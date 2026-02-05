@@ -1,0 +1,47 @@
+{
+  "paths": {
+    "scripts": "scripts",
+    "results": "results"
+  },
+  "scriptCommands": {
+    ".py": {
+      "command": "./scripts/analyzy/.venv/bin/python",
+      "description": "Python scripts"
+    },
+    ".js": {
+      "command": "node", 
+      "description": "Node.js scripts"
+    },
+    ".cjs": {
+      "command": "node", 
+      "description": "Node.js scripts"
+    },
+    ".sh": {
+      "command": "bash", 
+      "description": "Shell scripts"
+    },
+    ".r": {
+      "command": "Rscript",
+      "description": "R scripts"
+    },
+    ".R": {
+      "command": "Rscript",
+      "description": "R scripts"
+    }
+  },
+  "logging": {
+    "logFileName": "analysis.log",
+    "errorFileName": "analysis.err",
+    "timestampFormat": "ISO",
+    "separatorChar": "=",
+    "separatorLength": 80
+  },
+  "analysis": {
+    "defaultTimeout": 300000,
+    "maxConcurrentAnalyses": 5
+  },
+  "fileManager": {
+    "defaultDepth": 4,
+    "hiddenFilePrefixes": [".","_","node_modules"]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "reporter",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "reporter.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "docxtemplater": "^3.65.3",
+    "docxtemplater-image-module-free": "^1.1.1",
+    "dotenv": "^17.2.1",
+    "luxon": "^3.7.2",
+    "mysql2": "^3.14.3",
+    "pizzip": "^3.2.0"
+  }
+}

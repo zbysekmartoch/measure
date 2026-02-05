@@ -1,0 +1,237 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+/* ===== Base Button Styles ===== */
+button {
+  border-radius: 8px;
+  border: 1px solid black;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+/* ===== Action Button Base ===== */
+.btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+  color: #fff;
+}
+
+.btn:hover:not(:disabled) {
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16), 0 3px 6px rgba(0, 0, 0, 0.23);
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  color: #374151;
+  opacity: 0.7;
+  box-shadow: none;
+}
+
+/* ===== Add Button (Green) ===== */
+.btn-add {
+  background-color: #16a34a;
+  border: 1px solid #16a34a;
+}
+
+.btn-add:hover:not(:disabled) {
+  background-color: #15803d;
+  border-color: #15803d;
+}
+
+.btn-add:disabled {
+  background-color: #bbf7d0;
+  border-color: #bbf7d0;
+}
+
+/* ===== Delete Button (Red) ===== */
+.btn-delete {
+  background-color: #dc2626;
+  border: 1px solid #dc2626;
+}
+
+.btn-delete:hover:not(:disabled) {
+  background-color: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.btn-delete:disabled {
+  background-color: #fecaca;
+  border-color: #fecaca;
+}
+
+/* ===== Edit/Save Button (Blue) ===== */
+.btn-edit {
+  background-color: #2563eb;
+  border: 1px solid #2563eb;
+}
+
+.btn-edit:hover:not(:disabled) {
+  background-color: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.btn-edit:disabled {
+  background-color: #bfdbfe;
+  border-color: #bfdbfe;
+}
+
+/* ===== Primary Action Button (Teal/Run) ===== */
+.btn-primary {
+  background-color: #0d9488;
+  border: 1px solid #0d9488;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #0f766e;
+  border-color: #0f766e;
+}
+
+.btn-primary:disabled {
+  background-color: #99f6e4;
+  border-color: #99f6e4;
+}
+
+/* ===== Secondary/Cancel Button (Gray) ===== */
+.btn-secondary {
+  background-color: #6b7280;
+  border: 1px solid #6b7280;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #4b5563;
+  border-color: #4b5563;
+}
+
+.btn-secondary:disabled {
+  background-color: #e5e7eb;
+  border-color: #e5e7eb;
+}
+
+/* ===== Cancel Button (Light Gray with dark text) ===== */
+.btn-cancel {
+  background-color: #f3f4f6;
+  border: 1px solid #d1d5db;
+  color: #374151;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background-color: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.btn-cancel:disabled {
+  background-color: #f9fafb;
+  border-color: #e5e7eb;
+  color: #9ca3af;
+}
+
+/* ===== Warning/Refresh Button (Purple) ===== */
+.btn-warning {
+  background-color: #7c3aed;
+  border: 1px solid #7c3aed;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background-color: #6d28d9;
+  border-color: #6d28d9;
+}
+
+.btn-warning:disabled {
+  background-color: #ddd6fe;
+  border-color: #ddd6fe;
+}
+
+/* ===== Logout Button (Red variant) ===== */
+.btn-logout {
+  background-color: #ef4444;
+  border: 1px solid #ef4444;
+}
+
+.btn-logout:hover:not(:disabled) {
+  background-color: #dc2626;
+  border-color: #dc2626;
+}
+
+/* ===== AG Grid Active Row Highlight ===== */
+.ag-theme-quartz .ag-row-active {
+  background-color: #fef3c7 !important;
+  border-left: 3px solid #f59e0b !important;
+}
+
+.ag-theme-quartz .ag-row-active.ag-row-selected {
+  background-color: #fde68a !important;
+}
+
+/* Hover on active row */
+.ag-theme-quartz .ag-row-active:hover {
+  background-color: #fde68a !important;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
