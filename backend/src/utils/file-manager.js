@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Načti konfiguraci z config.json
-let fileManagerConfig = { defaultDepth: 4 };
+let fileManagerConfig = { defaultDepth: Infinity };
 try {
   const configPath = path.resolve(__dirname, '../../config.json');
   const configData = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -28,6 +28,26 @@ try {
  */
 export function getDefaultDepth() {
   return fileManagerConfig.defaultDepth;
+}
+
+/**
+ * Copy a file or directory recursively from src to dest.
+ * Creates parent directories as needed.
+ * @param {string} src - Absolute source path
+ * @param {string} dest - Absolute destination path
+ */
+export async function copyRecursive(src, dest) {
+  const stat = await fs.stat(src);
+  if (stat.isDirectory()) {
+    await fs.mkdir(dest, { recursive: true });
+    const entries = await fs.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      await copyRecursive(path.join(src, entry.name), path.join(dest, entry.name));
+    }
+  } else {
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.copyFile(src, dest);
+  }
 }
 
 /**
@@ -80,10 +100,11 @@ export function getSecurePath(rootPath, relativePath) {
  * @returns {Array} - Seznam souborů a složek
  */
 export async function listFiles(dirPath, relativeTo = '', maxDepth = null, currentDepth = 0, options = {}) {
-  // Použij konfigurovanou hloubku pokud není specifikována
-  if (maxDepth === null) {
+  // Použij konfigurovanou hloubku pokud není specifikována (0 = unlimited)
+  if (maxDepth === null || maxDepth === undefined) {
     maxDepth = fileManagerConfig.defaultDepth;
   }
+  if (maxDepth === 0) maxDepth = Infinity;
   const items = [];
   const allowedExts = options.allowedExtensions || ALLOWED_EXTENSIONS;
   

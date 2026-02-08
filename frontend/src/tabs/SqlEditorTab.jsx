@@ -3,9 +3,17 @@ import Editor from '@monaco-editor/react';
 import { fetchJSON } from '../lib/fetchJSON.js';
 import { useLanguage } from '../context/LanguageContext';
 
-export default function SqlEditorTab() {
+/**
+ * SqlEditorTab — SQL editor with run, autocomplete, data source selection, results table.
+ *
+ * Props (all optional):
+ *   initialSql   – pre-fill the editor with this SQL (e.g. loaded .sql file content)
+ *   onSqlChange  – callback(value) fired on every editor change (for dirty tracking)
+ *   extraButtons – React node rendered at the start of the toolbar (e.g. Save button)
+ */
+export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) {
   const { t } = useLanguage();
-  const [sql, setSql] = useState('SELECT 1;');
+  const [sql, setSql] = useState(initialSql ?? 'SELECT 1;');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -20,6 +28,22 @@ export default function SqlEditorTab() {
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const completionRef = useRef(null);
+
+  // Sync external initialSql when it changes (e.g. file reloaded)
+  const prevInitialSql = useRef(initialSql);
+  useEffect(() => {
+    if (initialSql !== undefined && initialSql !== prevInitialSql.current) {
+      prevInitialSql.current = initialSql;
+      setSql(initialSql);
+    }
+  }, [initialSql]);
+
+  // Propagate changes to parent
+  const handleSqlChange = useCallback((val) => {
+    const v = val ?? '';
+    setSql(v);
+    onSqlChange?.(v);
+  }, [onSqlChange]);
 
   const availableThemes = [
     { value: 'vs', label: 'Light' },
@@ -307,6 +331,7 @@ export default function SqlEditorTab() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {extraButtons}
         <button
           className="btn btn-primary"
           type="button"
@@ -372,7 +397,7 @@ export default function SqlEditorTab() {
           height="100%"
           defaultLanguage="sql"
           value={sql}
-          onChange={(val) => setSql(val ?? '')}
+          onChange={handleSqlChange}
           onMount={handleEditorMount}
           theme={editorTheme}
           options={{

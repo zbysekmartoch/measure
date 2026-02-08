@@ -33,16 +33,8 @@ REST API for managing analyses, workflows, scripts, and results with JWT authent
 git clone <repository-url>
 cd measure-backend
 
-# Run automated setup
-./setup.sh
-
-# Configure environment
 cp .env.example .env
 # Edit .env with your configuration
-
-# Setup database (see below)
-```
-
 ### Manual Setup
 
 ### 1. Clone Repository
@@ -78,15 +70,9 @@ Reporter uses its own `package.json` for generating Word documents. More info in
 ```bash
 # Set up environment variables
 cp .env.example .env
-# Edit .env with your configuration
-```
-
-### 6. Setup Database
-Create tables for `usr`, `analysis`, and `result` (see DB schema below).
-
 ### 7. Start Server
 ```bash
-npm start
+ISC
 ```
 
 ## ⚙️ Configuration
@@ -314,7 +300,7 @@ npm test
 
 ## License
 
-MIT
+ISC
 
 ## Author
 

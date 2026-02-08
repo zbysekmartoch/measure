@@ -6,6 +6,9 @@
  * - Tab-based navigation with persistent state
  * - Health info display from backend API
  * - User authentication handling
+ *
+ * Lab workspace tabs live inside LabsTab as sub-tabs.
+ * Standalone mode (?lab=<id>&standalone=1) renders only the lab workspace.
  */
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -13,10 +16,41 @@ import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import AuthPage from './components/AuthPage';
 import { ToastProvider } from './components/Toast';
+import { FileClipboardProvider } from './components/file-manager/ClipboardContext.jsx';
 import AnalysesTab from './tabs/AnalysesTab.jsx';
 import ResultsTab from './tabs/ResultsTab';
 import DebugTab from './tabs/DebugTab';
 import SettingsTab from './tabs/SettingsTab';
+import LabsTab from './tabs/LabsTab.jsx';
+import LabWorkspaceTab from './tabs/LabWorkspaceTab.jsx';
+import { fetchJSON } from './lib/fetchJSON.js';
+
+/**
+ * Standalone lab view — used when opened via popup window (?lab=<id>&standalone=1).
+ * Shows only the lab workspace, no header or other tabs.
+ */
+function StandaloneLabView({ labId }) {
+  const [lab, setLab] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchJSON(`/api/v1/labs/${labId}`)
+      .then((data) => {
+        setLab(data);
+        document.title = `🔬 ${data.name} — Measure`;
+      })
+      .catch(() => setError('Lab not found or access denied.'));
+  }, [labId]);
+
+  if (error) return <div style={{ padding: 40, color: '#dc2626' }}>{error}</div>;
+  if (!lab) return <div style={{ padding: 40, color: '#6b7280' }}>Loading lab…</div>;
+
+  return (
+    <div style={{ height: '100vh', width: '100vw', boxSizing: 'border-box', padding: 8, background: '#fff' }}>
+      <LabWorkspaceTab lab={lab} />
+    </div>
+  );
+}
 
 /**
  * Main application content displayed after authentication
@@ -29,6 +63,15 @@ function AppContent() {
   const { t } = useLanguage();
   const { showAdvancedUI } = useSettings();
 
+  // Check for standalone lab mode
+  const params = new URLSearchParams(window.location.search);
+  const standaloneLabId = params.get('standalone') === '1' ? params.get('lab') : null;
+
+  // If standalone mode, render only the lab workspace
+  if (standaloneLabId) {
+    return <StandaloneLabView labId={standaloneLabId} />;
+  }
+
   // Load backend health info on mount
   useEffect(() => {
     fetch('/api/health')
@@ -37,7 +80,13 @@ function AppContent() {
       .catch(err => console.error('Failed to load health info:', err));
   }, []);
 
-  // Reusable tab button component
+  // If URL has ?lab=<id> (without standalone), switch to Labs tab
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('lab')) setTab('labs');
+  }, []);
+
+  // Reusable tab button component (matches the app-wide pattern)
   const TabButton = ({ id, children }) => (
     <button
       onClick={() => setTab(id)}
@@ -45,7 +94,6 @@ function AppContent() {
         padding: '8px 12px',
         border: '1px solid #012345',
         borderBottom: 'none',
-        //borderBottom: tab === id ? 'none' : '1px solid #012345',
         marginBottom: tab === id ? -1 : 0,
         borderTopLeftRadius: 8,
         borderTopRightRadius: 8,
@@ -103,6 +151,7 @@ function AppContent() {
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <TabButton id="analytika">{t('tabAnalyses')}</TabButton>
+          <TabButton id="labs">Labs</TabButton>
           <TabButton id="vysledky">{t('tabResults')}</TabButton>
           {showAdvancedUI && <TabButton id="debug">{t('tabDebug')}</TabButton>}
         </div>
@@ -123,6 +172,9 @@ function AppContent() {
         <div style={{ display: tab === 'vysledky' ? 'block' : 'none', height: '100%' }}>
           <ResultsTab />
         </div>
+        <div style={{ display: tab === 'labs' ? 'block' : 'none', height: '100%' }}>
+          <LabsTab />
+        </div>
         {showAdvancedUI && (
           <div style={{ display: tab === 'debug' ? 'block' : 'none', height: '100%' }}>
             <DebugTab />
@@ -142,7 +194,9 @@ export default function App() {
       <SettingsProvider>
         <AuthProvider>
           <ToastProvider>
-            <AuthApp />
+            <FileClipboardProvider>
+              <AuthApp />
+            </FileClipboardProvider>
           </ToastProvider>
         </AuthProvider>
       </SettingsProvider>

@@ -149,4 +149,4 @@ npm run lint     # Run ESLint
 
 ## License
 
-Proprietary - Czech Competition Authority (ÚOHS)
+ISC

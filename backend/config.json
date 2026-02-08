@@ -41,7 +41,7 @@
     "maxConcurrentAnalyses": 5
   },
   "fileManager": {
-    "defaultDepth": 4,
+    "defaultDepth": 0,
     "hiddenFilePrefixes": [".","_","node_modules"]
   }
 }

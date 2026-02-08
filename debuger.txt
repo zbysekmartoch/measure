@@ -1,0 +1,188 @@
+Uprav Node.js backend a frontend (Monaco editor) tak, aby při spuštění workflow v “debug mode” bylo možné ladit vybrané Python kroky přes Debug Adapter Protocol (DAP) pomocí debugpy. V systému vždy běží v daný okamžik pouze 1 Python skript (žádná paralelizace). Skripty existují jako reálné soubory na backendu. Bezpečnost a izolaci neřeš.
+
+Cílové vlastnosti (MVP)
+
+Backend umí spustit workflow v debug režimu tak, že pro daný krok/kroky spustí python přes debugpy a otevře lokální DAP port.
+Backend vystaví WebSocket endpoint, který tuneluje binární stream DAP mezi frontendem a debugpy TCP portem (WS ⇄ TCP), bez parsování DAP.
+
+Frontend (Monaco editor) umí:
+připojit se na DAP přes websocket,
+nastavovat breakpointy klikáním v gutteru,
+ovládat běh: Continue, Step Over, Step In, Step Out,
+zobrazit call stack,
+zobrazit lokální proměnné (scopes → variables),
+zvýraznit aktuální řádek při zastavení.
+
+V debug režimu se workflow na debug kroku pozastaví do doby, než se připojí debugger a pošle konfiguraci (--wait-for-client).
+
+Backend požadavky (Node.js)
+A) Debug spouštění python kroků
+
+Backend už ví, že workflow běží v debug režimu (API parametr).
+
+Pokud je workflow v debug režimu:
+
+pro python kroky spouštěj python s 
+
+ -m debugpy --listen 127.0.0.1:<port> --wait-for-client <scriptPath> ...args
+
+pro ostatní kroky spouštěj normálně jako teď
+
+Port:
+
+implementuj funkci getFreePort() (listen na port 0 a přečti přidělený port).
+
+debugpy poslouchej pouze na 127.0.0.1.
+
+B) WebSocket DAP proxy
+
+Přidej WS endpoint například:
+
+ws://<backend-host>/dap
+
+
+Jakmile se klient připojí na /dap, backend:
+
+otevře TCP spojení na 127.0.0.1:<activeDebugPort>
+relayeuje data:
+
+WS message (binary) → TCP write
+TCP data → WS send (binary)
+
+korektně zavře obě strany při close/error.
+
+C) API pro frontend
+
+Při startu debug kroku backend musí frontend informovat, že:
+
+existuje aktivní debug session,
+WS endpoint je připraven.
+Implementuj jednu z možností:
+Server-sent event / websocket pro “workflow events”, nebo
+
+jednoduché REST endpointy:
+GET /debug/status → { active: boolean, wsUrl: "ws://.../dap", scriptPath: "...", cwd: "..." }
+
+Frontend se podle toho připojí.
+
+D) Logika “active debug port”
+
+Backend drží globální stav:
+activeDebugPort (null nebo číslo)
+activeScriptPath
+activeProcessPid (volitelné)
+Nastav activeDebugPort pouze během debug kroku a po ukončení kroku ho vynuluj.
+
+E) Knihovny
+
+použij ws pro WebSocket server.
+
+žádné další debug knihovny na backendu (debugpy běží v python procesu).
+
+Frontend požadavky (Monaco + DAP klient)
+A) DAP transport přes WebSocket
+
+Implementuj WebSocketTransport, který:
+
+otevře WS na backend /dap,
+posílá i přijímá binární data (ArrayBuffer/Uint8Array),
+poskytne callback onData(chunk).
+
+B) DAP framing (Content-Length)
+
+Implementuj jednoduchý DAP protokol klient (nebo použij existující malou knihovnu, ale preferuj vlastní pro kontrolu):
+
+
+C) DAP session flow (attach)
+
+Po připojení transportu proveď:
+
+initialize request
+attach request (debugpy server už běží díky python -m debugpy --listen ...)
+arguments dle debugpy běžného attach scénáře (základní argumenty stačí; neřeš pathMappings).
+setBreakpoints pro aktuální otevřený soubor (a průběžně při změnách breakpointů)
+
+configurationDone
+
+continue
+
+Pozn.: v UI dej tlačítko “Attach debugger” nebo automaticky attachni, když backend hlásí debug krok aktivní.
+
+D) Breakpointy v Monaco
+
+Umožni klik v gutteru → toggle breakpoint pro konkrétní řádek.
+Udržuj per-file seznam breakpointů.
+
+Při změně breakpointů pošli DAP setBreakpoints:
+source.path musí být reálná backend cesta souboru.
+
+breakpoints: [{ line: <1-based> }, ...]
+
+E) Krokování
+
+Implementuj UI tlačítka:
+
+Continue → continue
+Step Over → next
+Step In → stepIn
+Step Out → stepOut
+
+
+F) Zastavení a zobrazení call stack / variables
+
+Když přijde event stopped:
+
+vyžádej stackTrace:
+zobraz seznam frame: name, source.path, line
+pro top frame (nebo vybraný frame) vyžádej:
+scopes → vyber Locals scope
+variables → zobraz strom proměnných (name/value/type)
+
+v Monaco:
+
+zvýrazni aktuální řádek (dekorace),
+scroll na řádek,
+volitelně otevři soubor, pokud není otevřen.
+
+G) Konzole / stdout
+
+Neřeš integraci debug console přes DAP v MVP.
+
+Stačí zobrazovat stdout/stderr.
+
+Definice “debuggable krok”
+
+Pokud workflow je debug, debuguj jen konkrétní kroky:
+
+buď na základě příznaku v definici workflow,
+
+nebo na základě toho, že je aktuálně otevřený script v editoru a je v něm nějaký breakpoint (debug pouze jeho).
+
+Implementuj jednoduše:
+
+debuguj pouze krok, jehož scriptPath se rovná frontendSelectedScriptPath.
+
+Fungovat by to mělo zhruba takto:
+
+Debug session se připojí
+pošlou se breakpointy
+dá se continue
+
+Běh se zastaví na breakpointu:
+v Monaco se zvýrazní řádek
+zobrazí se call stack
+zobrazí se locals proměnné
+
+Krokování funguje (next/stepIn/stepOut) a aktualizuje line + locals.
+
+Implementované změny v backendu:
+debug spouštění debugpy
+WS tunel /dap
+endpoint /debug/status (nebo ekvivalent)
+
+Implementované změny ve frontendu:
+DAP klient (framing + parser)
+integrace s Monaco breakpointy
+debug UI (minimálně: attach, continue, step over/in/out)
+call stack panel + locals panel
+
