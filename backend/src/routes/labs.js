@@ -781,7 +781,7 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
     // Write initial progress.json
     const now = new Date().toISOString();
     const progress = {
-      status: 'pending',
+      status: 'ready',
       workflowFile,
       totalSteps: null,
       currentStep: 0,

@@ -4,18 +4,21 @@
  * Contains:
  *   - A sub-tab bar: "📁 File browser" + one tab per opened file
  *   - Content area: FileManagerEditor (browser) or inline file editors
+ *   - Breakpoint support in Python files (via DebugEditor) when debug is provided
  *
  * Props:
- *   lab – lab metadata { id, name, … }
+ *   lab   – lab metadata { id, name, … }
+ *   debug – debug session object from useDebugSession() (optional, from LabWorkspaceTab)
  */
 import React, { useCallback, useState } from 'react';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import SqlEditorTab from './SqlEditorTab.jsx';
 import Editor from '@monaco-editor/react';
+import DebugEditor from '../debug/DebugEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
 import { useToast } from '../components/Toast';
 
-export default function LabScriptsPane({ lab }) {
+export default function LabScriptsPane({ lab, debug }) {
   const toast = useToast();
   const apiBasePath = `/api/v1/labs/${lab.id}/scripts`;
 
@@ -216,6 +219,8 @@ export default function LabScriptsPane({ lab }) {
                 onEditorThemeChange={(t) => { setEditorTheme(t); localStorage.setItem('monacoTheme', t); }}
                 onChange={(val) => updateFileContent(file.path, val)}
                 onSave={() => saveFile(file.path)}
+                debug={debug}
+                labId={lab.id}
               />
             ) : file.isImage ? (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', borderRadius: 8 }}>
@@ -239,13 +244,47 @@ export default function LabScriptsPane({ lab }) {
   );
 }
 
-/** Inline text file editor with toolbar + Monaco. */
-function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSave }) {
+/**
+ * Inline text file editor with toolbar + Monaco.
+ * For Python files: uses DebugEditor with breakpoint gutter if debug session is available.
+ */
+function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSave, debug, labId }) {
   const availableThemes = [
     { value: 'vs', label: 'Light' },
     { value: 'vs-dark', label: 'Dark' },
     { value: 'hc-black', label: 'High Contrast' },
   ];
+
+  const isPython = file.language === 'python';
+
+  // Resolve absolute file path for breakpoints (DAP needs abs paths).
+  // Derive from debug info or use a known pattern.
+  let absPath = null;
+  if (isPython && debug?.debugInfo?.scriptAbsolutePath) {
+    // scriptAbsolutePath is e.g. /path/to/labs/X/scripts/analyzy/sum.py
+    // scriptPath is the relative part e.g. analyzy/sum.py
+    // So scriptsRoot = scriptAbsolutePath without the trailing scriptPath
+    const sp = debug.debugInfo.scriptPath;
+    const sap = debug.debugInfo.scriptAbsolutePath;
+    if (sp && sap.endsWith(sp)) {
+      const scriptsRoot = sap.slice(0, -sp.length);
+      absPath = scriptsRoot + file.path;
+    }
+  }
+  // Fallback: try a marker-based approach
+  if (!absPath && isPython) {
+    const marker = `/labs/${labId}/scripts/`;
+    if (debug?.debugInfo?.scriptAbsolutePath?.includes(marker)) {
+      const base = debug.debugInfo.scriptAbsolutePath;
+      const idx = base.indexOf(marker);
+      absPath = base.substring(0, idx) + marker + file.path;
+    }
+  }
+
+  const breakpoints = (absPath && debug) ? debug.getBreakpoints(absPath) : new Set();
+  const stoppedLine = (absPath && debug?.stoppedLocation?.file === absPath)
+    ? debug.stoppedLocation.line
+    : null;
 
   return (
     <>
@@ -261,6 +300,13 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             background: 'rgba(59,130,246,0.2)', color: editorTheme === 'vs' ? '#1d4ed8' : '#60a5fa',
             padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase',
           }}>{file.language}</span>
+          {isPython && absPath && (
+            <span style={{
+              fontSize: 10, color: '#888', fontFamily: 'monospace',
+            }} title="Breakpoints can be set by clicking in the gutter">
+              🔴 breakpoints ready
+            </span>
+          )}
           <select
             value={editorTheme}
             onChange={(e) => onEditorThemeChange(e.target.value)}
@@ -279,15 +325,30 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
         </button>
       </div>
       <div style={{ flex: 1, borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
-        <Editor
-          height="100%"
-          language={file.language}
-          value={file.content}
-          onChange={(val) => onChange(val || '')}
-          theme={editorTheme}
-          options={{ minimap: { enabled: true }, fontSize: 13, wordWrap: 'on', automaticLayout: true, tabSize: 2, readOnly: false }}
-        />
+        {isPython && absPath && debug ? (
+          <DebugEditor
+            file={file}
+            editorTheme={editorTheme}
+            breakpoints={breakpoints}
+            stoppedLine={stoppedLine}
+            readOnly={false}
+            onChange={(val) => onChange(val || '')}
+            onToggleBreakpoint={(_filePath, line) => {
+              debug.toggleBreakpoint(absPath, line);
+            }}
+          />
+        ) : (
+          <Editor
+            height="100%"
+            language={file.language}
+            value={file.content}
+            onChange={(val) => onChange(val || '')}
+            theme={editorTheme}
+            options={{ minimap: { enabled: true }, fontSize: 13, wordWrap: 'on', automaticLayout: true, tabSize: 2, readOnly: false }}
+          />
+        )}
       </div>
     </>
   );
 }
+
