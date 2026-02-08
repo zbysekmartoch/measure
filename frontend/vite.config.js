@@ -11,6 +11,11 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true
+      },
+      // Forward DAP WebSocket proxy
+      '/dap': {
+        target: 'ws://localhost:3000',
+        ws: true
       }
     }
   }

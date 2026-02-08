@@ -17,6 +17,7 @@ import scripts, { publicRouter as scriptsPublic } from './scripts.js';
 import resultFiles, { publicRouter as resultFilesPublic } from './result-files.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { getSecurePath, copyRecursive } from '../utils/file-manager.js';
+import debugRoutes from '../debug/debug-routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -94,6 +95,7 @@ router.use('/v1/sql', authenticateToken, sql);
 router.use('/v1/labs', authenticateToken, labs);
 router.use('/v1/users', authenticateToken, users);
 router.use('/v1/scripts', authenticateToken, scripts);
+router.use('/v1/debug', authenticateToken, debugRoutes);
 
 // ─── Generic paste (copy file/folder across any file-manager root) ────────────
 // Body: { sourceApi, sourcePath, targetApi, targetFolder }

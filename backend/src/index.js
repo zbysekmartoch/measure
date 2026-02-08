@@ -8,6 +8,7 @@ import { config } from './config.js';
 import api from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { getPool } from './db.js';
+import { attachDapProxy } from './debug/dap-proxy.js';
 
 const app = express();
 
@@ -48,6 +49,9 @@ const server = app.listen(config.port, async () => {
   await getPool().query('SELECT 1');
   console.log(`API listening on http://localhost:${config.port} env=${config.env}`);
 });
+
+// Attach DAP WebSocket proxy for debugger
+attachDapProxy(server);
 
 // Graceful shutdown
 function shutdown(signal) {

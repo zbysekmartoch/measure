@@ -2,8 +2,10 @@ import { Router } from 'express';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 import archiver from 'archiver';
 import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth } from '../utils/file-manager.js';
+import { startDebugSession, getDebugStatus, getDebugEvents } from '../debug/debug-engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -502,6 +504,207 @@ router.post('/:id/results/:resultId/files/upload', async (req, res, next) => {
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
       res.json({ success: true, file: req.file.filename, size: req.file.size });
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── Lab Result Debug Execution ────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/labs/:id/results/:resultId/debug
+ * Body: { debugMode?: boolean }
+ *
+ * Reads the workflow from progress.json (workflowFile), resolves the steps,
+ * and executes them sequentially. Python steps (.py) are spawned via debugpy
+ * with --wait-for-client so the frontend debugger can attach.
+ * Non-Python steps run normally.
+ *
+ * Only one debug session can run at a time (global singleton).
+ */
+router.post('/:id/results/:resultId/debug', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const labId = req.params.id;
+    const resultId = req.params.resultId;
+    const resultsRoot = getLabResultsRoot(labId);
+    const resultDir = path.join(resultsRoot, resultId);
+    const secureResult = getSecurePath(resultsRoot, resultId);
+    if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
+
+    // Read progress.json to get workflowFile
+    let progress;
+    try {
+      const raw = await fs.readFile(path.join(resultDir, 'progress.json'), 'utf-8');
+      progress = JSON.parse(raw);
+    } catch {
+      return res.status(400).json({ error: 'Cannot read progress.json' });
+    }
+
+    const workflowFile = progress.workflowFile;
+    if (!workflowFile) {
+      return res.status(400).json({ error: 'No workflowFile in progress.json' });
+    }
+
+    // Read the workflow file from scripts
+    const scriptsRoot = getLabScriptsRoot(labId);
+    const wfPath = getSecurePath(scriptsRoot, workflowFile);
+    if (!wfPath) return res.status(400).json({ error: 'Invalid workflow file path' });
+
+    let wfContent;
+    try {
+      wfContent = await fs.readFile(wfPath, 'utf-8');
+    } catch (e) {
+      if (e.code === 'ENOENT') return res.status(404).json({ error: 'Workflow file not found' });
+      throw e;
+    }
+
+    // Parse workflow steps (skip empty lines and comments)
+    const allSteps = wfContent.split('\n').map(s => s.trim()).filter(s => s);
+    const activeSteps = allSteps.filter(s => !s.startsWith('#'));
+
+    if (activeSteps.length === 0) {
+      return res.status(400).json({ error: 'Workflow has no active steps' });
+    }
+
+    // Respond immediately — execution runs in background
+    res.json({
+      ok: true,
+      message: 'Debug execution started',
+      steps: activeSteps,
+      resultId,
+    });
+
+    // ── Background execution ──
+    const logFile = path.join(resultDir, 'analysis.log');
+    const errorFile = path.join(resultDir, 'analysis.err');
+    const now = new Date().toISOString();
+    const separator = '='.repeat(80);
+
+    await fs.writeFile(logFile, `[DEBUG] Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
+    await fs.writeFile(errorFile, `[DEBUG] Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
+
+    // Update progress
+    const writeProgress = async (step, stepName, status) => {
+      const p = {
+        ...progress,
+        status,
+        totalSteps: activeSteps.length,
+        currentStep: step,
+        currentStepName: stepName,
+        analysisStartedAt: progress.analysisStartedAt || now,
+        updatedAt: new Date().toISOString(),
+      };
+      if (status === 'completed' || status === 'failed') p.completedAt = new Date().toISOString();
+      await fs.writeFile(path.join(resultDir, 'progress.json'), JSON.stringify(p, null, 2), 'utf-8');
+    };
+
+    try {
+      for (let i = 0; i < activeSteps.length; i++) {
+        const step = activeSteps[i];
+        const ext = path.extname(step).toLowerCase();
+        const isPython = ext === '.py';
+        const scriptAbsPath = path.join(scriptsRoot, step);
+
+        await writeProgress(i + 1, step, 'running');
+        await fs.appendFile(logFile, `\n[${new Date().toISOString()}] Step ${i + 1}/${activeSteps.length}: ${step}\n`);
+
+        if (isPython) {
+          // ── Debug mode: spawn via debugpy ──
+          // Determine python command from config or use the lab's venv if present
+          let pythonCmd = 'python';
+          try {
+            // Try to read config.json for scriptCommands
+            const configPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config.json');
+            const configData = JSON.parse(await fs.readFile(configPath, 'utf-8'));
+            const pyConfig = configData.scriptCommands?.['.py'];
+            if (pyConfig?.command) {
+              const cmd = pyConfig.command;
+              if (cmd.startsWith('./') || cmd.startsWith('/')) {
+                pythonCmd = path.isAbsolute(cmd) ? cmd : path.resolve(path.dirname(configPath), cmd);
+              } else {
+                pythonCmd = cmd;
+              }
+            }
+          } catch { /* use default */ }
+
+          try {
+            const { port, pid } = await startDebugSession({
+              scriptAbsolutePath: scriptAbsPath,
+              scriptPath: step,
+              cwd: resultDir,
+              pythonCommand: pythonCmd,
+              args: [resultDir],
+              labId,
+              resultId,
+              stepIndex: i,
+              stepName: step,
+              logFile,
+              errorFile,
+            });
+
+            await fs.appendFile(logFile, `[DEBUG] debugpy listening on port ${port}, PID ${pid}, waiting for client...\n`);
+
+            // Wait for the debug process to finish
+            const debugEvents = getDebugEvents();
+            await new Promise((resolve) => {
+              const onExit = () => { debugEvents.off('exit', onExit); resolve(); };
+              debugEvents.on('exit', onExit);
+              // If already ended, resolve immediately
+              const st = getDebugStatus();
+              if (!st.active) { debugEvents.off('exit', onExit); resolve(); }
+            });
+
+            await fs.appendFile(logFile, `[DEBUG] Step ${step} process exited\n`);
+
+          } catch (err) {
+            await fs.appendFile(errorFile, `[DEBUG] Failed to start debug session: ${err.message}\n`);
+            await writeProgress(i + 1, step, 'failed');
+            return;
+          }
+        } else {
+          // ── Normal mode: spawn script directly ──
+          const ext2 = path.extname(step).toLowerCase();
+          const cmdMap = { '.js': 'node', '.cjs': 'node', '.sh': 'bash', '.r': 'Rscript', '.R': 'Rscript' };
+          const command = cmdMap[ext2];
+          if (!command) {
+            await fs.appendFile(errorFile, `Unsupported script type: ${ext2}\n`);
+            await writeProgress(i + 1, step, 'failed');
+            return;
+          }
+
+          const success = await new Promise((resolve) => {
+            const child = spawn(command, [scriptAbsPath, resultDir], {
+              cwd: resultDir,
+              env: { ...process.env, WORK_DIR: resultDir },
+            });
+            child.stdout.on('data', (d) => fs.appendFile(logFile, d.toString()).catch(() => {}));
+            child.stderr.on('data', (d) => fs.appendFile(errorFile, d.toString()).catch(() => {}));
+            child.on('error', () => resolve(false));
+            child.on('close', (code) => resolve(code === 0));
+          });
+
+          if (!success) {
+            await writeProgress(i + 1, step, 'failed');
+            await fs.appendFile(errorFile, `Step ${step} failed\n`);
+            return;
+          }
+        }
+      }
+
+      // All steps completed
+      await writeProgress(activeSteps.length, activeSteps[activeSteps.length - 1], 'completed');
+      await fs.appendFile(logFile, `\n${separator}\n[${new Date().toISOString()}] [DEBUG] WORKFLOW COMPLETED\n${separator}\n`);
+
+    } catch (err) {
+      await writeProgress(0, null, 'failed');
+      await fs.appendFile(errorFile, `[DEBUG] SYSTEM ERROR: ${err.message}\n${err.stack}\n`);
+    }
   } catch (e) {
     next(e);
   }
