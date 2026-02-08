@@ -127,6 +127,7 @@ export default function LabScriptsPane({ lab }) {
     color: '#111827',
     zIndex: isActive ? 1 : 0,
     cursor: 'pointer', fontSize: 13,
+    outline: 'none',
   });
 
   return (

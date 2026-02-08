@@ -13,13 +13,10 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
-import { SettingsProvider, useSettings } from './context/SettingsContext';
+import { SettingsProvider } from './context/SettingsContext';
 import AuthPage from './components/AuthPage';
 import { ToastProvider } from './components/Toast';
 import { FileClipboardProvider } from './components/file-manager/ClipboardContext.jsx';
-import AnalysesTab from './tabs/AnalysesTab.jsx';
-import ResultsTab from './tabs/ResultsTab';
-import DebugTab from './tabs/DebugTab';
 import SettingsTab from './tabs/SettingsTab';
 import LabsTab from './tabs/LabsTab.jsx';
 import LabWorkspaceTab from './tabs/LabWorkspaceTab.jsx';
@@ -57,28 +54,23 @@ function StandaloneLabView({ labId }) {
  * Uses CSS display:none for tab switching to preserve component state
  */
 function AppContent() {
-  const [tab, setTab] = useState('analytika');
+  const [tab, setTab] = useState('labs');
   const [healthInfo, setHealthInfo] = useState(null);
   const { user, logout } = useAuth();
   const { t } = useLanguage();
-  const { showAdvancedUI } = useSettings();
 
   // Check for standalone lab mode
   const params = new URLSearchParams(window.location.search);
   const standaloneLabId = params.get('standalone') === '1' ? params.get('lab') : null;
 
-  // If standalone mode, render only the lab workspace
-  if (standaloneLabId) {
-    return <StandaloneLabView labId={standaloneLabId} />;
-  }
-
   // Load backend health info on mount
   useEffect(() => {
+    if (standaloneLabId) return; // skip in standalone mode
     fetch('/api/health')
       .then(res => res.json())
       .then(data => setHealthInfo(data))
       .catch(err => console.error('Failed to load health info:', err));
-  }, []);
+  }, [standaloneLabId]);
 
   // If URL has ?lab=<id> (without standalone), switch to Labs tab
   useEffect(() => {
@@ -86,8 +78,13 @@ function AppContent() {
     if (p.get('lab')) setTab('labs');
   }, []);
 
-  // Reusable tab button component (matches the app-wide pattern)
-  const TabButton = ({ id, children }) => (
+  // If standalone mode, render only the lab workspace
+  if (standaloneLabId) {
+    return <StandaloneLabView labId={standaloneLabId} />;
+  }
+
+  // Reusable tab button component
+  const TabButton = ({ id, children, style: extraStyle }) => (
     <button
       onClick={() => setTab(id)}
       style={{
@@ -102,7 +99,10 @@ function AppContent() {
         background: tab === id ? '#fff' : '#f3f4f6',
         fontWeight: tab === id ? 600 : 400,
         color: '#111827',
-        zIndex: tab === id ? 1 : 0
+        zIndex: tab === id ? 1 : 0,
+        cursor: 'pointer',
+        outline: 'none',
+        ...extraStyle,
       }}
     >
       {children}
@@ -150,10 +150,7 @@ function AppContent() {
       {/* Tab navigation bar */}
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <TabButton id="analytika">{t('tabAnalyses')}</TabButton>
           <TabButton id="labs">Labs</TabButton>
-          <TabButton id="vysledky">{t('tabResults')}</TabButton>
-          {showAdvancedUI && <TabButton id="debug">{t('tabDebug')}</TabButton>}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex' }}>
           <TabButton id="nastaveni">{t('tabSettings')}</TabButton>
@@ -166,20 +163,9 @@ function AppContent() {
         Using display:none instead of conditional rendering to maintain state.
       */}
       <div style={{ border: '1px solid #012345', padding: 10, background: '#fff', height: 'calc(100vh - 130px)', position: 'relative' }}>
-        <div style={{ display: tab === 'analytika' ? 'block' : 'none', height: '100%' }}>
-          <AnalysesTab />
-        </div>
-        <div style={{ display: tab === 'vysledky' ? 'block' : 'none', height: '100%' }}>
-          <ResultsTab />
-        </div>
         <div style={{ display: tab === 'labs' ? 'block' : 'none', height: '100%' }}>
           <LabsTab />
         </div>
-        {showAdvancedUI && (
-          <div style={{ display: tab === 'debug' ? 'block' : 'none', height: '100%' }}>
-            <DebugTab />
-          </div>
-        )}
         <div style={{ display: tab === 'nastaveni' ? 'block' : 'none', height: '100%' }}>
           <SettingsTab />
         </div>

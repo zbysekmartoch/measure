@@ -207,6 +207,8 @@ export default function LabsTab() {
     fontWeight: isActive ? 600 : 400,
     color: '#111827',
     zIndex: isActive ? 1 : 0,
+    cursor: 'pointer',
+    outline: 'none',
   });
 
   // ---- render ----
@@ -254,6 +256,7 @@ export default function LabsTab() {
                   whiteSpace: 'nowrap',
                   cursor: 'pointer',
                   fontSize: 'inherit',
+                  outline: 'none',
                 }}
               >
                 🔬 {lab.name}
@@ -276,6 +279,7 @@ export default function LabsTab() {
                   fontSize: 11,
                   display: 'flex',
                   alignItems: 'center',
+                  outline: 'none',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = '#2563eb'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; }}
@@ -303,6 +307,7 @@ export default function LabsTab() {
                   fontSize: 13,
                   display: 'flex',
                   alignItems: 'center',
+                  outline: 'none',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; }}

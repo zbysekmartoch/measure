@@ -31,12 +31,15 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
     marginBottom: isActive ? -1 : 0,
     borderTopLeftRadius: 6,
     borderTopRightRadius: 6,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     background: isActive ? '#fff' : '#f3f4f6',
     fontWeight: isActive ? 600 : 400,
     color: '#111827',
     zIndex: isActive ? 1 : 0,
     cursor: 'pointer',
     fontSize: 13,
+    outline: 'none',
   });
 
   return (
@@ -47,7 +50,10 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            style={tabStyle(activeTab === tab.key)}
+            style={{
+              ...tabStyle(activeTab === tab.key),
+              ...(tab.key === 'settings' ? { marginLeft: 'auto' } : {}),
+            }}
           >
             {tab.icon} {tab.label}
           </button>
