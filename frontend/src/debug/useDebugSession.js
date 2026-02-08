@@ -15,10 +15,10 @@ import { DapClient } from './dap-client.js';
 
 /**
  * @param {object} opts
- * @param {string} opts.labId
+ * @param {string} opts.labId — lab identifier for persisting breakpoints to debug.json
  * @returns debug session state + actions
  */
-export function useDebugSession() {
+export function useDebugSession({ labId } = {}) {
   // ── State ──
   const [status, setStatus] = useState('idle'); // idle | connecting | attached | stopped | running | ended
   const [debugInfo, setDebugInfo] = useState(null); // backend debug status
@@ -30,23 +30,86 @@ export function useDebugSession() {
   const [output, setOutput] = useState([]); // { type: 'stdout'|'stderr', text }[]
   const [error, setError] = useState(null);
 
-  // ── Breakpoints: Map<filePath, Set<lineNumber>> ──
+  // ── Breakpoints: Map<relPath, Set<lineNumber>> ──
+  // Keys are relative paths within the lab's scripts folder (e.g. "analyzy/sum.py")
   const [breakpointsMap, setBreakpointsMap] = useState(() => new Map());
+  const bpSaveTimerRef = useRef(null);
 
   // ── Refs ──
   const clientRef = useRef(null);
   const sseRef = useRef(null);
   const pollingRef = useRef(null);
+  const debugInfoRef = useRef(null); // latest debug info for abs path resolution
+
+  /**
+   * Resolve a relative script path to an absolute path using debug info.
+   * The debug status provides scriptAbsolutePath and scriptPath — we can
+   * derive the scriptsRoot from those.
+   */
+  function resolveAbsPath(relPath, info) {
+    if (!info) return null;
+    const sp = info.scriptPath;
+    const sap = info.scriptAbsolutePath;
+    if (sp && sap && sap.endsWith(sp)) {
+      const root = sap.slice(0, -sp.length);
+      return root + relPath;
+    }
+    return null;
+  }
+
+  // ── Load breakpoints from debug.json on mount ──
+  useEffect(() => {
+    if (!labId) return;
+    const token = localStorage.getItem('authToken');
+    fetch(`/api/v1/labs/${labId}/debug-state`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : { breakpoints: {} })
+      .then(data => {
+        if (data.breakpoints && typeof data.breakpoints === 'object') {
+          const map = new Map();
+          for (const [filePath, lines] of Object.entries(data.breakpoints)) {
+            if (Array.isArray(lines) && lines.length > 0) {
+              map.set(filePath, new Set(lines));
+            }
+          }
+          setBreakpointsMap(map);
+        }
+      })
+      .catch(() => { /* ignore — no debug state yet */ });
+  }, [labId]);
+
+  // ── Persist breakpoints to debug.json (debounced) ──
+  const persistBreakpoints = useCallback((map) => {
+    if (!labId) return;
+    if (bpSaveTimerRef.current) clearTimeout(bpSaveTimerRef.current);
+    bpSaveTimerRef.current = setTimeout(() => {
+      const breakpoints = {};
+      for (const [filePath, lines] of map) {
+        if (lines.size > 0) {
+          breakpoints[filePath] = [...lines].sort((a, b) => a - b);
+        }
+      }
+      const token = localStorage.getItem('authToken');
+      fetch(`/api/v1/labs/${labId}/debug-state`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ breakpoints }),
+      }).catch(() => { /* ignore */ });
+    }, 500);
+  }, [labId]);
 
   // ── Cleanup ──
   useEffect(() => {
     const sse = sseRef;
     const polling = pollingRef;
     const client = clientRef;
+    const bpTimer = bpSaveTimerRef;
     return () => {
       if (client.current) { try { client.current.disconnect(); } catch { /* ignore */ } }
       if (sse.current) sse.current.close();
       if (polling.current) clearInterval(polling.current);
+      if (bpTimer.current) clearTimeout(bpTimer.current);
     };
   }, []);
 
@@ -60,6 +123,7 @@ export function useDebugSession() {
       if (res.ok) {
         const data = await res.json();
         setDebugInfo(data);
+        debugInfoRef.current = data;
         return data;
       }
     } catch { /* network error, ignore */ }
@@ -78,6 +142,7 @@ export function useDebugSession() {
       try {
         const data = JSON.parse(ev.data);
         setDebugInfo(data);
+        debugInfoRef.current = data;
         if (data.status === 'ended') {
           setStatus('ended');
         }
@@ -194,13 +259,16 @@ export function useDebugSession() {
       // Attach
       await client.attach();
 
-      // Send all breakpoints
-      for (const [filePath, lines] of breakpointsMap) {
+      // Send all breakpoints (resolve relative paths to absolute for DAP)
+      for (const [relPath, lines] of breakpointsMap) {
         if (lines.size > 0) {
-          try {
-            await client.setBreakpoints(filePath, [...lines]);
-          } catch (e) {
-            console.warn('[useDebugSession] setBreakpoints error:', e);
+          const absFilePath = resolveAbsPath(relPath, info);
+          if (absFilePath) {
+            try {
+              await client.setBreakpoints(absFilePath, [...lines]);
+            } catch (e) {
+              console.warn('[useDebugSession] setBreakpoints error:', e);
+            }
           }
         }
       }
@@ -304,6 +372,7 @@ export function useDebugSession() {
   }, [callStack]);
 
   // ── Breakpoints ──
+  // filePath here is the RELATIVE path within scripts (e.g. "analyzy/sum.py")
   const toggleBreakpoint = useCallback((filePath, line) => {
     setBreakpointsMap(prev => {
       const next = new Map(prev);
@@ -313,16 +382,27 @@ export function useDebugSession() {
       } else {
         lines.add(line);
       }
-      next.set(filePath, lines);
+      if (lines.size === 0) {
+        next.delete(filePath);
+      } else {
+        next.set(filePath, lines);
+      }
 
-      // Sync to DAP if connected
+      // Persist to debug.json
+      persistBreakpoints(next);
+
+      // Sync to DAP if connected (need absolute path for DAP)
       if (clientRef.current?.connected) {
-        clientRef.current.setBreakpoints(filePath, [...lines]).catch(() => {});
+        const info = debugInfoRef.current;
+        const absFilePath = resolveAbsPath(filePath, info);
+        if (absFilePath) {
+          clientRef.current.setBreakpoints(absFilePath, [...lines]).catch(() => {});
+        }
       }
 
       return next;
     });
-  }, []);
+  }, [persistBreakpoints]);
 
   const getBreakpoints = useCallback((filePath) => {
     return breakpointsMap.get(filePath) || new Set();
@@ -333,13 +413,19 @@ export function useDebugSession() {
       const next = new Map(prev);
       next.delete(filePath);
 
+      persistBreakpoints(next);
+
       if (clientRef.current?.connected) {
-        clientRef.current.setBreakpoints(filePath, []).catch(() => {});
+        const info = debugInfoRef.current;
+        const absFilePath = resolveAbsPath(filePath, info);
+        if (absFilePath) {
+          clientRef.current.setBreakpoints(absFilePath, []).catch(() => {});
+        }
       }
 
       return next;
     });
-  }, []);
+  }, [persistBreakpoints]);
 
   // ── Expand variable children ──
   const expandVariable = useCallback(async (variablesReference) => {

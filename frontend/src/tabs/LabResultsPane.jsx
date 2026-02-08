@@ -20,7 +20,7 @@ import { useToast } from '../components/Toast';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { appConfig } from '../lib/appConfig.js';
 
-export default function LabResultsPane({ lab, debug }) {
+export default function LabResultsPane({ lab, debug, debugVisible = false }) {
   const { t } = useLanguage();
   const toast = useToast();
 
@@ -90,7 +90,7 @@ export default function LabResultsPane({ lab, debug }) {
       await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResult.id}/debug`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ debugMode: true }),
+        body: JSON.stringify({ debugVisible }),
       });
       toast.success(t('debugAnalysisStarted') || 'Debug workflow spuštěn');
 
@@ -110,7 +110,7 @@ export default function LabResultsPane({ lab, debug }) {
     } finally {
       setDebugRunning(false);
     }
-  }, [selectedResult, lab.id, t, toast, loadResults, debug]);
+  }, [selectedResult, lab.id, t, toast, loadResults, debug, debugVisible]);
 
   // ---- Formatting helpers ----
   const formatDT = (s) => {
@@ -182,7 +182,7 @@ export default function LabResultsPane({ lab, debug }) {
             fontWeight: 500, fontSize: 13,
           }}
         >
-          {debugRunning ? '⏳' : '🐛'} {t('runDebug') || 'Spustit debug'}
+          {debugRunning ? '⏳' : debugVisible ? '🐛' : '▶️'} {debugVisible ? (t('runDebug') || 'Spustit debug') : (t('run') || 'Spustit')}
         </button>
 
         {/* Status badge */}

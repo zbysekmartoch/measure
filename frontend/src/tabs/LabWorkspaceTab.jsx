@@ -44,7 +44,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
   const containerRef = useRef(null);
 
   // ---- Debug session (lives here, shared with children) ----
-  const debug = useDebugSession();
+  const debug = useDebugSession({ labId: lab.id });
 
   // ---- Popup window handling ----
   useEffect(() => {
@@ -241,7 +241,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
             <LabScriptsPane lab={lab} debug={debug} />
           </div>
           <div style={{ height: '100%', display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6 }}>
-            <LabResultsPane lab={lab} debug={debug} />
+            <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} />
           </div>
           <div style={{ height: '100%', display: activeTab === 'settings' ? 'block' : 'none', overflow: 'auto' }}>
             <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />

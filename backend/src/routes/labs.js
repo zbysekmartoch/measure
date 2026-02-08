@@ -280,6 +280,45 @@ router.put('/:id/state', async (req, res, next) => {
   }
 });
 
+// ─── Lab Debug State (debug.json) ─────────────────────────────────────────────
+
+// GET /api/v1/labs/:id/debug-state — read debug.json (breakpoints, settings)
+router.get('/:id/debug-state', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) return res.status(403).json({ error: 'Access denied' });
+
+    const debugPath = path.join(labPath, 'debug.json');
+    try {
+      const raw = await fs.readFile(debugPath, 'utf-8');
+      res.json(JSON.parse(raw));
+    } catch (e) {
+      if (e.code === 'ENOENT') return res.json({ breakpoints: {} });
+      throw e;
+    }
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
+    next(e);
+  }
+});
+
+// PUT /api/v1/labs/:id/debug-state — write debug.json
+router.put('/:id/debug-state', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) return res.status(403).json({ error: 'Access denied' });
+
+    const debugPath = path.join(labPath, 'debug.json');
+    await fs.writeFile(debugPath, JSON.stringify(req.body ?? {}, null, 2), 'utf-8');
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
+    next(e);
+  }
+});
+
 // Helper for lab scripts root.
 function getLabScriptsRoot(labId) {
   return path.join(getLabPath(labId), 'scripts');
@@ -513,14 +552,18 @@ router.post('/:id/results/:resultId/files/upload', async (req, res, next) => {
 
 /**
  * POST /api/v1/labs/:id/results/:resultId/debug
- * Body: { debugMode?: boolean }
+ * Body: { debugVisible?: boolean }
  *
- * Reads the workflow from progress.json (workflowFile), resolves the steps,
- * and executes them sequentially. Python steps (.py) are spawned via debugpy
- * with --wait-for-client so the frontend debugger can attach.
- * Non-Python steps run normally.
+ * Reads the workflow from result's data.json (key "workflow": string or string[]).
+ *   - string → path to a .workflow file (relative to lab scripts), read its lines as steps
+ *   - string[] → direct list of script paths (relative to lab scripts)
  *
- * Only one debug session can run at a time (global singleton).
+ * Reads debug.json from the lab folder for breakpoint info.
+ * Python scripts that have breakpoints AND debugVisible=true are spawned via debugpy
+ * with --wait-for-client. All other scripts run normally.
+ *
+ * Each script receives the result dir as its first argument.
+ * stdout → output.log, stderr → output.err, debug comms → debuger.log (all in result dir).
  */
 router.post('/:id/results/:resultId/debug', async (req, res, next) => {
   try {
@@ -537,57 +580,105 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
     const secureResult = getSecurePath(resultsRoot, resultId);
     if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
 
-    // Read progress.json to get workflowFile
-    let progress;
+    const debugVisible = req.body?.debugVisible === true;
+
+    // Read data.json from result to get workflow
+    let dataJson;
     try {
-      const raw = await fs.readFile(path.join(resultDir, 'progress.json'), 'utf-8');
-      progress = JSON.parse(raw);
+      const raw = await fs.readFile(path.join(resultDir, 'data.json'), 'utf-8');
+      dataJson = JSON.parse(raw);
     } catch {
-      return res.status(400).json({ error: 'Cannot read progress.json' });
+      return res.status(400).json({ error: 'Cannot read data.json in result folder' });
     }
 
-    const workflowFile = progress.workflowFile;
-    if (!workflowFile) {
-      return res.status(400).json({ error: 'No workflowFile in progress.json' });
+    const workflow = dataJson.workflow;
+    if (!workflow) {
+      return res.status(400).json({ error: 'No "workflow" key in data.json' });
     }
 
-    // Read the workflow file from scripts
+    // Resolve steps from workflow
     const scriptsRoot = getLabScriptsRoot(labId);
-    const wfPath = getSecurePath(scriptsRoot, workflowFile);
-    if (!wfPath) return res.status(400).json({ error: 'Invalid workflow file path' });
+    let activeSteps;
 
-    let wfContent;
-    try {
-      wfContent = await fs.readFile(wfPath, 'utf-8');
-    } catch (e) {
-      if (e.code === 'ENOENT') return res.status(404).json({ error: 'Workflow file not found' });
-      throw e;
+    if (typeof workflow === 'string') {
+      // workflow is a path to a .workflow file — read its lines
+      const wfPath = getSecurePath(scriptsRoot, workflow);
+      if (!wfPath) return res.status(400).json({ error: 'Invalid workflow file path' });
+
+      let wfContent;
+      try {
+        wfContent = await fs.readFile(wfPath, 'utf-8');
+      } catch (e) {
+        if (e.code === 'ENOENT') return res.status(404).json({ error: `Workflow file not found: ${workflow}` });
+        throw e;
+      }
+
+      const allLines = wfContent.split('\n').map(s => s.trim()).filter(s => s);
+      activeSteps = allLines.filter(s => !s.startsWith('#'));
+    } else if (Array.isArray(workflow)) {
+      // workflow is a direct array of script paths
+      activeSteps = workflow.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim());
+    } else {
+      return res.status(400).json({ error: '"workflow" must be a string (path to .workflow file) or an array of script paths' });
     }
-
-    // Parse workflow steps (skip empty lines and comments)
-    const allSteps = wfContent.split('\n').map(s => s.trim()).filter(s => s);
-    const activeSteps = allSteps.filter(s => !s.startsWith('#'));
 
     if (activeSteps.length === 0) {
       return res.status(400).json({ error: 'Workflow has no active steps' });
     }
 
+    // Read debug.json from lab for breakpoint info
+    let debugState = { breakpoints: {} };
+    try {
+      const raw = await fs.readFile(path.join(labPath, 'debug.json'), 'utf-8');
+      debugState = JSON.parse(raw);
+    } catch { /* no debug.json — no breakpoints */ }
+
+    // Determine which scripts have breakpoints
+    // debug.json.breakpoints is { "relPath": [line1, line2, …], … }
+    const scriptsWithBreakpoints = new Set();
+    if (debugVisible && debugState.breakpoints) {
+      for (const [filePath, lines] of Object.entries(debugState.breakpoints)) {
+        if (Array.isArray(lines) && lines.length > 0) {
+          scriptsWithBreakpoints.add(filePath);
+        }
+      }
+    }
+
+    // Read progress.json for metadata
+    let progress;
+    try {
+      const raw = await fs.readFile(path.join(resultDir, 'progress.json'), 'utf-8');
+      progress = JSON.parse(raw);
+    } catch {
+      progress = {};
+    }
+
     // Respond immediately — execution runs in background
     res.json({
       ok: true,
-      message: 'Debug execution started',
+      message: debugVisible && scriptsWithBreakpoints.size > 0
+        ? `Execution started with debugpy for ${scriptsWithBreakpoints.size} script(s)`
+        : 'Execution started (no debug)',
       steps: activeSteps,
+      debugScripts: [...scriptsWithBreakpoints],
       resultId,
     });
 
     // ── Background execution ──
-    const logFile = path.join(resultDir, 'analysis.log');
-    const errorFile = path.join(resultDir, 'analysis.err');
+    const logFile = path.join(resultDir, 'output.log');
+    const errorFile = path.join(resultDir, 'output.err');
+    const debugLogFile = path.join(resultDir, 'debuger.log');
     const now = new Date().toISOString();
     const separator = '='.repeat(80);
 
-    await fs.writeFile(logFile, `[DEBUG] Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
-    await fs.writeFile(errorFile, `[DEBUG] Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
+    await fs.writeFile(logFile, `Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
+    await fs.writeFile(errorFile, '', 'utf-8');
+    await fs.writeFile(debugLogFile, `[debuger] Session started at ${now}\n${separator}\n`, 'utf-8');
+
+    const debugLog = async (msg) => {
+      const line = `[${new Date().toISOString()}] ${msg}\n`;
+      await fs.appendFile(debugLogFile, line).catch(() => {});
+    };
 
     // Update progress
     const writeProgress = async (step, stepName, status) => {
@@ -604,34 +695,36 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       await fs.writeFile(path.join(resultDir, 'progress.json'), JSON.stringify(p, null, 2), 'utf-8');
     };
 
+    // Determine python command from config
+    let pythonCmd = 'python';
+    try {
+      const configPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config.json');
+      const configData = JSON.parse(await fs.readFile(configPath, 'utf-8'));
+      const pyConfig = configData.scriptCommands?.['.py'];
+      if (pyConfig?.command) {
+        const cmd = pyConfig.command;
+        if (cmd.startsWith('./') || cmd.startsWith('/')) {
+          pythonCmd = path.isAbsolute(cmd) ? cmd : path.resolve(path.dirname(configPath), cmd);
+        } else {
+          pythonCmd = cmd;
+        }
+      }
+    } catch { /* use default */ }
+
     try {
       for (let i = 0; i < activeSteps.length; i++) {
         const step = activeSteps[i];
         const ext = path.extname(step).toLowerCase();
         const isPython = ext === '.py';
         const scriptAbsPath = path.join(scriptsRoot, step);
+        const shouldDebug = isPython && scriptsWithBreakpoints.has(step);
 
         await writeProgress(i + 1, step, 'running');
         await fs.appendFile(logFile, `\n[${new Date().toISOString()}] Step ${i + 1}/${activeSteps.length}: ${step}\n`);
 
-        if (isPython) {
-          // ── Debug mode: spawn via debugpy ──
-          // Determine python command from config or use the lab's venv if present
-          let pythonCmd = 'python';
-          try {
-            // Try to read config.json for scriptCommands
-            const configPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config.json');
-            const configData = JSON.parse(await fs.readFile(configPath, 'utf-8'));
-            const pyConfig = configData.scriptCommands?.['.py'];
-            if (pyConfig?.command) {
-              const cmd = pyConfig.command;
-              if (cmd.startsWith('./') || cmd.startsWith('/')) {
-                pythonCmd = path.isAbsolute(cmd) ? cmd : path.resolve(path.dirname(configPath), cmd);
-              } else {
-                pythonCmd = cmd;
-              }
-            }
-          } catch { /* use default */ }
+        if (shouldDebug) {
+          // ── Debug mode: spawn via debugpy with --wait-for-client ──
+          await debugLog(`Starting debugpy for step ${step}`);
 
           try {
             const { port, pid } = await startDebugSession({
@@ -648,32 +741,50 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
               errorFile,
             });
 
-            await fs.appendFile(logFile, `[DEBUG] debugpy listening on port ${port}, PID ${pid}, waiting for client...\n`);
+            await debugLog(`debugpy listening on port ${port}, PID ${pid}, waiting for client...`);
+            await fs.appendFile(logFile, `[debugpy] listening on port ${port}, PID ${pid}\n`);
 
             // Wait for the debug process to finish
             const debugEvents = getDebugEvents();
             await new Promise((resolve) => {
               const onExit = () => { debugEvents.off('exit', onExit); resolve(); };
               debugEvents.on('exit', onExit);
-              // If already ended, resolve immediately
               const st = getDebugStatus();
               if (!st.active) { debugEvents.off('exit', onExit); resolve(); }
             });
 
-            await fs.appendFile(logFile, `[DEBUG] Step ${step} process exited\n`);
+            await debugLog(`Step ${step} debug process exited`);
 
           } catch (err) {
-            await fs.appendFile(errorFile, `[DEBUG] Failed to start debug session: ${err.message}\n`);
+            await debugLog(`Failed to start debug session: ${err.message}`);
+            await fs.appendFile(errorFile, `[debugpy] Failed: ${err.message}\n`);
             await writeProgress(i + 1, step, 'failed');
             return;
           }
+        } else if (isPython) {
+          // ── Python without debug: spawn python directly ──
+          const success = await new Promise((resolve) => {
+            const child = spawn(pythonCmd, [scriptAbsPath, resultDir], {
+              cwd: resultDir,
+              env: { ...process.env, WORK_DIR: resultDir },
+            });
+            child.stdout.on('data', (d) => fs.appendFile(logFile, d.toString()).catch(() => {}));
+            child.stderr.on('data', (d) => fs.appendFile(errorFile, d.toString()).catch(() => {}));
+            child.on('error', () => resolve(false));
+            child.on('close', (code) => resolve(code === 0));
+          });
+
+          if (!success) {
+            await writeProgress(i + 1, step, 'failed');
+            await fs.appendFile(errorFile, `Step ${step} failed\n`);
+            return;
+          }
         } else {
-          // ── Normal mode: spawn script directly ──
-          const ext2 = path.extname(step).toLowerCase();
+          // ── Non-Python: spawn script directly ──
           const cmdMap = { '.js': 'node', '.cjs': 'node', '.sh': 'bash', '.r': 'Rscript', '.R': 'Rscript' };
-          const command = cmdMap[ext2];
+          const command = cmdMap[ext];
           if (!command) {
-            await fs.appendFile(errorFile, `Unsupported script type: ${ext2}\n`);
+            await fs.appendFile(errorFile, `Unsupported script type: ${ext}\n`);
             await writeProgress(i + 1, step, 'failed');
             return;
           }
@@ -699,11 +810,13 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
 
       // All steps completed
       await writeProgress(activeSteps.length, activeSteps[activeSteps.length - 1], 'completed');
-      await fs.appendFile(logFile, `\n${separator}\n[${new Date().toISOString()}] [DEBUG] WORKFLOW COMPLETED\n${separator}\n`);
+      await fs.appendFile(logFile, `\n${separator}\n[${new Date().toISOString()}] WORKFLOW COMPLETED\n${separator}\n`);
+      await debugLog('WORKFLOW COMPLETED');
 
     } catch (err) {
       await writeProgress(0, null, 'failed');
-      await fs.appendFile(errorFile, `[DEBUG] SYSTEM ERROR: ${err.message}\n${err.stack}\n`);
+      await fs.appendFile(errorFile, `SYSTEM ERROR: ${err.message}\n${err.stack}\n`);
+      await debugLog(`SYSTEM ERROR: ${err.message}`);
     }
   } catch (e) {
     next(e);

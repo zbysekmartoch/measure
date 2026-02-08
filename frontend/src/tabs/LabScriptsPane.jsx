@@ -246,7 +246,8 @@ export default function LabScriptsPane({ lab, debug }) {
 
 /**
  * Inline text file editor with toolbar + Monaco.
- * For Python files: uses DebugEditor with breakpoint gutter if debug session is available.
+ * For Python files: always uses DebugEditor with breakpoint gutter.
+ * Breakpoints are stored using relative paths (within lab scripts folder).
  */
 function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSave, debug, labId }) {
   const availableThemes = [
@@ -257,34 +258,24 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
 
   const isPython = file.language === 'python';
 
-  // Resolve absolute file path for breakpoints (DAP needs abs paths).
-  // Derive from debug info or use a known pattern.
-  let absPath = null;
-  if (isPython && debug?.debugInfo?.scriptAbsolutePath) {
-    // scriptAbsolutePath is e.g. /path/to/labs/X/scripts/analyzy/sum.py
-    // scriptPath is the relative part e.g. analyzy/sum.py
-    // So scriptsRoot = scriptAbsolutePath without the trailing scriptPath
-    const sp = debug.debugInfo.scriptPath;
-    const sap = debug.debugInfo.scriptAbsolutePath;
-    if (sp && sap.endsWith(sp)) {
-      const scriptsRoot = sap.slice(0, -sp.length);
-      absPath = scriptsRoot + file.path;
-    }
-  }
-  // Fallback: try a marker-based approach
-  if (!absPath && isPython) {
-    const marker = `/labs/${labId}/scripts/`;
-    if (debug?.debugInfo?.scriptAbsolutePath?.includes(marker)) {
-      const base = debug.debugInfo.scriptAbsolutePath;
-      const idx = base.indexOf(marker);
-      absPath = base.substring(0, idx) + marker + file.path;
-    }
-  }
+  // Breakpoints use relative paths (file.path is relative within scripts/)
+  const breakpoints = (isPython && debug) ? debug.getBreakpoints(file.path) : new Set();
 
-  const breakpoints = (absPath && debug) ? debug.getBreakpoints(absPath) : new Set();
-  const stoppedLine = (absPath && debug?.stoppedLocation?.file === absPath)
-    ? debug.stoppedLocation.line
-    : null;
+  // Stopped line: check if the debug session is stopped on this file
+  // The stoppedLocation.file from DAP is an absolute path — resolve to relative
+  let stoppedLine = null;
+  if (isPython && debug?.stoppedLocation?.file) {
+    const stoppedFile = debug.stoppedLocation.file;
+    // Try to match: stoppedFile ends with /scripts/<file.path>
+    const marker = `/labs/${labId}/scripts/`;
+    const idx = stoppedFile.indexOf(marker);
+    if (idx !== -1) {
+      const relPath = stoppedFile.substring(idx + marker.length);
+      if (relPath === file.path) {
+        stoppedLine = debug.stoppedLocation.line;
+      }
+    }
+  }
 
   return (
     <>
@@ -300,11 +291,11 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             background: 'rgba(59,130,246,0.2)', color: editorTheme === 'vs' ? '#1d4ed8' : '#60a5fa',
             padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase',
           }}>{file.language}</span>
-          {isPython && absPath && (
+          {isPython && debug && (
             <span style={{
-              fontSize: 10, color: '#888', fontFamily: 'monospace',
-            }} title="Breakpoints can be set by clicking in the gutter">
-              🔴 breakpoints ready
+              fontSize: 10, color: breakpoints.size > 0 ? '#dc2626' : '#888', fontFamily: 'monospace',
+            }} title="Klikněte do okraje editoru pro nastavení breakpointů">
+              🔴 {breakpoints.size > 0 ? `${breakpoints.size} breakpoint${breakpoints.size > 1 ? 's' : ''}` : 'breakpoints'}
             </span>
           )}
           <select
@@ -325,7 +316,7 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
         </button>
       </div>
       <div style={{ flex: 1, borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
-        {isPython && absPath && debug ? (
+        {isPython && debug ? (
           <DebugEditor
             file={file}
             editorTheme={editorTheme}
@@ -334,7 +325,7 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             readOnly={false}
             onChange={(val) => onChange(val || '')}
             onToggleBreakpoint={(_filePath, line) => {
-              debug.toggleBreakpoint(absPath, line);
+              debug.toggleBreakpoint(file.path, line);
             }}
           />
         ) : (
