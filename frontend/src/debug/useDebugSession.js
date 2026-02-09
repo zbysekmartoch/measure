@@ -256,25 +256,49 @@ export function useDebugSession({ labId } = {}) {
       // Initialize
       await client.initialize();
 
-      // Attach
-      await client.attach();
-
-      // Send all breakpoints (resolve relative paths to absolute for DAP)
-      for (const [relPath, lines] of breakpointsMap) {
-        if (lines.size > 0) {
-          const absFilePath = resolveAbsPath(relPath, info);
-          if (absFilePath) {
-            try {
-              await client.setBreakpoints(absFilePath, [...lines]);
-            } catch (e) {
-              console.warn('[useDebugSession] setBreakpoints error:', e);
+      // DAP protocol: after we send 'attach', debugpy sends 'initialized' event
+      // BEFORE it sends the 'attach' response. The 'initialized' event tells us
+      // to send breakpoints + configurationDone. Only AFTER configurationDone
+      // does debugpy send the 'attach' response. So we must handle this async.
+      const configuredPromise = new Promise((resolve, reject) => {
+        const onInitialized = async () => {
+          try {
+            console.log('[useDebugSession] received "initialized" event, sending breakpoints + configurationDone');
+            // Send all breakpoints (resolve relative paths to absolute for DAP)
+            for (const [relPath, lines] of breakpointsMap) {
+              if (lines.size > 0) {
+                const absFilePath = resolveAbsPath(relPath, info);
+                if (absFilePath) {
+                  try {
+                    await client.setBreakpoints(absFilePath, [...lines]);
+                    console.log(`[useDebugSession] setBreakpoints ${absFilePath}: lines ${[...lines].join(',')}`);
+                  } catch (e) {
+                    console.warn('[useDebugSession] setBreakpoints error:', e);
+                  }
+                }
+              }
             }
-          }
-        }
-      }
 
-      // Configuration done
-      await client.configurationDone();
+            // Configuration done — this unblocks the 'attach' response
+            await client.configurationDone();
+            console.log('[useDebugSession] configurationDone sent');
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        };
+        client.on('initialized', onInitialized);
+
+        // Safety: if no initialized event within 15s, proceed anyway
+        setTimeout(() => resolve(), 15000);
+      });
+
+      // Send attach request — will resolve only after configurationDone
+      await client.attach();
+      console.log('[useDebugSession] attach response received');
+
+      // Wait for configuration to also complete (should be done by now)
+      await configuredPromise;
 
       setStatus('running');
     } catch (e) {
