@@ -451,6 +451,21 @@ export function useDebugSession({ labId } = {}) {
     });
   }, [persistBreakpoints]);
 
+  // ── Update breakpoint positions (called by DebugEditor when lines shift) ──
+  const updateBreakpointPositions = useCallback((filePath, newLines) => {
+    setBreakpointsMap(prev => {
+      const next = new Map(prev);
+      if (newLines.size === 0) {
+        next.delete(filePath);
+      } else {
+        next.set(filePath, newLines);
+      }
+      persistBreakpoints(next);
+      // Note: we don't sync to DAP here — that happens on attach or toggleBreakpoint
+      return next;
+    });
+  }, [persistBreakpoints]);
+
   // ── Expand variable children ──
   const expandVariable = useCallback(async (variablesReference) => {
     if (!clientRef.current) return [];
@@ -485,6 +500,7 @@ export function useDebugSession({ labId } = {}) {
     toggleBreakpoint,
     getBreakpoints,
     clearBreakpoints,
+    updateBreakpointPositions,
     expandVariable,
     pollStatus,
   };

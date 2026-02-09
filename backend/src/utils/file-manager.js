@@ -55,7 +55,8 @@ export async function copyRecursive(src, dest) {
  */
 const ALLOWED_EXTENSIONS = [
   '.doc', '.docx', '.xls', '.xlsx', '.js', '.cjs', '.py', '.txt', '.md', 
-  '.json', '.workflow', '.sql', '.sh', '.css', '.html', '.xml', '.yaml', '.yml', '.env'
+  '.json', '.workflow', '.sql', '.sh', '.css', '.html', '.xml', '.yaml', '.yml', '.env',
+  '.log', '.err', '.csv', '.r',
 ];
 
 /**
@@ -63,7 +64,8 @@ const ALLOWED_EXTENSIONS = [
  */
 const TEXT_EXTENSIONS = [
   '.js', '.cjs', '.py', '.txt', '.md', '.json', '.workflow', '.sql', 
-  '.sh', '.css', '.html', '.xml', '.yaml', '.yml', '.env'
+  '.sh', '.css', '.html', '.xml', '.yaml', '.yml', '.env',
+  '.log', '.err', '.csv', '.r',
 ];
 
 /**

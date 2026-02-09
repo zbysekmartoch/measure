@@ -20,7 +20,7 @@ import { useToast } from '../components/Toast';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { appConfig } from '../lib/appConfig.js';
 
-export default function LabResultsPane({ lab, debug, debugVisible = false }) {
+export default function LabResultsPane({ lab, debug, debugVisible = false, runDebugRef }) {
   const { t } = useLanguage();
   const toast = useToast();
 
@@ -123,6 +123,12 @@ export default function LabResultsPane({ lab, debug, debugVisible = false }) {
     }
   }, [selectedResult, lab.id, t, toast, loadResults, debug, debugVisible]);
 
+  // Expose handleRunDebug for F9 keyboard shortcut (via ref from parent)
+  useEffect(() => {
+    if (runDebugRef) runDebugRef.current = handleRunDebug;
+    return () => { if (runDebugRef) runDebugRef.current = null; };
+  }, [handleRunDebug, runDebugRef]);
+
   // ---- Formatting helpers ----
   const formatDT = (s) => {
     if (!s) return '-';
@@ -193,7 +199,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false }) {
             fontWeight: 500, fontSize: 13,
           }}
         >
-          {debugRunning ? '⏳' : debugVisible ? '🐛' : '▶️'} {debugVisible ? (t('runDebug') || 'Spustit debug') : (t('run') || 'Spustit')}
+          {debugRunning ? '⏳' : debugVisible ? '�' : '▶'} {debugVisible ? 'Debug' : 'Run'} <span style={{fontSize:10,opacity:0.6}}>F9</span>
         </button>
 
         {/* Status badge */}

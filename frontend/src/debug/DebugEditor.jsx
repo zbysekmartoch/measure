@@ -27,11 +27,13 @@ export default function DebugEditor({
   readOnly = false,
   onChange,
   onToggleBreakpoint,
+  onBreakpointsMoved,
   onEditorMount,
 }) {
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const decorationsRef = useRef([]);
+  const bpDecIdsRef = useRef([]); // track which decorations are breakpoints
 
   // Update decorations when breakpoints or stoppedLine change
   const updateDecorations = useCallback(() => {
@@ -40,6 +42,7 @@ export default function DebugEditor({
     if (!editor || !monaco) return;
 
     const decorations = [];
+    const bpCount = breakpoints.size;
 
     // Breakpoint dots
     for (const line of breakpoints) {
@@ -49,7 +52,7 @@ export default function DebugEditor({
           isWholeLine: false,
           glyphMarginClassName: 'debug-breakpoint-glyph',
           glyphMarginHoverMessage: { value: `Breakpoint at line ${line}` },
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          stickiness: monaco.editor.TrackedRangeStickiness.GrowsOnlyWhenTypingBefore,
         },
       });
     }
@@ -68,6 +71,8 @@ export default function DebugEditor({
     }
 
     decorationsRef.current = editor.deltaDecorations(decorationsRef.current, decorations);
+    // First N decorations are breakpoints
+    bpDecIdsRef.current = decorationsRef.current.slice(0, bpCount);
   }, [breakpoints, stoppedLine]);
 
   // Scroll to stopped line
@@ -81,6 +86,33 @@ export default function DebugEditor({
   useEffect(() => {
     updateDecorations();
   }, [updateDecorations]);
+
+  // Sync breakpoint positions from Monaco decorations back to parent state.
+  // When lines are inserted/deleted, Monaco moves decorations but our
+  // breakpointsMap still has the old line numbers. This reads the actual
+  // decoration positions and notifies the parent to update.
+  const syncRef = useRef(null);
+  syncRef.current = () => {
+    const editor = editorRef.current;
+    if (!editor || !onBreakpointsMoved || !file?.path) return;
+    if (bpDecIdsRef.current.length === 0) return;
+
+    const model = editor.getModel();
+    if (!model) return;
+
+    const newLines = new Set();
+    for (const decId of bpDecIdsRef.current) {
+      const range = model.getDecorationRange(decId);
+      if (range) {
+        newLines.add(range.startLineNumber);
+      }
+    }
+
+    // Check if positions changed
+    if (newLines.size !== breakpoints.size || ![...breakpoints].every(l => newLines.has(l))) {
+      onBreakpointsMoved(file.path, newLines);
+    }
+  };
 
   const handleMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
@@ -100,9 +132,16 @@ export default function DebugEditor({
       ) {
         const line = e.target.position?.lineNumber;
         if (line && onToggleBreakpoint && file?.path) {
+          // Before toggling, sync current breakpoint positions from decorations
+          syncRef.current?.();
           onToggleBreakpoint(file.path, line);
         }
       }
+    });
+
+    // On content changes, track where breakpoints moved and notify parent
+    editor.onDidChangeModelContent(() => {
+      syncRef.current?.();
     });
 
     // Apply initial decorations

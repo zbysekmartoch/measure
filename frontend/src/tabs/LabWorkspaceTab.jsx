@@ -23,7 +23,6 @@ import DebugPanel from '../debug/DebugPanel.jsx';
 const TABS = [
   { key: 'scripts',  icon: '📜', label: 'Scripts' },
   { key: 'results',  icon: '📊', label: 'Results' },
-  { key: 'settings', icon: '⚙️', label: 'Settings' },
 ];
 
 // Debug panel placement: 'hidden' | 'right' | 'bottom' | 'popup'
@@ -45,6 +44,57 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
 
   // ---- Debug session (lives here, shared with children) ----
   const debug = useDebugSession({ labId: lab.id });
+
+  // ---- F9 handler ref (set by LabResultsPane) ----
+  const runDebugRef = useRef(null);
+
+  // ---- Blinking state ----
+  const [blinkScripts, setBlinkScripts] = useState(false);
+
+  // Blink Scripts tab when debugger is stopped and Scripts tab is NOT active
+  useEffect(() => {
+    if (debug.status === 'stopped' && activeTab !== 'scripts') {
+      setBlinkScripts(true);
+    } else {
+      setBlinkScripts(false);
+    }
+  }, [debug.status, activeTab]);
+
+  // ---- Global keyboard shortcuts ----
+  useEffect(() => {
+    const handler = (e) => {
+      // Don't intercept if user is typing in an input/textarea/select
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      switch (e.key) {
+        case 'F8':
+          e.preventDefault();
+          if (debug.status === 'stopped') debug.doContinue();
+          break;
+        case 'F9':
+          e.preventDefault();
+          if (runDebugRef.current) runDebugRef.current();
+          break;
+        case 'F10':
+          e.preventDefault();
+          if (debug.status === 'stopped') debug.doNext();
+          break;
+        case 'F11':
+          e.preventDefault();
+          if (e.shiftKey) {
+            if (debug.status === 'stopped') debug.doStepOut();
+          } else {
+            if (debug.status === 'stopped') debug.doStepIn();
+          }
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [debug]);
 
   // ---- Popup window handling ----
   useEffect(() => {
@@ -121,7 +171,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
   }, [debugMode]);
 
   // ---- Tab style ----
-  const tabStyle = (isActive) => ({
+  const tabStyle = (isActive, blink = false) => ({
     padding: '7px 14px',
     border: '1px solid #012345',
     borderBottom: 'none',
@@ -130,13 +180,14 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
     borderTopRightRadius: 6,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    background: isActive ? '#fff' : '#f3f4f6',
+    background: isActive ? '#fff' : blink ? undefined : '#f3f4f6',
     fontWeight: isActive ? 600 : 400,
     color: '#111827',
     zIndex: isActive ? 1 : 0,
     cursor: 'pointer',
     fontSize: 13,
     outline: 'none',
+    animation: blink ? 'tabBlink 0.8s ease-in-out infinite' : 'none',
   });
 
   const showSplitter = debugMode === 'right' || debugMode === 'bottom';
@@ -171,16 +222,16 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            style={{
-              ...tabStyle(activeTab === tab.key),
-              ...(tab.key === 'settings' ? { marginLeft: 'auto' } : {}),
-            }}
+            style={tabStyle(
+              activeTab === tab.key,
+              tab.key === 'scripts' && blinkScripts
+            )}
           >
             {tab.icon} {tab.label}
           </button>
         ))}
 
-        {/* Debugger placement controls — after Settings tab */}
+        {/* Debugger placement controls — right after Results tab */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 2,
           marginLeft: 6,
@@ -210,6 +261,17 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
             </button>
           ))}
         </div>
+
+        {/* Settings tab — pushed to right */}
+        <button
+          onClick={() => setActiveTab('settings')}
+          style={{
+            ...tabStyle(activeTab === 'settings'),
+            marginLeft: 'auto',
+          }}
+        >
+          ⚙️ Settings
+        </button>
       </div>
 
       {/* Content area with optional splitter */}
@@ -241,7 +303,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
             <LabScriptsPane lab={lab} debug={debug} />
           </div>
           <div style={{ height: '100%', display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6 }}>
-            <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} />
+            <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} />
           </div>
           <div style={{ height: '100%', display: activeTab === 'settings' ? 'block' : 'none', overflow: 'auto' }}>
             <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />
@@ -282,6 +344,13 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           </div>
         )}
       </div>
+
+      <style>{`
+        @keyframes tabBlink {
+          0%, 100% { background: #fef3c7; }
+          50% { background: #fbbf24; }
+        }
+      `}</style>
     </div>
   );
 }

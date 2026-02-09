@@ -28,6 +28,46 @@ export default function LabScriptsPane({ lab, debug }) {
     localStorage.getItem('monacoTheme') || 'vs-dark'
   );
 
+  // ---- Determine which file the debugger is stopped in (relative path) ----
+  const stoppedRelPath = (() => {
+    if (!debug?.stoppedLocation?.file) return null;
+    const marker = `/labs/${lab.id}/scripts/`;
+    const idx = debug.stoppedLocation.file.indexOf(marker);
+    if (idx !== -1) return debug.stoppedLocation.file.substring(idx + marker.length);
+    return null;
+  })();
+
+  // Auto-open and switch to the file where debugger stopped
+  useEffect(() => {
+    if (!stoppedRelPath || debug?.status !== 'stopped') return;
+    const tabKey = `file:${stoppedRelPath}`;
+    // If file is already open, just switch to it
+    if (openFiles.find(f => f.path === stoppedRelPath)) {
+      setActiveTab(tabKey);
+      return;
+    }
+    // Otherwise, open it
+    fetch(`${apiBasePath}/content?file=${encodeURIComponent(stoppedRelPath)}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+    })
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(data => {
+        const name = stoppedRelPath.split('/').pop();
+        setOpenFiles(prev => {
+          if (prev.find(f => f.path === stoppedRelPath)) return prev;
+          return [...prev, {
+            path: stoppedRelPath, name,
+            content: data.content || '', originalContent: data.content || '',
+            language: getLanguageFromFilename(stoppedRelPath),
+            isSql: false, isImage: false, isPdf: false, isText: true, dirty: false,
+          }];
+        });
+        setActiveTab(tabKey);
+      })
+      .catch(() => { /* ignore */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stoppedRelPath, debug?.status]);
+
   // ---- Debug workflow: create result run and notify user ----
   const handleDebugWorkflow = useCallback(async (workflowFile) => {
     try {
@@ -144,8 +184,14 @@ export default function LabScriptsPane({ lab, debug }) {
         {openFiles.map((file) => {
           const isActive = activeTab === `file:${file.path}`;
           const icon = file.isSql ? '🧮' : file.isImage ? '🖼️' : file.isPdf ? '📕' : '📄';
+          const shouldBlink = !isActive && debug?.status === 'stopped' && stoppedRelPath === file.path;
           return (
-            <span key={file.path} style={{ display: 'inline-flex', alignItems: 'stretch', marginBottom: isActive ? -1 : 0, zIndex: isActive ? 1 : 0 }}>
+            <span key={file.path} style={{
+              display: 'inline-flex', alignItems: 'stretch',
+              marginBottom: isActive ? -1 : 0, zIndex: isActive ? 1 : 0,
+              animation: shouldBlink ? 'tabBlink 0.8s ease-in-out infinite' : 'none',
+              borderRadius: '6px 6px 0 0',
+            }}>
               <button
                 onClick={() => setActiveTab(`file:${file.path}`)}
                 title={file.path}
@@ -240,6 +286,13 @@ export default function LabScriptsPane({ lab, debug }) {
           </div>
         ))}
       </div>
+
+      <style>{`
+        @keyframes tabBlink {
+          0%, 100% { background: #fef3c7; }
+          50% { background: #fbbf24; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -326,6 +379,9 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             onChange={(val) => onChange(val || '')}
             onToggleBreakpoint={(_filePath, line) => {
               debug.toggleBreakpoint(file.path, line);
+            }}
+            onBreakpointsMoved={(_filePath, newLines) => {
+              debug.updateBreakpointPositions(file.path, newLines);
             }}
           />
         ) : (

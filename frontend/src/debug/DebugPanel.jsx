@@ -94,14 +94,14 @@ function DebugToolbar({ status, onAttach, onDetach, onContinue, onNext, onStepIn
 
       <span style={{ width: 1, height: 20, background: '#555' }} />
 
-      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onContinue} title="Continue (F5)">
-        ▶ Continue
+      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onContinue} title="Continue (F8)">
+        ▶ Continue <span style={{fontSize:10,opacity:0.6}}>F8</span>
       </button>
       <button style={btnStyle(canStep)} disabled={!canStep} onClick={onNext} title="Step Over (F10)">
-        ⤵ Step Over
+        ⤵ Step Over <span style={{fontSize:10,opacity:0.6}}>F10</span>
       </button>
       <button style={btnStyle(canStep)} disabled={!canStep} onClick={onStepIn} title="Step In (F11)">
-        ↓ Step In
+        ↓ Step In <span style={{fontSize:10,opacity:0.6}}>F11</span>
       </button>
       <button style={btnStyle(canStep)} disabled={!canStep} onClick={onStepOut} title="Step Out (Shift+F11)">
         ↑ Step Out
