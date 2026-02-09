@@ -68,12 +68,12 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
   // ---- Global keyboard shortcuts ----
   useEffect(() => {
     const handler = (e) => {
+      // Only handle F-keys we care about
+      if (!['F8', 'F9', 'F10', 'F11'].includes(e.key)) return;
+
       // Don't intercept if user is typing in an input/textarea/select
       const tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      // Don't intercept if inside Monaco editor (contentEditable or textarea)
-      const isMonaco = e.target.closest?.('.monaco-editor');
-      if (isMonaco) return;
 
       const d = debugRef.current;
       switch (e.key) {
