@@ -34,6 +34,8 @@ export function attachDapProxy(server) {
 
   wss.on('connection', (ws) => {
     const status = getDebugStatus();
+    console.log(`[dap-proxy] WS connection received. Debug status: ${JSON.stringify({ active: status.active, status: status.status, port: status.port, pid: status.pid })}`);
+
     if (!status.active || !status.port) {
       console.log('[dap-proxy] No active debug session, closing WS');
       ws.close(4000, 'No active debug session');
@@ -41,29 +43,32 @@ export function attachDapProxy(server) {
     }
 
     const targetPort = status.port;
-    console.log(`[dap-proxy] WS client connected, bridging to TCP 127.0.0.1:${targetPort}`);
+    console.log(`[dap-proxy] Bridging WS to TCP 127.0.0.1:${targetPort}`);
 
-    const tcp = net.createConnection({ host: '127.0.0.1', port: targetPort }, () => {
+    const tcp = net.createConnection({ host: '127.0.0.1', port: targetPort });
+
+    tcp.on('connect', () => {
       console.log(`[dap-proxy] TCP connected to debugpy on port ${targetPort}`);
     });
 
     // WS → TCP
     ws.on('message', (data) => {
-      // data can be Buffer or ArrayBuffer
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+      console.log(`[dap-proxy] WS→TCP ${buf.length} bytes`);
       tcp.write(buf);
     });
 
-    // TCP → WS (send as binary)
+    // TCP → WS
     tcp.on('data', (chunk) => {
+      console.log(`[dap-proxy] TCP→WS ${chunk.length} bytes`);
       if (ws.readyState === ws.OPEN) {
         ws.send(chunk);
       }
     });
 
     // Clean shutdown
-    ws.on('close', () => {
-      console.log('[dap-proxy] WS closed, destroying TCP');
+    ws.on('close', (code, reason) => {
+      console.log(`[dap-proxy] WS closed code=${code} reason=${reason}`);
       tcp.destroy();
     });
 
@@ -72,14 +77,14 @@ export function attachDapProxy(server) {
       tcp.destroy();
     });
 
-    tcp.on('close', () => {
-      console.log('[dap-proxy] TCP closed, closing WS');
+    tcp.on('close', (hadError) => {
+      console.log(`[dap-proxy] TCP closed hadError=${hadError}`);
       if (ws.readyState === ws.OPEN) ws.close(1000);
     });
 
     tcp.on('error', (err) => {
-      console.error('[dap-proxy] TCP error:', err.message);
-      if (ws.readyState === ws.OPEN) ws.close(4001, 'TCP connection error');
+      console.error(`[dap-proxy] TCP error: ${err.message} (code=${err.code})`);
+      if (ws.readyState === ws.OPEN) ws.close(4001, `TCP error: ${err.message}`);
     });
   });
 

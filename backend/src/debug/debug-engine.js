@@ -128,8 +128,13 @@ function emitStatus() {
  * @returns {Promise<{ port: number, pid: number }>}
  */
 export async function startDebugSession(opts) {
+  // Force-kill any leftover session before starting a new one
   if (debugState.status !== 'idle' && debugState.status !== 'ended') {
-    throw new Error(`Debug session already active (status=${debugState.status})`);
+    console.log(`[debug-engine] Cleaning up previous session (status=${debugState.status})`);
+    endDebugSession();
+    // Give process a moment to die
+    await new Promise(r => setTimeout(r, 300));
+    resetState();
   }
 
   const port = await getFreePort();
@@ -149,8 +154,9 @@ export async function startDebugSession(opts) {
 
   const pythonCmd = opts.pythonCommand || 'python';
 
-  // python -m debugpy --listen 127.0.0.1:<port> --wait-for-client <script> [args...]
+  // python -Xfrozen_modules=off -m debugpy --listen 127.0.0.1:<port> --wait-for-client <script> [args...]
   const spawnArgs = [
+    '-Xfrozen_modules=off',
     '-m', 'debugpy',
     '--listen', `127.0.0.1:${port}`,
     '--wait-for-client',
@@ -166,6 +172,7 @@ export async function startDebugSession(opts) {
     env: {
       ...process.env,
       WORK_DIR: opts.cwd,
+      PYDEVD_DISABLE_FILE_VALIDATION: '1',
     },
   });
 
@@ -207,9 +214,12 @@ export async function startDebugSession(opts) {
     debugState.events.emit('exit', { code, signal });
   });
 
-  // Wait a short time for debugpy to bind the port
-  await waitForPort(port, 10000);
-  console.log(`[debug-engine] debugpy listening on 127.0.0.1:${port}`);
+  // Wait for debugpy to print its "listening" message to stderr.
+  // We must NOT make a TCP connection to the port — debugpy in --wait-for-client
+  // mode treats the first TCP connection as the DAP client. If we connect and
+  // immediately close, debugpy loses its one client slot.
+  await waitForDebugpyReady(child, port, 15000);
+  console.log(`[debug-engine] debugpy ready on 127.0.0.1:${port}`);
 
   return { port, pid: child.pid };
 }
@@ -226,23 +236,72 @@ export function endDebugSession() {
 }
 
 /**
- * Wait until a TCP port accepts connections.
+ * Wait for debugpy to be ready by monitoring its stderr output.
+ * debugpy prints messages like:
+ *   "0.00s - ..." (warnings)
+ * and the process stays alive waiting for a client.
+ * We wait until stderr output appears OR we can probe the port is open
+ * using a low-level socket test that resets immediately (RST, no data).
+ *
+ * @param {import('child_process').ChildProcess} child
  * @param {number} port
  * @param {number} timeoutMs
  */
-function waitForPort(port, timeoutMs = 10000) {
+function waitForDebugpyReady(child, port, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
-    function attempt() {
-      if (Date.now() > deadline) return reject(new Error(`Timeout waiting for port ${port}`));
-      const sock = net.createConnection({ host: '127.0.0.1', port }, () => {
-        sock.destroy();
-        resolve();
+    let resolved = false;
+
+    // Strategy 1: watch stderr for debugpy output (any output means it started)
+    const onStderr = () => {
+      if (resolved) return;
+      // debugpy has printed something — give it a tiny bit more time to bind
+      setTimeout(() => {
+        if (!resolved) { resolved = true; resolve(); }
+      }, 200);
+    };
+    child.stderr.once('data', onStderr);
+
+    // Strategy 2: poll with SO_LINGER(0) to send RST instead of FIN
+    // This avoids consuming debugpy's client slot
+    function probePort() {
+      if (resolved) return;
+      if (Date.now() > deadline) {
+        child.stderr.off('data', onStderr);
+        return reject(new Error(`Timeout waiting for debugpy on port ${port}`));
+      }
+      const sock = new net.Socket();
+      // Set SO_LINGER to 0 so close sends RST, not FIN+ACK.
+      // This way debugpy doesn't see a proper client connection.
+      sock.on('connect', () => {
+        // Port is open! Use setNoDelay and destroy with RST
+        try {
+          sock.setNoDelay(true);
+          sock.destroy();
+        } catch { /* ignore */ }
+        if (!resolved) {
+          resolved = true;
+          child.stderr.off('data', onStderr);
+          resolve();
+        }
       });
       sock.on('error', () => {
-        setTimeout(attempt, 100);
+        sock.destroy();
+        setTimeout(probePort, 150);
       });
+      sock.connect(port, '127.0.0.1');
     }
-    attempt();
+
+    // Start probing after a small initial delay
+    setTimeout(probePort, 300);
+
+    // Strategy 3: if process exits before ready, reject
+    child.once('exit', () => {
+      if (!resolved) {
+        resolved = true;
+        child.stderr.off('data', onStderr);
+        reject(new Error('debugpy process exited before becoming ready'));
+      }
+    });
   });
 }
