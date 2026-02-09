@@ -6,6 +6,7 @@
  * Props: everything from useDebugSession() hook
  */
 import React, { useState, useCallback } from 'react';
+import { shadow, debugButtons as dbBtn } from '../lib/uiConfig.js';
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 
@@ -22,8 +23,10 @@ const btnStyle = (enabled = true) => ({
   cursor: enabled ? 'pointer' : 'not-allowed',
   opacity: enabled ? 1 : 0.4,
   color: '#fff',
-  background: '#333',
+  background: dbBtn.stepBg,
   display: 'flex', alignItems: 'center', gap: 4,
+  boxShadow: enabled ? shadow.small : 'none',
+  transition: 'box-shadow 0.15s, transform 0.15s',
 });
 
 const statusBadge = (status) => {
@@ -81,30 +84,36 @@ function DebugToolbar({ status, onAttach, onDetach, onContinue, onNext, onStepIn
       <span style={statusBadge(status)}>{status}</span>
 
       {canAttach && (
-        <button style={{ ...btnStyle(true), background: '#166534' }} onClick={onAttach} title="Attach debugger">
-          🔗 Attach
+        <button style={{ ...btnStyle(true), background: dbBtn.attach.bg }} onClick={onAttach} title="Attach debugger"
+          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = shadow.hover; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = shadow.small; e.currentTarget.style.transform = ''; }}
+        >
+          {dbBtn.attach.icon} {dbBtn.attach.label}
         </button>
       )}
 
       {canDetach && (
-        <button style={{ ...btnStyle(true), background: '#991b1b' }} onClick={onDetach} title="Stop debug session">
-          ⏹ Stop
+        <button style={{ ...btnStyle(true), background: dbBtn.stop.bg }} onClick={onDetach} title="Stop debug session"
+          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = shadow.hover; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = shadow.small; e.currentTarget.style.transform = ''; }}
+        >
+          {dbBtn.stop.icon} {dbBtn.stop.label}
         </button>
       )}
 
       <span style={{ width: 1, height: 20, background: '#555' }} />
 
-      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onContinue} title="Continue (F8)">
-        ▶ Continue <span style={{fontSize:10,opacity:0.6}}>F8</span>
+      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onContinue} title={`${dbBtn.continue.label} (${dbBtn.continue.shortcut})`}>
+        {dbBtn.continue.icon} {dbBtn.continue.label} <span style={{fontSize:10,opacity:0.6}}>{dbBtn.continue.shortcut}</span>
       </button>
-      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onNext} title="Step Over (F10)">
-        ⤵ Step Over <span style={{fontSize:10,opacity:0.6}}>F10</span>
+      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onNext} title={`${dbBtn.stepOver.label} (${dbBtn.stepOver.shortcut})`}>
+        {dbBtn.stepOver.icon} {dbBtn.stepOver.label} <span style={{fontSize:10,opacity:0.6}}>{dbBtn.stepOver.shortcut}</span>
       </button>
-      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onStepIn} title="Step In (F11)">
-        ↓ Step In <span style={{fontSize:10,opacity:0.6}}>F11</span>
+      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onStepIn} title={`${dbBtn.stepIn.label} (${dbBtn.stepIn.shortcut})`}>
+        {dbBtn.stepIn.icon} {dbBtn.stepIn.label} <span style={{fontSize:10,opacity:0.6}}>{dbBtn.stepIn.shortcut}</span>
       </button>
-      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onStepOut} title="Step Out (Shift+F11)">
-        ↑ Step Out
+      <button style={btnStyle(canStep)} disabled={!canStep} onClick={onStepOut} title={`${dbBtn.stepOut.label} (${dbBtn.stepOut.shortcut})`}>
+        {dbBtn.stepOut.icon} {dbBtn.stepOut.label}
       </button>
 
       {isRunning && (

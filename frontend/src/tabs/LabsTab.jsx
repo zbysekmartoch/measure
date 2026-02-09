@@ -11,6 +11,7 @@ import { fetchJSON } from '../lib/fetchJSON.js';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import LabWorkspaceTab from './LabWorkspaceTab.jsx';
+import { icons } from '../lib/uiConfig.js';
 
 export default function LabsTab() {
   const { user } = useAuth();
@@ -284,7 +285,7 @@ export default function LabsTab() {
                 onMouseEnter={(e) => { e.currentTarget.style.color = '#2563eb'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; }}
               >
-                ↗
+                {icons.popOut}
               </button>
 
               {/* Close button */}
@@ -383,7 +384,7 @@ export default function LabsTab() {
                         style={{ padding: '4px 10px', fontSize: 12 }}
                         onClick={(e) => { e.stopPropagation(); openLab(lab); }}
                       >
-                        Enter ↗
+                        Enter {icons.enter}
                       </button>
                     </div>
                     {lab.description && (
@@ -418,7 +419,7 @@ export default function LabsTab() {
                       />
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button className="btn btn-edit" onClick={handleSaveDetails}>Save</button>
-                        <button className="btn btn-primary" onClick={() => openLab(selectedLab)}>Enter ↗</button>
+                        <button className="btn btn-primary" onClick={() => openLab(selectedLab)}>Enter {icons.enter}</button>
                       </div>
 
                       <div style={{ marginTop: 8 }}>
@@ -452,7 +453,7 @@ export default function LabsTab() {
                     <>
                       <div style={{ fontSize: 15, fontWeight: 600 }}>{selectedLab.name}</div>
                       <div style={{ color: '#6b7280', fontSize: 13 }}>{selectedLab.description || '—'}</div>
-                      <button className="btn btn-primary" onClick={() => openLab(selectedLab)}>Enter ↗</button>
+                      <button className="btn btn-primary" onClick={() => openLab(selectedLab)}>Enter {icons.enter}</button>
                     </>
                   )}
                 </div>

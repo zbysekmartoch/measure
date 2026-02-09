@@ -19,6 +19,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../components/Toast';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { appConfig } from '../lib/appConfig.js';
+import { shadow, resultButtons as rbtn } from '../lib/uiConfig.js';
 
 export default function LabResultsPane({ lab, debug, debugVisible = false, runDebugRef }) {
   const { t } = useLanguage();
@@ -214,13 +215,17 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
             onClick={handleReset}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
-              background: '#92400e',
+              background: rbtn.reset.bg,
               color: 'white', border: 'none', borderRadius: 6,
               cursor: 'pointer',
               fontWeight: 500, fontSize: 13,
+              boxShadow: shadow.normal,
+              transition: 'box-shadow 0.15s, transform 0.15s',
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.boxShadow = shadow.hover; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.boxShadow = shadow.normal; e.currentTarget.style.transform = ''; }}
           >
-            ⏹ Reset
+            {rbtn.reset.icon} {rbtn.reset.label}
           </button>
         ) : (
           <button
@@ -228,13 +233,17 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
             disabled={!canRun}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
-              background: canRun ? '#b82b2b' : '#9ca3af',
+              background: canRun ? rbtn.run.bg : rbtn.run.disabledBg,
               color: 'white', border: 'none', borderRadius: 6,
               cursor: canRun ? 'pointer' : 'not-allowed',
               fontWeight: 500, fontSize: 13,
+              boxShadow: canRun ? shadow.normal : 'none',
+              transition: 'box-shadow 0.15s, transform 0.15s',
             }}
+            onMouseEnter={(e) => { if (canRun) { e.currentTarget.style.boxShadow = shadow.hover; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.boxShadow = canRun ? shadow.normal : 'none'; e.currentTarget.style.transform = ''; }}
           >
-            {debugRunning ? '⏳' : debugVisible ? '🛠' : '▶'} {debugVisible ? 'Debug' : 'Run'} <span style={{fontSize:10,opacity:0.6}}>F9</span>
+            {debugRunning ? rbtn.loading.icon : debugVisible ? rbtn.debug.icon : rbtn.run.icon} {debugVisible ? rbtn.debug.label : rbtn.run.label} <span style={{fontSize:10,opacity:0.6}}>F9</span>
           </button>
         )}
 

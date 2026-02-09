@@ -13,6 +13,7 @@ import React, { useCallback } from 'react';
 import { useLanguage } from '../../context/LanguageContext';
 import { formatFileSize, fileIcon } from './fileUtils.js';
 import { useFileClipboard } from './ClipboardContext.jsx';
+import { shadow, fileBrowserButtons as fbBtn, fileItemButtons as fiBtn } from '../../lib/uiConfig.js';
 
 /* ── tiny icon-button helper ────────────────────────────────────────────────── */
 const IBtn = ({ title, onClick, bg = '#6b7280', children, disabled, style: extra }) => (
@@ -21,10 +22,17 @@ const IBtn = ({ title, onClick, bg = '#6b7280', children, disabled, style: extra
     onClick={(e) => { e.stopPropagation(); onClick?.(e); }}
     disabled={disabled}
     style={{
-      fontSize: 10, padding: '1px 5px', background: bg, color: 'white',
-      border: 'none', borderRadius: 3, cursor: disabled ? 'not-allowed' : 'pointer',
-      lineHeight: '16px', whiteSpace: 'nowrap', ...extra,
+      fontSize: 10, padding: '2px 6px', background: bg, color: 'white',
+      border: 'none', borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer',
+      lineHeight: '16px', whiteSpace: 'nowrap',
+      boxShadow: disabled ? 'none' : shadow.small,
+      transition: 'box-shadow 0.15s, transform 0.15s',
+      ...extra,
     }}
+    onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.boxShadow = shadow.smallHover; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+    onMouseLeave={(e) => { e.currentTarget.style.boxShadow = disabled ? 'none' : shadow.small; e.currentTarget.style.transform = ''; }}
+    onMouseDown={(e) => { if (!disabled) e.currentTarget.style.boxShadow = shadow.pressed; }}
+    onMouseUp={(e) => { if (!disabled) e.currentTarget.style.boxShadow = shadow.smallHover; }}
   >{children}</button>
 );
 
@@ -81,16 +89,16 @@ function FolderNode({
           {dragOverFolder === node.path && showUpload && (
             <span style={{ color: '#3b82f6', fontSize: 10 }}>⬆</span>
           )}
-          <IBtn title="Kopírovat složku" onClick={() => onCopyFolder(node.path)} bg="#6366f1">📋</IBtn>
+          <IBtn title={fiBtn.copyFolder.label} onClick={() => onCopyFolder(node.path)} bg={fiBtn.copyFolder.bg}>{fiBtn.copyFolder.icon}</IBtn>
           {clipboard && (
-            <IBtn title="Vložit sem" onClick={() => onPasteInto(node.path)} bg="#8b5cf6">📌</IBtn>
+            <IBtn title={fiBtn.pasteInto.label} onClick={() => onPasteInto(node.path)} bg={fiBtn.pasteInto.bg}>{fiBtn.pasteInto.icon}</IBtn>
           )}
           {showUpload && (
-            <IBtn title="Nahrát sem" onClick={() => onTriggerFolderUpload(node.path)} bg="#22c55e" disabled={loading}>+</IBtn>
+            <IBtn title={fiBtn.uploadHere.label} onClick={() => onTriggerFolderUpload(node.path)} bg={fiBtn.uploadHere.bg} disabled={loading}>{fiBtn.uploadHere.icon}</IBtn>
           )}
-          <IBtn title="Stáhnout ZIP" onClick={() => onDownloadFolderZip(node.path)} bg="#3b82f6" disabled={loading}>⬇</IBtn>
+          <IBtn title={fiBtn.downloadZip.label} onClick={() => onDownloadFolderZip(node.path)} bg={fiBtn.downloadZip.bg} disabled={loading}>{fiBtn.downloadZip.icon}</IBtn>
           {showDelete && (
-            <IBtn title="Smazat složku" onClick={() => onDeleteFolder(node.path)} bg="#ef4444" disabled={loading}>🗑</IBtn>
+            <IBtn title={fiBtn.deleteFolder.label} onClick={() => onDeleteFolder(node.path)} bg={fiBtn.deleteFolder.bg} disabled={loading}>{fiBtn.deleteFolder.icon}</IBtn>
           )}
         </div>
       </div>
@@ -168,9 +176,9 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
       </div>
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
         {isWorkflow && onDebugWorkflow && (
-          <IBtn title="Debug workflow" onClick={() => onDebugWorkflow(file.path)} bg="#b82b2b">🐛</IBtn>
+          <IBtn title={fiBtn.debugWorkflow.label} onClick={() => onDebugWorkflow(file.path)} bg={fiBtn.debugWorkflow.bg}>{fiBtn.debugWorkflow.icon}</IBtn>
         )}
-        <IBtn title="Kopírovat soubor" onClick={() => onCopy(file.path)} bg="#6366f1">📋</IBtn>
+        <IBtn title={fiBtn.copyFile.label} onClick={() => onCopy(file.path)} bg={fiBtn.copyFile.bg}>{fiBtn.copyFile.icon}</IBtn>
       </div>
     </div>
   );
@@ -271,31 +279,31 @@ export default function FileBrowserPane({
           {title || t('files') || 'Soubory'}
         </h3>
         <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-          <IBtn title={t('refresh') || 'Obnovit'} onClick={onRefresh} bg="#8b5cf6" disabled={loading}>↻</IBtn>
+          <IBtn title={t('refresh') || fbBtn.refresh.label} onClick={onRefresh} bg={fbBtn.refresh.bg} disabled={loading}>{fbBtn.refresh.icon}</IBtn>
           <IBtn
-            title={showPreview ? (t('hidePreview') || 'Skrýt náhled') : (t('showPreview') || 'Náhled')}
+            title={showPreview ? (t('hidePreview') || fbBtn.previewHide.label) : (t('showPreview') || fbBtn.preview.label)}
             onClick={onTogglePreview}
-            bg={showPreview ? '#6b7280' : '#3b82f6'}
+            bg={showPreview ? fbBtn.previewHide.bg : fbBtn.preview.bg}
           >
-            {showPreview ? '◀' : '▶'}
+            {showPreview ? fbBtn.previewHide.icon : fbBtn.preview.icon}
           </IBtn>
           <IBtn
-            title="Nový soubor"
+            title={fbBtn.newFile.label}
             onClick={() => {
               const name = prompt('Název nového souboru (např. folder/query.sql):');
               if (name) onCreateNewFile(name);
             }}
-            bg="#f59e0b" disabled={loading}
+            bg={fbBtn.newFile.bg} disabled={loading}
           >
-            📝
+            {fbBtn.newFile.icon}
           </IBtn>
           {clipboard && (
-            <IBtn title="Vložit do root" onClick={() => handlePaste('')} bg="#8b5cf6">📌 Paste</IBtn>
+            <IBtn title={fbBtn.paste.label} onClick={() => handlePaste('')} bg={fbBtn.paste.bg}>{fbBtn.paste.icon} {fbBtn.paste.label}</IBtn>
           )}
           {showUpload && (
             <>
-              <IBtn title={t('upload') || 'Nahrát'} onClick={() => document.getElementById(uploadId)?.click()} bg="#22c55e" disabled={loading}>
-                + {t('upload') || 'Nahrát'}
+              <IBtn title={t('upload') || fbBtn.upload.label} onClick={() => document.getElementById(uploadId)?.click()} bg={fbBtn.upload.bg} disabled={loading}>
+                {fbBtn.upload.icon} {t('upload') || fbBtn.upload.label}
               </IBtn>
               <input id={uploadId} type="file" style={{ display: 'none' }} onChange={onUpload} />
             </>

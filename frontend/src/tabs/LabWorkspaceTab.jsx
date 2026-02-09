@@ -20,6 +20,7 @@ import LabResultsPane from './LabResultsPane.jsx';
 import LabSettingsPane from './LabSettingsPane.jsx';
 import { useDebugSession } from '../debug/useDebugSession.js';
 import DebugPanel from '../debug/DebugPanel.jsx';
+import { shadow, debugModes as dmCfg, icons } from '../lib/uiConfig.js';
 
 const TABS = [
   { key: 'scripts',  icon: '📜', label: 'Scripts' },
@@ -28,10 +29,10 @@ const TABS = [
 
 // Debug panel placement: 'hidden' | 'right' | 'bottom' | 'popup'
 const DEBUG_MODES = [
-  { key: 'hidden', label: 'Skrýt',       icon: '🚫' },
-  { key: 'right',  label: 'Vpravo',      icon: '◧' },
-  { key: 'bottom', label: 'Pod',         icon: '⬓' },
-  { key: 'popup',  label: 'Nové okno',   icon: '↗' },
+  { key: 'hidden', label: dmCfg.hidden.label, icon: dmCfg.hidden.icon },
+  { key: 'right',  label: dmCfg.right.label,  icon: dmCfg.right.icon },
+  { key: 'bottom', label: dmCfg.bottom.label, icon: dmCfg.bottom.icon },
+  { key: 'popup',  label: dmCfg.popup.label,  icon: dmCfg.popup.icon },
 ];
 
 export default function LabWorkspaceTab({ lab, onLabUpdate }) {
@@ -243,35 +244,43 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           </button>
         ))}
 
-        {/* Debugger placement controls — right after Results tab */}
+        {/* Debugger placement controls — enclosed panel with toggle buttons */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 2,
-          marginLeft: 6,
-          padding: '0 4px',
-          borderLeft: '1px solid #d1d5db',
+          display: 'flex', alignItems: 'center', gap: 0,
+          marginLeft: 8,
+          background: dmCfg.panelBg,
+          border: `1px solid ${dmCfg.panelBorder}`,
+          borderRadius: 6,
+          padding: 2,
+          boxShadow: shadow.small,
         }}>
-          <span style={{ fontSize: 11, color: '#6b7280', marginRight: 4, whiteSpace: 'nowrap' }}>🛠</span>
-          {DEBUG_MODES.map((m) => (
-            <button
-              key={m.key}
-              onClick={() => setDebugMode(debugMode === m.key && m.key !== 'hidden' ? 'hidden' : m.key)}
-              title={m.label}
-              style={{
-                padding: '4px 7px',
-                border: debugMode === m.key ? '1px solid #012345' : '1px solid transparent',
-                borderRadius: 4,
-                background: debugMode === m.key ? '#e0e7ff' : 'transparent',
-                color: debugMode === m.key ? '#3730a3' : '#6b7280',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: debugMode === m.key ? 600 : 400,
-                outline: 'none',
-                lineHeight: 1,
-              }}
-            >
-              {m.icon}
-            </button>
-          ))}
+          <span style={{ fontSize: 11, color: '#6b7280', padding: '0 6px', whiteSpace: 'nowrap' }}>🛠</span>
+          {DEBUG_MODES.map((m) => {
+            const isActive = debugMode === m.key;
+            return (
+              <button
+                key={m.key}
+                onClick={() => setDebugMode(m.key)}
+                title={m.label}
+                style={{
+                  padding: '4px 8px',
+                  border: `1px solid ${isActive ? dmCfg.activeBorder : 'transparent'}`,
+                  borderRadius: 4,
+                  background: isActive ? dmCfg.activeBg : dmCfg.inactiveBg,
+                  color: isActive ? dmCfg.activeColor : dmCfg.inactiveColor,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: isActive ? 600 : 400,
+                  outline: 'none',
+                  lineHeight: 1,
+                  boxShadow: isActive ? shadow.inset : 'none',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {m.icon}
+              </button>
+            );
+          })}
         </div>
 
         {/* Settings tab — pushed to right */}

@@ -11,21 +11,31 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { fetchJSON } from '../lib/fetchJSON.js';
 import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../context/AuthContext';
+import { shadow } from '../lib/uiConfig.js';
 
 export default function LabSettingsPane({ lab, onLabUpdate }) {
   const { t } = useLanguage();
   const toast = useToast();
+  const { user } = useAuth();
 
   const [name, setName] = useState(lab.name || '');
   const [description, setDescription] = useState(lab.description || '');
   const [saving, setSaving] = useState(false);
-  const [shareUserId, setShareUserId] = useState('');
+  const [users, setUsers] = useState([]);
 
   // Sync from prop when lab changes externally
   useEffect(() => {
     setName(lab.name || '');
     setDescription(lab.description || '');
   }, [lab.name, lab.description]);
+
+  // Load all users for sharing checkboxes
+  useEffect(() => {
+    fetchJSON('/api/v1/users')
+      .then((data) => setUsers(data?.items || []))
+      .catch(() => setUsers([]));
+  }, []);
 
   const dirty = name !== (lab.name || '') || description !== (lab.description || '');
 
@@ -48,28 +58,21 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
     }
   }, [lab.id, name, description, t, toast, onLabUpdate]);
 
-  // ---- Share ----
-  const handleShare = useCallback(async () => {
-    if (!shareUserId.trim()) return;
+  // ---- Share (toggle) ----
+  const toggleShare = useCallback(async (targetUserId, isChecked) => {
     try {
-      const updated = await fetchJSON(`/api/v1/labs/${lab.id}/share`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: shareUserId.trim() }),
-      });
-      toast.success(`Sdíleno s uživatelem #${shareUserId}`);
-      setShareUserId('');
-      onLabUpdate?.(updated);
-    } catch (err) {
-      toast.error(`Chyba: ${err.message || err}`);
-    }
-  }, [lab.id, shareUserId, toast, onLabUpdate]);
-
-  // ---- Unshare ----
-  const handleUnshare = useCallback(async (userId) => {
-    try {
-      const updated = await fetchJSON(`/api/v1/labs/${lab.id}/share/${userId}`, { method: 'DELETE' });
-      toast.success(`Sdílení s uživatelem #${userId} zrušeno`);
+      let updated;
+      if (isChecked) {
+        updated = await fetchJSON(`/api/v1/labs/${lab.id}/share`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: targetUserId }),
+        });
+      } else {
+        updated = await fetchJSON(`/api/v1/labs/${lab.id}/share/${targetUserId}`, {
+          method: 'DELETE',
+        });
+      }
       onLabUpdate?.(updated);
     } catch (err) {
       toast.error(`Chyba: ${err.message || err}`);
@@ -108,7 +111,7 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
           className="btn btn-add"
           onClick={handleSave}
           disabled={!dirty || saving}
-          style={{ padding: '8px 20px' }}
+          style={{ padding: '8px 20px', boxShadow: dirty && !saving ? shadow.normal : 'none' }}
         >
           {saving ? '⏳' : '💾'} {t('save') || 'Uložit'}
         </button>
@@ -126,39 +129,32 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
 
       <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb' }} />
 
-      {/* Sharing */}
+      {/* Sharing — checkboxes for all users */}
       <div>
         <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 600 }}>👥 {t('sharing') || 'Sdílení'}</h3>
 
-        {lab.sharedWith?.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-            {lab.sharedWith.map((uid) => (
-              <div key={uid} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb' }}>
-                <span style={{ flex: 1, fontSize: 13 }}>Uživatel #{uid}</span>
-                <button
-                  onClick={() => handleUnshare(uid)}
-                  style={{ padding: '3px 8px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}
-                >
-                  ✕ Odebrat
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p style={{ color: '#9ca3af', fontSize: 13, margin: '0 0 12px' }}>Laboratoř není sdílena s nikým.</p>
-        )}
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            placeholder="User ID"
-            value={shareUserId}
-            onChange={(e) => setShareUserId(e.target.value)}
-            style={{ ...fieldStyle, width: 120 }}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleShare(); }}
-          />
-          <button className="btn btn-edit" onClick={handleShare} disabled={!shareUserId.trim()} style={{ padding: '8px 14px' }}>
-            + {t('share') || 'Sdílet'}
-          </button>
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto', maxHeight: 280 }}>
+          {users.filter((u) => String(u.id) !== String(user?.id)).map((u) => {
+            const checked =
+              Array.isArray(lab.sharedWith) &&
+              lab.sharedWith.map(String).includes(String(u.id));
+            return (
+              <label
+                key={u.id}
+                style={{ display: 'flex', gap: 8, padding: '6px 10px', borderBottom: '1px solid #f3f4f6', cursor: 'pointer', fontSize: 13, alignItems: 'center' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => toggleShare(u.id, e.target.checked)}
+                />
+                <span>{u.firstName} {u.lastName} ({u.email})</span>
+              </label>
+            );
+          })}
+          {users.filter((u) => String(u.id) !== String(user?.id)).length === 0 && (
+            <div style={{ padding: 12, color: '#9ca3af', fontSize: 13 }}>Žádní další uživatelé.</div>
+          )}
         </div>
       </div>
     </div>
