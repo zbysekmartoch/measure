@@ -145,12 +145,14 @@ export class DapClient {
         url = `${proto}//${location.host}${url}`;
       }
 
+      console.log(`[DapClient] Connecting to ${url}`);
       this._ws = new WebSocket(url);
       this._ws.binaryType = 'arraybuffer';
 
       this._parser = new DapParser((msg) => this._handleMessage(msg));
 
       this._ws.onopen = () => {
+        console.log('[DapClient] WebSocket open');
         this._connected = true;
         this._emit('connected', null);
         resolve();
@@ -159,10 +161,12 @@ export class DapClient {
       this._ws.onmessage = (ev) => {
         const data = ev.data;
         const chunk = data instanceof ArrayBuffer ? new Uint8Array(data) : ENCODER.encode(data);
+        console.log(`[DapClient] WS received ${chunk.length} bytes`);
         this._parser.feed(chunk);
       };
 
       this._ws.onclose = (ev) => {
+        console.log(`[DapClient] WebSocket closed code=${ev.code} reason=${ev.reason}`);
         this._connected = false;
         this._emit('disconnected', { code: ev.code, reason: ev.reason });
         // Reject all pending requests
@@ -173,6 +177,7 @@ export class DapClient {
       };
 
       this._ws.onerror = (ev) => {
+        console.error('[DapClient] WebSocket error:', ev);
         this._emit('error', ev);
         if (!this._connected) reject(new Error('WebSocket connection failed'));
       };
@@ -196,6 +201,7 @@ export class DapClient {
       throw new Error('WebSocket not connected');
     }
     const encoded = encodeMessage(msg);
+    console.log(`[DapClient] Sending ${encoded.length} bytes: ${msg.type}/${msg.command || msg.event || '?'} seq=${msg.seq}`);
     this._ws.send(encoded);
   }
 
@@ -234,6 +240,7 @@ export class DapClient {
   }
 
   _handleMessage(msg) {
+    console.log(`[DapClient] Received: ${msg.type}/${msg.command || msg.event || '?'} seq=${msg.seq} request_seq=${msg.request_seq || '-'}`, msg.success !== undefined ? `success=${msg.success}` : '');
     if (msg.type === 'response') {
       const pending = this._pending.get(msg.request_seq);
       if (pending) {

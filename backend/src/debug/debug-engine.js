@@ -154,10 +154,14 @@ export async function startDebugSession(opts) {
 
   const pythonCmd = opts.pythonCommand || 'python';
 
-  // python -Xfrozen_modules=off -m debugpy --listen 127.0.0.1:<port> --wait-for-client <script> [args...]
+  // python -Xfrozen_modules=off -m debugpy --log-to-stderr --listen 127.0.0.1:<port> --wait-for-client <script> [args...]
+  // --log-to-stderr makes debugpy print lifecycle messages to stderr, including
+  // "Adapter is accepting incoming client connections on 127.0.0.1:<port>"
+  // which we watch for to know when DAP is truly ready.
   const spawnArgs = [
     '-Xfrozen_modules=off',
     '-m', 'debugpy',
+    '--log-to-stderr',
     '--listen', `127.0.0.1:${port}`,
     '--wait-for-client',
     opts.scriptAbsolutePath,
@@ -178,7 +182,7 @@ export async function startDebugSession(opts) {
 
   debugState.process = child;
   debugState.pid = child.pid;
-  debugState.status = 'waiting_for_client';
+  // Don't set waiting_for_client yet — wait until debugpy is actually ready
   emitStatus();
 
   child.stdout.on('data', async (data) => {
@@ -190,13 +194,22 @@ export async function startDebugSession(opts) {
     }
   });
 
+  // stderr handler needs special treatment — debugpy's own log messages
+  // (from --log-to-stderr) go here mixed with script errors.
+  // We filter debugpy log lines (start with letter + "+" like "I+00000.123:")
+  // and only forward non-debugpy lines to the error file.
   child.stderr.on('data', async (data) => {
     const text = data.toString();
     debugState.stderr += text;
     debugState.events.emit('stderr', text);
-    // debugpy prints its own messages to stderr — also route to error log
+
+    // Filter: only write non-debugpy lines to error log
     if (opts.errorFile) {
-      try { await fs.appendFile(opts.errorFile, text); } catch { /* ignore */ }
+      const lines = text.split('\n');
+      const nonDebugpy = lines.filter(l => !isDebugpyLogLine(l)).join('\n');
+      if (nonDebugpy.trim()) {
+        try { await fs.appendFile(opts.errorFile, nonDebugpy); } catch { /* ignore */ }
+      }
     }
   });
 
@@ -214,12 +227,13 @@ export async function startDebugSession(opts) {
     debugState.events.emit('exit', { code, signal });
   });
 
-  // Wait for debugpy to print its "listening" message to stderr.
-  // We must NOT make a TCP connection to the port — debugpy in --wait-for-client
-  // mode treats the first TCP connection as the DAP client. If we connect and
-  // immediately close, debugpy loses its one client slot.
+  // Wait for debugpy's "Adapter is accepting incoming client connections" message.
+  // We MUST NOT make any TCP connection to the port — debugpy treats the first
+  // connection as the DAP client. Only the real DAP proxy should connect.
   await waitForDebugpyReady(child, port, 15000);
-  console.log(`[debug-engine] debugpy ready on 127.0.0.1:${port}`);
+  debugState.status = 'waiting_for_client';
+  emitStatus();
+  console.log(`[debug-engine] debugpy ready on 127.0.0.1:${port}, waiting for DAP client`);
 
   return { port, pid: child.pid };
 }
@@ -236,12 +250,23 @@ export function endDebugSession() {
 }
 
 /**
- * Wait for debugpy to be ready by monitoring its stderr output.
- * debugpy prints messages like:
- *   "0.00s - ..." (warnings)
- * and the process stays alive waiting for a client.
- * We wait until stderr output appears OR we can probe the port is open
- * using a low-level socket test that resets immediately (RST, no data).
+ * Check if a stderr line is a debugpy internal log message.
+ * debugpy --log-to-stderr lines look like:
+ *   "I+00000.123: ..."  or  "D+00000.123: ..."  or  "W+00000.123: ..."
+ * or continuation lines indented with spaces.
+ */
+function isDebugpyLogLine(line) {
+  return /^[A-Z]\+\d+\.\d+:/.test(line) || /^\s{2,}/.test(line);
+}
+
+/**
+ * Wait for debugpy to be ready by watching its stderr output for the
+ * "Adapter is accepting incoming client connections" message.
+ *
+ * This is the ONLY reliable way to know debugpy's DAP server is ready
+ * without consuming its one-shot client slot via a TCP connection.
+ *
+ * Requires --log-to-stderr in the debugpy spawn args.
  *
  * @param {import('child_process').ChildProcess} child
  * @param {number} port
@@ -249,57 +274,41 @@ export function endDebugSession() {
  */
 function waitForDebugpyReady(child, port, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
-    const deadline = Date.now() + timeoutMs;
     let resolved = false;
+    let stderrAccum = '';
 
-    // Strategy 1: watch stderr for debugpy output (any output means it started)
-    const onStderr = () => {
-      if (resolved) return;
-      // debugpy has printed something — give it a tiny bit more time to bind
-      setTimeout(() => {
-        if (!resolved) { resolved = true; resolve(); }
-      }, 200);
-    };
-    child.stderr.once('data', onStderr);
-
-    // Strategy 2: poll with SO_LINGER(0) to send RST instead of FIN
-    // This avoids consuming debugpy's client slot
-    function probePort() {
-      if (resolved) return;
-      if (Date.now() > deadline) {
-        child.stderr.off('data', onStderr);
-        return reject(new Error(`Timeout waiting for debugpy on port ${port}`));
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        child.stderr.off('data', onData);
+        console.error(`[debug-engine] Timeout waiting for debugpy ready (accumulated stderr: ${stderrAccum.length} chars)`);
+        // Don't reject — resolve anyway, the DAP client will report the real error
+        resolve();
       }
-      const sock = new net.Socket();
-      // Set SO_LINGER to 0 so close sends RST, not FIN+ACK.
-      // This way debugpy doesn't see a proper client connection.
-      sock.on('connect', () => {
-        // Port is open! Use setNoDelay and destroy with RST
-        try {
-          sock.setNoDelay(true);
-          sock.destroy();
-        } catch { /* ignore */ }
-        if (!resolved) {
-          resolved = true;
-          child.stderr.off('data', onStderr);
-          resolve();
-        }
-      });
-      sock.on('error', () => {
-        sock.destroy();
-        setTimeout(probePort, 150);
-      });
-      sock.connect(port, '127.0.0.1');
+    }, timeoutMs);
+
+    function onData(data) {
+      if (resolved) return;
+      const text = data.toString();
+      stderrAccum += text;
+
+      // Look for the magic line from debugpy's adapter
+      if (stderrAccum.includes('Adapter is accepting incoming client connections')) {
+        resolved = true;
+        clearTimeout(timer);
+        child.stderr.off('data', onData);
+        console.log(`[debug-engine] Detected debugpy ready message`);
+        resolve();
+      }
     }
 
-    // Start probing after a small initial delay
-    setTimeout(probePort, 300);
+    child.stderr.on('data', onData);
 
-    // Strategy 3: if process exits before ready, reject
     child.once('exit', () => {
       if (!resolved) {
         resolved = true;
-        child.stderr.off('data', onStderr);
+        clearTimeout(timer);
+        child.stderr.off('data', onData);
         reject(new Error('debugpy process exited before becoming ready'));
       }
     });
