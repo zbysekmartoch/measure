@@ -115,62 +115,44 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
         if (w) {
           popupRef.current = w;
           w.document.title = `🛠 Debugger — ${lab.name}`;
-          // Copy stylesheets from parent window
-          const parentStyles = document.querySelectorAll('style, link[rel="stylesheet"]');
-          parentStyles.forEach(s => {
-            try { w.document.head.appendChild(s.cloneNode(true)); } catch { /* ignore */ }
-          });
+          // Write a clean document so it doesn't show about:blank content
+          w.document.open();
+          w.document.write('<!DOCTYPE html><html><head></head><body></body></html>');
+          w.document.close();
           // Add base styles
           const style = w.document.createElement('style');
           style.textContent = 'body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#1e1e1e;color:#d4d4d4;}';
           w.document.head.appendChild(style);
           // Create portal container
-          let container = w.document.getElementById('debug-root');
-          if (!container) {
-            container = w.document.createElement('div');
-            container.id = 'debug-root';
-            container.style.cssText = 'height:100vh;overflow:auto;padding:6px;';
-            w.document.body.innerHTML = '';
-            w.document.body.appendChild(container);
-          }
+          const container = w.document.createElement('div');
+          container.id = 'debug-root';
+          container.style.cssText = 'height:100vh;overflow:auto;padding:6px;';
+          w.document.body.appendChild(container);
           setPopupContainer(container);
           w.addEventListener('beforeunload', () => {
-            popupRef.current = null;
+            // Clear the portal BEFORE the window is destroyed
+            // so React can unmount cleanly
             setPopupContainer(null);
+            popupRef.current = null;
             setDebugMode('hidden');
           });
         }
       }
     } else {
       if (popupRef.current && !popupRef.current.closed) {
-        popupRef.current.close();
+        // First clear the portal so React unmounts
+        setPopupContainer(null);
+        // Then close the window on next tick
+        const w = popupRef.current;
+        popupRef.current = null;
+        setTimeout(() => { try { w.close(); } catch { /* ignore */ } }, 0);
+      } else {
+        popupRef.current = null;
+        setPopupContainer(null);
       }
-      popupRef.current = null;
-      setPopupContainer(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debugMode]);
-
-  // Re-render popup content on debug state changes
-  useEffect(() => {
-    if (debugMode !== 'popup' || !popupRef.current || popupRef.current.closed) return;
-    const root = popupRef.current.document.getElementById('debug-root');
-    if (!root) return;
-    root.innerHTML = `
-      <div style="padding:10px;font-size:13px;">
-        <div style="margin-bottom:10px;font-weight:bold;font-size:15px;">🛠 Debugger — ${lab.name}</div>
-        <div style="margin-bottom:6px;">Status: <b style="color:${debug.status === 'stopped' ? '#f87171' : debug.status === 'running' ? '#4ade80' : '#d4d4d4'}">${debug.status}</b></div>
-        ${debug.debugInfo ? `<div style="font-size:11px;color:#888;margin-bottom:8px;">Script: ${debug.debugInfo.scriptPath || '—'} | Port: ${debug.debugInfo.port || '—'}</div>` : ''}
-        ${debug.stoppedLocation ? `<div style="margin-bottom:8px;color:#ffcc00;">⏸ Stopped at ${debug.stoppedLocation.name || debug.stoppedLocation.file || '?'}:${debug.stoppedLocation.line}</div>` : ''}
-        <div style="margin-bottom:6px;font-weight:600;">Call Stack (${debug.callStack.length})</div>
-        ${debug.callStack.map((f) => `<div style="padding:2px 0;font-family:monospace;font-size:12px;${f.id === debug.selectedFrameId ? 'color:#569cd6;' : ''}">${f.name} — ${f.source?.name || '?'}:${f.line}</div>`).join('')}
-        <div style="margin-top:10px;margin-bottom:6px;font-weight:600;">Variables (${debug.variables.length})</div>
-        ${debug.variables.map(v => `<div style="padding:1px 0;font-family:monospace;font-size:12px;"><span style="color:#9cdcfe;">${v.name}</span> = <span style="color:#b5cea8;">${v.value}</span></div>`).join('')}
-        ${debug.error ? `<div style="margin-top:10px;padding:6px;background:#7f1d1d;color:#fecaca;border-radius:4px;font-size:12px;">⚠ ${debug.error}</div>` : ''}
-        <div style="margin-top:12px;color:#555;font-size:11px;">Ovládání probíhá v hlavním okně.</div>
-      </div>
-    `;
-  });
 
   // ---- Splitter drag handling ----
   const onSplitterMouseDown = useCallback((e) => {
