@@ -23,9 +23,11 @@ export function attachDapProxy(server) {
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    console.log(`[dap-proxy] Upgrade request for ${url.pathname}`);
     if (url.pathname !== '/dap') return; // let other upgrades pass through
 
     wss.handleUpgrade(req, socket, head, (ws) => {
+      console.log('[dap-proxy] WebSocket upgrade complete');
       wss.emit('connection', ws, req);
     });
   });

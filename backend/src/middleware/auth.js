@@ -2,13 +2,19 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 
 export const authenticateToken = (req, res, next) => {
+  // Accept token from Authorization header or from ?token= query param (for SSE/EventSource)
   const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Chybí autorizační token' });
+  let token = null;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7);
+  } else if (req.query?.token) {
+    token = req.query.token;
   }
 
-  const token = authHeader.slice(7);
+  if (!token) {
+    return res.status(401).json({ error: 'Chybí autorizační token' });
+  }
   
   try {
     const decoded = jwt.verify(token, config.jwtSecret);

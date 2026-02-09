@@ -20,10 +20,9 @@ const router = Router();
  */
 router.get('/status', (req, res) => {
   const status = getDebugStatus();
-  // Compute the WS URL for the DAP proxy
-  const host = req.headers.host || 'localhost:3000';
-  const protocol = req.protocol === 'https' ? 'wss' : 'ws';
-  status.wsUrl = status.active ? `${protocol}://${host}/dap` : null;
+  // Return relative /dap path — the frontend will resolve it against current origin.
+  // This works both in dev (Vite proxy) and production.
+  status.wsUrl = status.active ? '/dap' : null;
   res.json(status);
 });
 

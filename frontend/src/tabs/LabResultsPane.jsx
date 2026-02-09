@@ -94,17 +94,28 @@ export default function LabResultsPane({ lab, debug, debugVisible = false }) {
       });
       toast.success(t('debugAnalysisStarted') || 'Debug workflow spuštěn');
 
-      // Give backend a moment to start the debug session, then auto-attach
-      setTimeout(async () => {
-        if (debug) {
-          const info = await debug.pollStatus();
-          if (info?.active) {
-            await debug.attach();
-          }
-        }
-      }, 2000);
+      // Refresh results list immediately
+      loadResults();
 
-      await loadResults();
+      // Poll backend until debug session is ready, then auto-attach
+      if (debug && debugVisible) {
+        const maxAttempts = 20;
+        const interval = 500; // ms
+        let attached = false;
+        for (let attempt = 0; attempt < maxAttempts && !attached; attempt++) {
+          await new Promise(r => setTimeout(r, interval));
+          try {
+            const info = await debug.pollStatus();
+            if (info?.active && info?.status === 'waiting_for_client') {
+              await debug.attach();
+              attached = true;
+            }
+          } catch { /* retry */ }
+        }
+        if (!attached) {
+          console.warn('[LabResultsPane] Could not auto-attach debugger after', maxAttempts, 'attempts');
+        }
+      }
     } catch (err) {
       toast.error(`${t('errorStartingDebugAnalysis') || 'Chyba'}: ${err.message || err}`);
     } finally {
