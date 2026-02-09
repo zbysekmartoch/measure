@@ -14,6 +14,7 @@
  *   onLabUpdate – callback(updatedLab) when settings change
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import LabScriptsPane from './LabScriptsPane.jsx';
 import LabResultsPane from './LabResultsPane.jsx';
 import LabSettingsPane from './LabSettingsPane.jsx';
@@ -48,6 +49,10 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
   // ---- F9 handler ref (set by LabResultsPane) ----
   const runDebugRef = useRef(null);
 
+  // ---- Keep fresh refs for keyboard handler ----
+  const debugRef = useRef(debug);
+  debugRef.current = debug;
+
   // ---- Blinking state ----
   const [blinkScripts, setBlinkScripts] = useState(false);
 
@@ -66,11 +71,15 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
       // Don't intercept if user is typing in an input/textarea/select
       const tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // Don't intercept if inside Monaco editor (contentEditable or textarea)
+      const isMonaco = e.target.closest?.('.monaco-editor');
+      if (isMonaco) return;
 
+      const d = debugRef.current;
       switch (e.key) {
         case 'F8':
           e.preventDefault();
-          if (debug.status === 'stopped') debug.doContinue();
+          if (d.status === 'stopped') d.doContinue();
           break;
         case 'F9':
           e.preventDefault();
@@ -78,36 +87,56 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           break;
         case 'F10':
           e.preventDefault();
-          if (debug.status === 'stopped') debug.doNext();
+          if (d.status === 'stopped') d.doNext();
           break;
         case 'F11':
           e.preventDefault();
           if (e.shiftKey) {
-            if (debug.status === 'stopped') debug.doStepOut();
+            if (d.status === 'stopped') d.doStepOut();
           } else {
-            if (debug.status === 'stopped') debug.doStepIn();
+            if (d.status === 'stopped') d.doStepIn();
           }
           break;
         default:
           break;
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [debug]);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, []);
 
   // ---- Popup window handling ----
+  const [popupContainer, setPopupContainer] = useState(null);
+
   useEffect(() => {
     if (debugMode === 'popup') {
       if (!popupRef.current || popupRef.current.closed) {
-        const w = window.open('', `debug_${lab.id}`, 'width=440,height=700,resizable=yes');
+        const w = window.open('', `debug_${lab.id}`, 'width=480,height=700,resizable=yes');
         if (w) {
           popupRef.current = w;
-          w.document.title = `🐛 Debugger — ${lab.name}`;
-          w.document.head.innerHTML = '<style>body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#1e1e1e;color:#d4d4d4;}</style>';
-          w.document.body.innerHTML = '<div id="debug-root" style="height:100vh;overflow:auto;padding:6px;"></div>';
+          w.document.title = `🛠 Debugger — ${lab.name}`;
+          // Copy stylesheets from parent window
+          const parentStyles = document.querySelectorAll('style, link[rel="stylesheet"]');
+          parentStyles.forEach(s => {
+            try { w.document.head.appendChild(s.cloneNode(true)); } catch { /* ignore */ }
+          });
+          // Add base styles
+          const style = w.document.createElement('style');
+          style.textContent = 'body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#1e1e1e;color:#d4d4d4;}';
+          w.document.head.appendChild(style);
+          // Create portal container
+          let container = w.document.getElementById('debug-root');
+          if (!container) {
+            container = w.document.createElement('div');
+            container.id = 'debug-root';
+            container.style.cssText = 'height:100vh;overflow:auto;padding:6px;';
+            w.document.body.innerHTML = '';
+            w.document.body.appendChild(container);
+          }
+          setPopupContainer(container);
           w.addEventListener('beforeunload', () => {
             popupRef.current = null;
+            setPopupContainer(null);
             setDebugMode('hidden');
           });
         }
@@ -117,6 +146,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
         popupRef.current.close();
       }
       popupRef.current = null;
+      setPopupContainer(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debugMode]);
@@ -128,7 +158,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
     if (!root) return;
     root.innerHTML = `
       <div style="padding:10px;font-size:13px;">
-        <div style="margin-bottom:10px;font-weight:bold;font-size:15px;">🐛 Debugger — ${lab.name}</div>
+        <div style="margin-bottom:10px;font-weight:bold;font-size:15px;">🛠 Debugger — ${lab.name}</div>
         <div style="margin-bottom:6px;">Status: <b style="color:${debug.status === 'stopped' ? '#f87171' : debug.status === 'running' ? '#4ade80' : '#d4d4d4'}">${debug.status}</b></div>
         ${debug.debugInfo ? `<div style="font-size:11px;color:#888;margin-bottom:8px;">Script: ${debug.debugInfo.scriptPath || '—'} | Port: ${debug.debugInfo.port || '—'}</div>` : ''}
         ${debug.stoppedLocation ? `<div style="margin-bottom:8px;color:#ffcc00;">⏸ Stopped at ${debug.stoppedLocation.name || debug.stoppedLocation.file || '?'}:${debug.stoppedLocation.line}</div>` : ''}
@@ -238,7 +268,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           padding: '0 4px',
           borderLeft: '1px solid #d1d5db',
         }}>
-          <span style={{ fontSize: 11, color: '#6b7280', marginRight: 4, whiteSpace: 'nowrap' }}>🐛</span>
+          <span style={{ fontSize: 11, color: '#6b7280', marginRight: 4, whiteSpace: 'nowrap' }}>🛠</span>
           {DEBUG_MODES.map((m) => (
             <button
               key={m.key}
@@ -344,6 +374,28 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           </div>
         )}
       </div>
+
+      {/* Popup portal for debug panel */}
+      {debugMode === 'popup' && popupContainer && createPortal(
+        <DebugPanel
+          status={debug.status}
+          debugInfo={debug.debugInfo}
+          callStack={debug.callStack}
+          variables={debug.variables}
+          selectedFrameId={debug.selectedFrameId}
+          output={debug.output}
+          error={debug.error}
+          onAttach={debug.attach}
+          onDetach={debug.detach}
+          onContinue={debug.doContinue}
+          onNext={debug.doNext}
+          onStepIn={debug.doStepIn}
+          onStepOut={debug.doStepOut}
+          onSelectFrame={debug.selectFrame}
+          onExpandVariable={debug.expandVariable}
+        />,
+        popupContainer
+      )}
 
       <style>{`
         @keyframes tabBlink {

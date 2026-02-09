@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import archiver from 'archiver';
 import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth } from '../utils/file-manager.js';
-import { startDebugSession, getDebugStatus, getDebugEvents } from '../debug/debug-engine.js';
+import { startDebugSession, getDebugStatus, getDebugEvents, endDebugSession } from '../debug/debug-engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -548,6 +548,47 @@ router.post('/:id/results/:resultId/files/upload', async (req, res, next) => {
   }
 });
 
+// ─── Abort / Reset a running result ────────────────────────────────────────────
+
+/**
+ * POST /api/v1/labs/:id/results/:resultId/abort
+ *
+ * Resets a running/pending result to "aborted" status.
+ * Kills any active debug session and updates progress.json.
+ */
+router.post('/:id/results/:resultId/abort', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const resultId = req.params.resultId;
+    const resultDir = getSecurePath(path.join(labPath, 'results'), resultId);
+    if (!resultDir) return res.status(400).json({ error: 'Invalid result id' });
+
+    // Kill debug session if active
+    try {
+      const debugStatus = getDebugStatus();
+      if (debugStatus.active && String(debugStatus.resultId) === String(resultId)) {
+        endDebugSession();
+      }
+    } catch { /* ignore */ }
+
+    // Update progress.json
+    const progressPath = path.join(resultDir, 'progress.json');
+    let progress = {};
+    try {
+      progress = JSON.parse(await fs.readFile(progressPath, 'utf-8'));
+    } catch { /* no progress yet */ }
+
+    progress.status = 'aborted';
+    progress.completedAt = new Date().toISOString();
+    progress.updatedAt = new Date().toISOString();
+    await fs.writeFile(progressPath, JSON.stringify(progress, null, 2), 'utf-8');
+
+    res.json({ ok: true, status: 'aborted' });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Lab Result Debug Execution ────────────────────────────────────────────────
 
 /**
@@ -717,7 +758,7 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
         const ext = path.extname(step).toLowerCase();
         const isPython = ext === '.py';
         const scriptAbsPath = path.join(scriptsRoot, step);
-        const shouldDebug = isPython && scriptsWithBreakpoints.has(step);
+        const shouldDebug = isPython && debugVisible;
 
         await writeProgress(i + 1, step, 'running');
         await fs.appendFile(logFile, `\n[${new Date().toISOString()}] Step ${i + 1}/${activeSteps.length}: ${step}\n`);

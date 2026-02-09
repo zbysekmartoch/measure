@@ -123,6 +123,26 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     }
   }, [selectedResult, lab.id, t, toast, loadResults, debug, debugVisible]);
 
+  // ---- Reset (abort) a running/pending result ----
+  const handleReset = useCallback(async () => {
+    if (!selectedResult) return;
+    try {
+      // Stop debug session if active
+      if (debug) {
+        try { await debug.detach(); } catch { /* ignore */ }
+      }
+      // Update progress.json to aborted
+      await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResult.id}/abort`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      toast.success('Výsledek resetován');
+      loadResults();
+    } catch (err) {
+      toast.error(`Reset failed: ${err.message || err}`);
+    }
+  }, [selectedResult, lab.id, toast, loadResults, debug]);
+
   // Expose handleRunDebug for F9 keyboard shortcut (via ref from parent)
   useEffect(() => {
     if (runDebugRef) runDebugRef.current = handleRunDebug;
@@ -143,12 +163,13 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
       case 'failed':    return { background: '#fee2e2', color: '#991b1b' };
       case 'pending':   return { background: '#fef3c7', color: '#92400e' };
       case 'ready':     return { background: '#e0e7ff', color: '#3730a3' };
+      case 'aborted':   return { background: '#fef3c7', color: '#92400e' };
       default:          return { background: '#f3f4f6', color: '#374151' };
     }
   };
 
   const statusLabel = (status) => {
-    const map = { completed: 'Dokončeno', running: 'Běží', failed: 'Chyba', pending: 'Čeká', ready: 'Připraveno', unknown: '?' };
+    const map = { completed: 'Dokončeno', running: 'Běží', failed: 'Chyba', pending: 'Čeká', ready: 'Připraveno', aborted: 'Přerušeno', unknown: '?' };
     return t(`status_${status}`) || map[status] || status;
   };
 
@@ -187,20 +208,35 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
           </select>
         </div>
 
-        {/* Run Debug */}
-        <button
-          onClick={handleRunDebug}
-          disabled={!canRun}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
-            background: canRun ? '#b82b2b' : '#9ca3af',
-            color: 'white', border: 'none', borderRadius: 6,
-            cursor: canRun ? 'pointer' : 'not-allowed',
-            fontWeight: 500, fontSize: 13,
-          }}
-        >
-          {debugRunning ? '⏳' : debugVisible ? '�' : '▶'} {debugVisible ? 'Debug' : 'Run'} <span style={{fontSize:10,opacity:0.6}}>F9</span>
-        </button>
+        {/* Run Debug / Reset */}
+        {isPending ? (
+          <button
+            onClick={handleReset}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+              background: '#92400e',
+              color: 'white', border: 'none', borderRadius: 6,
+              cursor: 'pointer',
+              fontWeight: 500, fontSize: 13,
+            }}
+          >
+            ⏹ Reset
+          </button>
+        ) : (
+          <button
+            onClick={handleRunDebug}
+            disabled={!canRun}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+              background: canRun ? '#b82b2b' : '#9ca3af',
+              color: 'white', border: 'none', borderRadius: 6,
+              cursor: canRun ? 'pointer' : 'not-allowed',
+              fontWeight: 500, fontSize: 13,
+            }}
+          >
+            {debugRunning ? '⏳' : debugVisible ? '🛠' : '▶'} {debugVisible ? 'Debug' : 'Run'} <span style={{fontSize:10,opacity:0.6}}>F9</span>
+          </button>
+        )}
 
         {/* Status badge */}
         {selectedResult && (
