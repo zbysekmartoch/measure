@@ -10,7 +10,7 @@
  *   lab   – lab metadata { id, name, … }
  *   debug – debug session object from useDebugSession() (optional, from LabWorkspaceTab)
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import SqlEditorTab from './SqlEditorTab.jsx';
 import Editor from '@monaco-editor/react';
