@@ -21,7 +21,8 @@ import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
 import Editor from '@monaco-editor/react';
 import { appConfig } from '../lib/appConfig.js';
-import { shadow, resultButtons as rbtn } from '../lib/uiConfig.js';
+import { shadow, resultButtons as rbtn, monacoReadOnly } from '../lib/uiConfig.js';
+import ZoomableImage from '../components/ZoomableImage.jsx';
 
 export default function LabResultsPane({ lab, debug, debugVisible = false, runDebugRef }) {
   const { t } = useLanguage();
@@ -328,7 +329,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
                 cursor: 'pointer', outline: 'none',
               }}
             >
-              📁 Browser
+              📁 File browser
             </button>
             {openFiles.map((file) => {
               const isActive = activeSubTab === `file:${file.path}`;
@@ -396,17 +397,14 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
               }}
             >
               {file.isImage ? (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', borderRadius: 6, border: '1px solid #e5e7eb' }}>
-                  <img
-                    src={`${fileManagerApiPath}/download?file=${encodeURIComponent(file.path)}&token=${localStorage.getItem('authToken')}`}
-                    alt={file.name}
-                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                  />
-                </div>
+                <ZoomableImage
+                  src={`${fileManagerApiPath}/download?file=${encodeURIComponent(file.path)}&inline=1&token=${localStorage.getItem('authToken')}`}
+                  alt={file.name}
+                />
               ) : file.isPdf ? (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 6, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
                   <embed
-                    src={`${fileManagerApiPath}/download?file=${encodeURIComponent(file.path)}&token=${localStorage.getItem('authToken')}`}
+                    src={`${fileManagerApiPath}/download?file=${encodeURIComponent(file.path)}&inline=1&token=${localStorage.getItem('authToken')}`}
                     type="application/pdf" style={{ flex: 1, width: '100%' }}
                   />
                 </div>
@@ -417,7 +415,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
                     language={file.language}
                     value={file.content}
                     theme={editorTheme}
-                    options={{ readOnly: true, minimap: { enabled: true }, fontSize: 13, wordWrap: 'on', automaticLayout: true }}
+                    options={monacoReadOnly}
                   />
                 </div>
               )}

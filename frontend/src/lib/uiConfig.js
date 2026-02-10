@@ -36,6 +36,7 @@ export const fileBrowserButtons = {
 // ─── File browser item (row) buttons ────────────────────────────────────────
 
 export const fileItemButtons = {
+  openInTab:    { icon: '📑', bg: '#4f46e5', label: 'Open in tab' },
   copyFile:     { icon: 'C', bg: '#000916', label: 'Copy file' },
   copyFolder:   { icon: 'C', bg: '#000916', label: 'Copy folder' },
   pasteInto:    { icon: 'P', bg: '#002a69', label: 'Paste here' },
@@ -166,4 +167,70 @@ export const icons = {
   popOut: '⧉',
   close: '×',
   enter: '↗',
+};
+
+// ─── Monaco Editor enhanced options ─────────────────────────────────────────
+
+/**
+ * Shared Monaco editor options for a rich editing experience.
+ * Use `{ ...monacoDefaults }` as a base and override per-instance as needed.
+ *
+ * Features enabled:
+ *   - Ctrl+Scroll to zoom the editor font
+ *   - Smooth scrolling & cursor blinking
+ *   - Bracket pair colorization & guides
+ *   - Sticky scroll (shows current scope at top)
+ *   - Minimap with proportional sizing
+ *   - Linked editing for rename-like refactors
+ *   - Cursor smooth animation
+ *   - Auto-indent & format on paste
+ *   - Folding with highlight
+ *   - Inlay hints for parameter names
+ */
+export const monacoDefaults = {
+  fontSize: 13,
+  fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Monaco, 'Courier New', monospace",
+  fontLigatures: true,
+  wordWrap: 'on',
+  automaticLayout: true,
+  tabSize: 2,
+  minimap: { enabled: true, scale: 1, showSlider: 'mouseover', renderCharacters: false },
+  // Zoom
+  mouseWheelZoom: true,
+  // Scrolling
+  smoothScrolling: true,
+  scrollBeyondLastLine: false,
+  // Cursor
+  cursorBlinking: 'smooth',
+  cursorSmoothCaretAnimation: 'on',
+  // Bracket matching
+  bracketPairColorization: { enabled: true, independentColorPoolPerBracketType: true },
+  guides: { bracketPairs: true, bracketPairsHorizontal: true, indentation: true, highlightActiveIndentation: true },
+  matchBrackets: 'always',
+  // Sticky scroll (scope headers)
+  stickyScroll: { enabled: true },
+  // Folding
+  folding: true,
+  foldingHighlight: true,
+  showFoldingControls: 'mouseover',
+  // Formatting
+  formatOnPaste: true,
+  autoIndent: 'full',
+  // Linked editing
+  linkedEditing: true,
+  // Inlay hints
+  inlayHints: { enabled: 'on' },
+  // Rendering
+  renderWhitespace: 'selection',
+  renderLineHighlight: 'all',
+  renderLineHighlightOnlyWhenFocus: false,
+  // Misc
+  suggest: { showMethods: true, showFunctions: true, showConstructors: true, showFields: true, showVariables: true, showClasses: true, showInterfaces: true, showModules: true, showProperties: true, showEvents: true, showOperators: true, showUnits: true, showValues: true, showConstants: true, showEnums: true, showEnumMembers: true, showKeywords: true, showWords: true, showColors: true, showFiles: true, showReferences: true, showSnippets: true },
+  padding: { top: 4, bottom: 4 },
+};
+
+/** Read-only variant (e.g. preview panes, result file viewers). */
+export const monacoReadOnly = {
+  ...monacoDefaults,
+  readOnly: true,
 };

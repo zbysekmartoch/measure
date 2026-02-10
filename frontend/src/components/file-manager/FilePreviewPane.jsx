@@ -7,7 +7,7 @@ import React, { useMemo } from 'react';
 import Editor from '@monaco-editor/react';
 import { useLanguage } from '../../context/LanguageContext';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate } from './fileUtils.js';
-import { filePreviewButtons as fpBtn, shadow } from '../../lib/uiConfig.js';
+import { filePreviewButtons as fpBtn, shadow, monacoDefaults } from '../../lib/uiConfig.js';
 
 export default function FilePreviewPane({
   selectedFile,
@@ -35,22 +35,7 @@ export default function FilePreviewPane({
   const editorLanguage = useMemo(() => getLanguageFromFilename(selectedFile), [selectedFile]);
 
   const editorOptions = useMemo(() => ({
-    minimap: { enabled: true },
-    fontSize: 13,
-    fontFamily: "'Fira Code', 'Consolas', 'Monaco', monospace",
-    lineNumbers: 'on',
-    scrollBeyondLastLine: false,
-    automaticLayout: true,
-    wordWrap: 'on',
-    tabSize: 2,
-    insertSpaces: true,
-    folding: true,
-    bracketPairColorization: { enabled: true },
-    autoClosingBrackets: 'always',
-    autoClosingQuotes: 'always',
-    formatOnPaste: true,
-    suggestOnTriggerCharacters: true,
-    quickSuggestions: true,
+    ...monacoDefaults,
     readOnly: readOnly || !isEditing,
   }), [isEditing, readOnly]);
 

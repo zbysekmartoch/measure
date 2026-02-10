@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react';
 import { fetchJSON } from '../lib/fetchJSON.js';
 import { useLanguage } from '../context/LanguageContext';
+import { monacoDefaults } from '../lib/uiConfig.js';
 
 const PAGE_SIZE_OPTIONS = [50, 100, 250, 500, 1000];
 
@@ -27,9 +28,12 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
   const [editorTheme, setEditorTheme] = useState(() =>
     localStorage.getItem('monacoTheme') || 'vs-dark'
   );
+  const [editorPct, setEditorPct] = useState(50); // % of space for editor
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const completionRef = useRef(null);
+  const containerRef = useRef(null);
+  const draggingRef = useRef(false);
 
   // Sync external initialSql when it changes (e.g. file reloaded)
   const prevInitialSql = useRef(initialSql);
@@ -394,31 +398,70 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
         )}
       </div>
 
-      <div style={{ flex: 1, minHeight: 200, border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-        <Editor
-          height="100%"
-          defaultLanguage="sql"
-          value={sql}
-          onChange={handleSqlChange}
-          onMount={handleEditorMount}
-          theme={editorTheme}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 13,
-            wordWrap: 'on',
-            automaticLayout: true,
-          }}
-        />
-      </div>
+      {/* Splittable editor + results area */}
+      <div ref={containerRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {/* Editor */}
+        <div style={{ flex: `0 0 ${editorPct}%`, minHeight: 80, border: '1px solid #e5e7eb', borderRadius: '8px 8px 0 0', overflow: 'hidden' }}>
+          <Editor
+            height="100%"
+            defaultLanguage="sql"
+            value={sql}
+            onChange={handleSqlChange}
+            onMount={handleEditorMount}
+            theme={editorTheme}
+            options={{
+              ...monacoDefaults,
+              minimap: { enabled: false },
+            }}
+          />
+        </div>
 
-      <div style={{ flex: 1, minHeight: 160, border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {error ? (
-          <pre style={{ margin: 0, padding: 12, color: '#dc2626', whiteSpace: 'pre-wrap' }}>{error}</pre>
-        ) : rows.length === 0 ? (
-          <div style={{ padding: 12, color: '#6b7280' }}>{t('sqlNoResults') || 'No results'}</div>
-        ) : (
-          <PaginatedTable columns={columns} rows={rows} />
-        )}
+        {/* Drag splitter */}
+        <div
+          style={{
+            height: 6, flexShrink: 0, cursor: 'row-resize',
+            background: draggingRef.current ? '#3b82f6' : '#e5e7eb',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'background 0.15s',
+            userSelect: 'none',
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            draggingRef.current = true;
+            const container = containerRef.current;
+            const startY = e.clientY;
+            const startPct = editorPct;
+            const onMove = (me) => {
+              const rect = container.getBoundingClientRect();
+              const dy = me.clientY - startY;
+              const totalH = rect.height;
+              const newPct = Math.max(10, Math.min(90, startPct + (dy / totalH) * 100));
+              setEditorPct(newPct);
+            };
+            const onUp = () => {
+              draggingRef.current = false;
+              document.removeEventListener('mousemove', onMove);
+              document.removeEventListener('mouseup', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#93c5fd'; }}
+          onMouseLeave={(e) => { if (!draggingRef.current) e.currentTarget.style.background = '#e5e7eb'; }}
+        >
+          <div style={{ width: 32, height: 2, background: '#9ca3af', borderRadius: 1 }} />
+        </div>
+
+        {/* Results grid */}
+        <div style={{ flex: 1, minHeight: 80, border: '1px solid #e5e7eb', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {error ? (
+            <pre style={{ margin: 0, padding: 12, color: '#dc2626', whiteSpace: 'pre-wrap' }}>{error}</pre>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: 12, color: '#6b7280' }}>{t('sqlNoResults') || 'No results'}</div>
+          ) : (
+            <PaginatedTable columns={columns} rows={rows} />
+          )}
+        </div>
       </div>
     </div>
   );

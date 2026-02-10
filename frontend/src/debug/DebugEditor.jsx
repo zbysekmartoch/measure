@@ -18,6 +18,7 @@
  */
 import React, { useRef, useCallback, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
+import { monacoDefaults } from '../lib/uiConfig.js';
 
 export default function DebugEditor({
   file,
@@ -159,11 +160,7 @@ export default function DebugEditor({
       theme={editorTheme}
       onMount={handleMount}
       options={{
-        minimap: { enabled: true },
-        fontSize: 13,
-        wordWrap: 'on',
-        automaticLayout: true,
-        tabSize: 2,
+        ...monacoDefaults,
         readOnly,
         glyphMargin: true,
         lineNumbersMinChars: 3,

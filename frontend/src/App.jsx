@@ -366,8 +366,8 @@ function AppContent() {
         {/* My labs / Shared labs browser */}
         {showList && (
           <div style={{ height: '100%', display: 'flex', gap: 16, padding: 2, overflow: 'hidden' }}>
-            {/* Left column — lab list */}
-            <div style={{ width: 340, display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
+            {/* Lab list column */}
+            <div style={{ width: tab === 'shared' ? '100%' : 340, display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
               {tab === 'mine' && (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <input
@@ -396,27 +396,30 @@ function AppContent() {
                 {currentList.map((lab) => (
                   <div
                     key={lab.id}
-                    onClick={() => setSelectedLab(lab)}
+                    onClick={() => tab === 'mine' && setSelectedLab(lab)}
                     onDoubleClick={() => openLab(lab)}
                     style={{
                       padding: '10px 12px',
                       borderBottom: '1px solid #f3f4f6',
                       cursor: 'pointer',
-                      background: selectedLab?.id === lab.id ? '#eff6ff' : '#fff',
+                      background: tab === 'mine' && selectedLab?.id === lab.id ? '#eff6ff' : '#fff',
                       transition: 'background 0.1s',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{lab.name}</span>
+                      {lab.description && tab === 'shared' && (
+                        <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lab.description}</span>
+                      )}
                       <button
                         className="btn btn-primary"
-                        style={{ padding: '4px 10px', fontSize: 12 }}
+                        style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }}
                         onClick={(e) => { e.stopPropagation(); openLab(lab); }}
                       >
                         Enter {icons.enter}
                       </button>
                     </div>
-                    {lab.description && (
+                    {lab.description && tab === 'mine' && (
                       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{lab.description}</div>
                     )}
                   </div>
@@ -424,14 +427,13 @@ function AppContent() {
               </div>
             </div>
 
-            {/* Right column — detail / edit / sharing */}
+            {/* Right column — detail / edit / sharing (My Labs only) */}
+            {tab === 'mine' && (
             <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
               {selectedLab ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ fontSize: 16, fontWeight: 600 }}>Lab details</div>
 
-                  {tab === 'mine' ? (
-                    <>
                       <label style={{ fontSize: 12, color: '#6b7280' }}>Name</label>
                       <input
                         type="text" value={editName} onChange={(e) => setEditName(e.target.value)}
@@ -464,19 +466,12 @@ function AppContent() {
                           )}
                         </div>
                       </div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 15, fontWeight: 600 }}>{selectedLab.name}</div>
-                      <div style={{ color: '#6b7280', fontSize: 13 }}>{selectedLab.description || '—'}</div>
-                      <button className="btn btn-primary" onClick={() => openLab(selectedLab)}>Enter {icons.enter}</button>
-                    </>
-                  )}
                 </div>
               ) : (
                 <div style={{ color: '#9ca3af', padding: 20 }}>Select a lab to view details, or double-click to enter.</div>
               )}
             </div>
+            )}
           </div>
         )}
 

@@ -17,6 +17,8 @@ import Editor from '@monaco-editor/react';
 import DebugEditor from '../debug/DebugEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
 import { useToast } from '../components/Toast';
+import ZoomableImage from '../components/ZoomableImage.jsx';
+import { monacoDefaults } from '../lib/uiConfig.js';
 
 export default function LabScriptsPane({ lab, debug }) {
   const toast = useToast();
@@ -269,16 +271,13 @@ export default function LabScriptsPane({ lab, debug }) {
                 labId={lab.id}
               />
             ) : file.isImage ? (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', borderRadius: 8 }}>
-                <img
-                  src={`${apiBasePath}/download?file=${encodeURIComponent(file.path)}`}
-                  alt={file.name}
-                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
-                />
-              </div>
+              <ZoomableImage
+                src={`${apiBasePath}/download?file=${encodeURIComponent(file.path)}&token=${localStorage.getItem('authToken')}`}
+                alt={file.name}
+              />
             ) : file.isPdf ? (
               <embed
-                src={`${apiBasePath}/download?file=${encodeURIComponent(file.path)}`}
+                src={`${apiBasePath}/download?file=${encodeURIComponent(file.path)}&inline=1&token=${localStorage.getItem('authToken')}`}
                 type="application/pdf"
                 style={{ flex: 1, width: '100%', borderRadius: 8 }}
               />
@@ -391,7 +390,7 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             value={file.content}
             onChange={(val) => onChange(val || '')}
             theme={editorTheme}
-            options={{ minimap: { enabled: true }, fontSize: 13, wordWrap: 'on', automaticLayout: true, tabSize: 2, readOnly: false }}
+            options={{ ...monacoDefaults, readOnly: false }}
           />
         )}
       </div>

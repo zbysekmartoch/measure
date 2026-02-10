@@ -397,7 +397,10 @@ export function createFileManagerRoutes(config) {
         return res.status(400).json({ error: 'Path is not a file' });
       }
       
-      // Send file
+      // Send file — inline mode for in-browser previews (PDFs, images)
+      if (req.query.inline === '1') {
+        return res.sendFile(filePath);
+      }
       res.download(filePath, path.basename(filePath));
     } catch (err) {
       if (err.code === 'ENOENT') {

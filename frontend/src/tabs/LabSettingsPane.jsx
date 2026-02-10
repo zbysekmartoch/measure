@@ -131,7 +131,7 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
       <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>⚙️ {t('labSettings') || 'Lab settings'}</h2>
 
       {/* Two-column layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40 }}>
         {/* ──── Left column: name, description, save, info ──── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Name */}
@@ -144,39 +144,6 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
           <div>
             <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>{t('description') || 'Description'}</label>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} style={{ ...fieldStyle, resize: 'vertical' }} />
-          </div>
-
-          {/* Backup */}
-          <div>
-            <h3 style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 600 }}>💾 Backup</h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                Frequency:
-                <select
-                  value={backupFrequency || ''}
-                  onChange={(e) => setBackupFrequency(e.target.value || null)}
-                  style={{ ...fieldStyle, width: 'auto', padding: '4px 8px', fontSize: 13 }}
-                >
-                  <option value="">Disabled</option>
-                  <option value="manual">Manual only</option>
-                  <option value="hourly">Hourly</option>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </label>
-              <button
-                className="btn btn-primary"
-                onClick={handleBackup}
-                disabled={backingUp}
-                style={{ padding: '6px 16px', fontSize: 13 }}
-              >
-                {backingUp ? '⏳ Backing up…' : '📦 Backup now'}
-              </button>
-            </div>
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: '#9ca3af' }}>
-              Duplicate backups (identical content) are automatically skipped.
-            </p>
           </div>
 
           {/* Save */}
@@ -229,6 +196,39 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Backup — full width below the grid */}
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16 }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 600 }}>💾 Backup</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            Frequency:
+            <select
+              value={backupFrequency || ''}
+              onChange={(e) => setBackupFrequency(e.target.value || null)}
+              style={{ ...fieldStyle, width: 'auto', padding: '4px 8px', fontSize: 13 }}
+            >
+              <option value="">Disabled</option>
+              <option value="manual">Manual only</option>
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </label>
+          <button
+            className="btn btn-primary"
+            onClick={handleBackup}
+            disabled={backingUp}
+            style={{ padding: '6px 16px', fontSize: 13 }}
+          >
+            {backingUp ? '⏳ Backing up…' : '📦 Backup now'}
+          </button>
+        </div>
+        <p style={{ margin: '6px 0 0', fontSize: 12, color: '#9ca3af' }}>
+          Duplicate backups (identical content) are automatically skipped.
+        </p>
       </div>
     </div>
   );
