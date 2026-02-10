@@ -3,6 +3,8 @@ import Editor from '@monaco-editor/react';
 import { fetchJSON } from '../lib/fetchJSON.js';
 import { useLanguage } from '../context/LanguageContext';
 
+const PAGE_SIZE_OPTIONS = [50, 100, 250, 500, 1000];
+
 /**
  * SqlEditorTab — SQL editor with run, autocomplete, data source selection, results table.
  *
@@ -409,36 +411,111 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
         />
       </div>
 
-      <div style={{ flex: 1, minHeight: 160, border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 160, border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {error ? (
           <pre style={{ margin: 0, padding: 12, color: '#dc2626', whiteSpace: 'pre-wrap' }}>{error}</pre>
         ) : rows.length === 0 ? (
           <div style={{ padding: 12, color: '#6b7280' }}>{t('sqlNoResults') || 'No results'}</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr>
-                {columns.map((col) => (
-                  <th key={col} style={{ textAlign: 'left', padding: 8, borderBottom: '1px solid #e5e7eb', background: '#f9fafb' }}>
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, idx) => (
-                <tr key={idx}>
-                  {columns.map((col) => (
-                    <td key={col} style={{ padding: 8, borderBottom: '1px solid #f3f4f6' }}>
-                      {row?.[col] == null ? '' : String(row[col])}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <PaginatedTable columns={columns} rows={rows} />
         )}
       </div>
     </div>
   );
 }
+
+/* ── Paginated Results Table ────────────────────────────────────────────────── */
+function PaginatedTable({ columns, rows }) {
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+
+  // Reset to first page when data or page size changes
+  useEffect(() => { setPage(0); }, [rows, pageSize]);
+
+  const pageRows = useMemo(() => {
+    const start = page * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [rows, page, pageSize]);
+
+  return (
+    <>
+      {/* Pagination toolbar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px',
+        background: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: 12, flexShrink: 0,
+      }}>
+        <button
+          onClick={() => setPage(0)}
+          disabled={page === 0}
+          style={pgBtnStyle}
+          title="First page"
+        >⏮</button>
+        <button
+          onClick={() => setPage(p => Math.max(0, p - 1))}
+          disabled={page === 0}
+          style={pgBtnStyle}
+        >◀</button>
+        <span style={{ color: '#374151' }}>
+          Page {page + 1} / {totalPages}
+        </span>
+        <button
+          onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+          disabled={page >= totalPages - 1}
+          style={pgBtnStyle}
+        >▶</button>
+        <button
+          onClick={() => setPage(totalPages - 1)}
+          disabled={page >= totalPages - 1}
+          style={pgBtnStyle}
+          title="Last page"
+        >⏭</button>
+        <span style={{ color: '#9ca3af' }}>|</span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#6b7280' }}>
+          Rows/page:
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            style={{ border: '1px solid #d1d5db', borderRadius: 4, padding: '1px 4px', fontSize: 12 }}
+          >
+            {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        <span style={{ marginLeft: 'auto', color: '#6b7280' }}>
+          {page * pageSize + 1}–{Math.min((page + 1) * pageSize, rows.length)} of {rows.length} rows
+        </span>
+      </div>
+
+      {/* Table body (only current page rendered) */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+            <tr>
+              {columns.map((col) => (
+                <th key={col} style={{ textAlign: 'left', padding: 8, borderBottom: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((row, idx) => (
+              <tr key={page * pageSize + idx}>
+                {columns.map((col) => (
+                  <td key={col} style={{ padding: 8, borderBottom: '1px solid #f3f4f6' }}>
+                    {row?.[col] == null ? '' : String(row[col])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+const pgBtnStyle = {
+  background: 'none', border: '1px solid #d1d5db', borderRadius: 4,
+  padding: '2px 6px', cursor: 'pointer', fontSize: 11, lineHeight: '16px',
+};

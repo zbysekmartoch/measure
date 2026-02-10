@@ -1,6 +1,6 @@
 # Measure
 
-**Modular Extensible Analytical Stack for Universal Reporting and Evaluation**
+**Modular Extensible Analytical Stack - Unfied Research Environment**
 
 Measure is an internal browser-based analytical workbench. Authenticated users create **labs** (analysis projects), manage files, execute scripts (Python, R, Node.js, Shell), run ad-hoc SQL queries against multiple datasources, and debug scripts via DAP — all from a single web UI.
 

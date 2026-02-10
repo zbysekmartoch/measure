@@ -76,10 +76,13 @@ function FolderNode({
           borderRadius: 4, cursor: 'pointer', userSelect: 'none',
           borderBottom: depth === 0 ? '1px solid #e5e7eb' : 'none',
           marginTop: depth === 0 ? 4 : 0,
+          transition: 'background 0.1s',
         }}
         onClick={() => onToggleFolder(node.path)}
+        onMouseEnter={(e) => { if (dragOverFolder !== node.path) e.currentTarget.style.background = '#f0f4ff'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = dragOverFolder === node.path ? '#dbeafe' : (depth === 0 ? '#f9fafb' : 'transparent'); }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: depth === 0 ? 600 : 500, color: '#374151', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: '#374151', minWidth: 0 }}>
           <span style={{ display: 'inline-block', transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>▶</span>
           <span>📁</span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
@@ -123,8 +126,13 @@ function FolderNode({
         </div>
       </div>
 
-      {/* Children (files + subdirectories) */}
-      {isExpanded && (node.children || []).map((child) =>
+      {/* Children — files first, then subdirectories */}
+      {isExpanded && [...(node.children || [])]
+        .sort((a, b) => {
+          if (a.type === b.type) return a.name.localeCompare(b.name);
+          return a.type === 'file' ? -1 : 1;
+        })
+        .map((child) =>
         child.type === 'directory' ? (
           <FolderNode
             key={child.path}
@@ -185,9 +193,12 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         borderRadius: 4,
         background: isSelected ? '#dbeafe' : 'transparent',
         cursor: 'pointer', fontSize: 12,
+        transition: 'background 0.1s',
       }}
       onClick={() => onClick(file)}
       onDoubleClick={() => onDoubleClick?.(file)}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f5f7fa'; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
     >
       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span>{fileIcon(file.name)}</span>

@@ -9,6 +9,7 @@ import api from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { getPool } from './db.js';
 import { attachDapProxy } from './debug/dap-proxy.js';
+import { startBackupScheduler, stopBackupScheduler } from './utils/backup-scheduler.js';
 
 const app = express();
 
@@ -48,6 +49,9 @@ const server = app.listen(config.port, async () => {
   // Verify DB connection on startup
   await getPool().query('SELECT 1');
   console.log(`API listening on http://localhost:${config.port} env=${config.env}`);
+
+  // Start background backup scheduler
+  startBackupScheduler();
 });
 
 // Attach DAP WebSocket proxy for debugger
@@ -56,6 +60,7 @@ attachDapProxy(server);
 // Graceful shutdown
 function shutdown(signal) {
   console.log(`\n${signal} received. Shutting down...`);
+  stopBackupScheduler();
   server.close(async () => {
     try {
       await getPool().end();

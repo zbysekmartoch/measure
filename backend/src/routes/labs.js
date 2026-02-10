@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import archiver from 'archiver';
 import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth } from '../utils/file-manager.js';
 import { startDebugSession, getDebugStatus, getDebugEvents, endDebugSession } from '../debug/debug-engine.js';
@@ -11,6 +11,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Root folder for all labs. Each lab has its own subfolder with metadata and files.
 const LABS_ROOT = path.resolve(__dirname, '../../labs');
+// Backup destination folder.
+const BACKUPS_DIR = path.resolve(__dirname, '../../backups');
+// Backup shell script.
+const BACKUP_SCRIPT = path.resolve(__dirname, '../../scripts/backup-lab.sh');
 
 const router = Router();
 
@@ -164,6 +168,14 @@ router.patch('/:id', async (req, res, next) => {
     const { name, description } = req.body ?? {};
     if (name !== undefined) lab.name = String(name).trim();
     if (description !== undefined) lab.description = String(description).trim();
+
+    // Optional backup frequency: 'manual', 'daily', 'weekly', 'monthly', or null/undefined
+    const { backupFrequency } = req.body ?? {};
+    if (backupFrequency !== undefined) {
+      const allowed = [null, 'manual', 'daily', 'weekly', 'monthly'];
+      lab.backupFrequency = allowed.includes(backupFrequency) ? backupFrequency : null;
+    }
+
     lab.updatedAt = new Date().toISOString();
 
     await writeLabMetadata(labPath, lab);
@@ -184,6 +196,33 @@ router.delete('/:id', async (req, res, next) => {
     }
     await fs.rm(labPath, { recursive: true, force: true });
     res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
+    next(e);
+  }
+});
+
+// Trigger a deduplicated backup of a lab (owner only).
+// Creates a ZIP of the entire lab folder and stores it in backend/backups/
+// unless an identical backup already exists.
+router.post('/:id/backup', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!isOwner(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Run the backup shell script
+    await new Promise((resolve, reject) => {
+      execFile(BACKUP_SCRIPT, [labPath, BACKUPS_DIR], { timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) return reject(new Error(stderr || err.message));
+        resolve(stdout.trim());
+      });
+    }).then((output) => {
+      const skipped = output.startsWith('SKIPPED');
+      res.json({ success: true, skipped, message: output });
+    });
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
     next(e);

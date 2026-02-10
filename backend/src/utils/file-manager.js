@@ -139,9 +139,8 @@ export async function listFiles(dirPath, relativeTo = '', maxDepth = null, curre
               : []
           });
         } else if (entry.isFile()) {
-          // Add file
+          // Add file (all extensions allowed)
           const ext = path.extname(entry.name).toLowerCase();
-          if (!allowedExts.includes(ext)) continue; // Extension filter
           items.push({
             name: entry.name,
             path: relativePath,

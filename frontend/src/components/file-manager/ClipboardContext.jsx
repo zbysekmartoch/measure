@@ -6,20 +6,26 @@
  * So paste knows *where* to fetch the source from.
  */
 import React, { createContext, useCallback, useContext, useState } from 'react';
+import { useToast } from '../Toast';
 
 const ClipboardCtx = createContext(null);
 
 export function FileClipboardProvider({ children }) {
   // clipboard: { type: 'file'|'folder', path: string, apiBasePath: string } | null
   const [clipboard, setClipboard] = useState(null);
+  const toast = useToast();
 
-  const copyFile = useCallback((path, apiBasePath) => {
-    setClipboard({ type: 'file', path, apiBasePath });
-  }, []);
+  const copyFile = useCallback((filePath, apiBasePath) => {
+    setClipboard({ type: 'file', path: filePath, apiBasePath });
+    const name = filePath.split('/').pop();
+    toast.info(`Copied file "${name}"`);
+  }, [toast]);
 
-  const copyFolder = useCallback((path, apiBasePath) => {
-    setClipboard({ type: 'folder', path, apiBasePath });
-  }, []);
+  const copyFolder = useCallback((folderPath, apiBasePath) => {
+    setClipboard({ type: 'folder', path: folderPath, apiBasePath });
+    const name = folderPath.split('/').pop() || folderPath;
+    toast.info(`Copied folder "${name}"`);
+  }, [toast]);
 
   const clear = useCallback(() => setClipboard(null), []);
 

@@ -21,14 +21,17 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
 
   const [name, setName] = useState(lab.name || '');
   const [description, setDescription] = useState(lab.description || '');
+  const [backupFrequency, setBackupFrequency] = useState(lab.backupFrequency || null);
   const [saving, setSaving] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
   const [users, setUsers] = useState([]);
 
   // Sync from prop when lab changes externally
   useEffect(() => {
     setName(lab.name || '');
     setDescription(lab.description || '');
-  }, [lab.name, lab.description]);
+    setBackupFrequency(lab.backupFrequency || null);
+  }, [lab.name, lab.description, lab.backupFrequency]);
 
   // Load all users for sharing checkboxes
   useEffect(() => {
@@ -37,7 +40,7 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
       .catch(() => setUsers([]));
   }, []);
 
-  const dirty = name !== (lab.name || '') || description !== (lab.description || '');
+  const dirty = name !== (lab.name || '') || description !== (lab.description || '') || backupFrequency !== (lab.backupFrequency || null);
 
   // ---- Save ----
   const handleSave = useCallback(async () => {
@@ -45,9 +48,9 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
     try {
       setSaving(true);
       const updated = await fetchJSON(`/api/v1/labs/${lab.id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim(), backupFrequency }),
       });
       toast.success(t('labSaved') || 'Lab saved');
       onLabUpdate?.(updated);
@@ -56,7 +59,24 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
     } finally {
       setSaving(false);
     }
-  }, [lab.id, name, description, t, toast, onLabUpdate]);
+  }, [lab.id, name, description, backupFrequency, t, toast, onLabUpdate]);
+
+  // ---- Manual backup ----
+  const handleBackup = useCallback(async () => {
+    try {
+      setBackingUp(true);
+      const result = await fetchJSON(`/api/v1/labs/${lab.id}/backup`, { method: 'POST' });
+      if (result?.skipped) {
+        toast.info('Backup skipped — no changes since last backup');
+      } else {
+        toast.success('Backup created successfully');
+      }
+    } catch (err) {
+      toast.error(`Backup failed: ${err.message || err}`);
+    } finally {
+      setBackingUp(false);
+    }
+  }, [lab.id, toast]);
 
   // ---- Share (toggle) ----
   const toggleShare = useCallback(async (targetUserId, isChecked) => {
@@ -115,6 +135,40 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
         >
           {saving ? '⏳' : '💾'} {t('save') || 'Save'}
         </button>
+      </div>
+
+      <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb' }} />
+
+      {/* Backup */}
+      <div>
+        <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 600 }}>💾 Backup</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            Frequency:
+            <select
+              value={backupFrequency || ''}
+              onChange={(e) => setBackupFrequency(e.target.value || null)}
+              style={{ ...fieldStyle, width: 'auto', padding: '4px 8px', fontSize: 13 }}
+            >
+              <option value="">Disabled</option>
+              <option value="manual">Manual only</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </label>
+          <button
+            className="btn btn-primary"
+            onClick={handleBackup}
+            disabled={backingUp}
+            style={{ padding: '6px 16px', fontSize: 13 }}
+          >
+            {backingUp ? '⏳ Backing up…' : '📦 Backup now'}
+          </button>
+        </div>
+        <p style={{ margin: '6px 0 0', fontSize: 12, color: '#9ca3af' }}>
+          Backups are stored in <code>backend/backups/</code>. Duplicate backups (identical content) are automatically skipped.
+        </p>
       </div>
 
       <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb' }} />
