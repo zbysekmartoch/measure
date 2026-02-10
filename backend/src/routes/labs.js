@@ -157,6 +157,54 @@ router.post('/', async (req, res, next) => {
   }
 });
 
+// Clone a lab — deep-copies scripts folder, creates new results/state folders.
+// Accessible to owner and shared users.
+router.post('/:id/clone', async (req, res, next) => {
+  try {
+    const srcLabPath = getLabPath(req.params.id);
+    const srcLab = await readLabMetadata(srcLabPath);
+    if (!hasAccess(srcLab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const newId = await getNextId();
+    const newLabPath = getLabPath(newId);
+
+    // Create new lab folder structure
+    await fs.mkdir(newLabPath, { recursive: true });
+    await fs.mkdir(path.join(newLabPath, 'results'), { recursive: true });
+    await fs.mkdir(path.join(newLabPath, 'state'), { recursive: true });
+
+    // Deep-copy scripts folder
+    const srcScripts = path.join(srcLabPath, 'scripts');
+    const dstScripts = path.join(newLabPath, 'scripts');
+    try {
+      await fs.cp(srcScripts, dstScripts, { recursive: true });
+    } catch {
+      // If scripts folder doesn't exist in source, just create an empty one
+      await fs.mkdir(dstScripts, { recursive: true });
+    }
+
+    const now = new Date().toISOString();
+    const { name: customName } = req.body ?? {};
+    const newLab = {
+      id: newId,
+      name: customName ? String(customName).trim() : `${srcLab.name} (clone)`,
+      description: srcLab.description || '',
+      ownerId: req.userId,
+      sharedWith: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await writeLabMetadata(newLabPath, newLab);
+    res.status(201).json(newLab);
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Source lab not found' });
+    next(e);
+  }
+});
+
 // Fetch lab metadata (owner/shared access).
 router.get('/:id', async (req, res, next) => {
   try {
@@ -560,6 +608,10 @@ router.get('/:id/results/:resultId/files/download', async (req, res, next) => {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) return res.status(400).json({ error: 'Not a file' });
 
+    // inline=1 → serve for in-browser display (PDF, images)
+    if (req.query.inline === '1') {
+      return res.sendFile(filePath);
+    }
     res.download(filePath, path.basename(filePath));
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
@@ -1179,6 +1231,10 @@ router.get('/:id/scripts/download', async (req, res, next) => {
     const stats = await fs.stat(filePath);
     if (!stats.isFile()) return res.status(400).json({ error: 'Path is not a file' });
 
+    // inline=1 → serve for in-browser display (PDF, images)
+    if (req.query.inline === '1') {
+      return res.sendFile(filePath);
+    }
     res.download(filePath, path.basename(filePath));
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });

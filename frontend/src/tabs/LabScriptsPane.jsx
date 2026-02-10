@@ -19,6 +19,7 @@ import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../
 import { useToast } from '../components/Toast';
 import ZoomableImage from '../components/ZoomableImage.jsx';
 import { monacoDefaults } from '../lib/uiConfig.js';
+import { setDirtyCount, removeDirtyCount } from '../lib/dirtyRegistry.js';
 
 export default function LabScriptsPane({ lab, debug }) {
   const toast = useToast();
@@ -29,6 +30,17 @@ export default function LabScriptsPane({ lab, debug }) {
   const [editorTheme, setEditorTheme] = useState(() =>
     localStorage.getItem('monacoTheme') || 'vs-dark'
   );
+
+  // Sync dirty file count to the global registry
+  useEffect(() => {
+    const dirtyCount = openFiles.filter((f) => f.dirty).length;
+    setDirtyCount(`lab:${lab.id}`, dirtyCount);
+  }, [openFiles, lab.id]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => removeDirtyCount(`lab:${lab.id}`);
+  }, [lab.id]);
 
   // ---- Determine which file the debugger is stopped in (relative path) ----
   const stoppedRelPath = (() => {
@@ -70,9 +82,18 @@ export default function LabScriptsPane({ lab, debug }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stoppedRelPath, debug?.status]);
 
-  // ---- Debug workflow: create result run and notify user ----
+  // ---- Debug workflow: save dirty files, create result run, notify user ----
   const handleDebugWorkflow = useCallback(async (workflowFile) => {
     try {
+      // Auto-save all dirty open files before running
+      const dirtyFiles = openFiles.filter((f) => f.dirty);
+      if (dirtyFiles.length > 0) {
+        for (const f of dirtyFiles) {
+          await saveFile(f.path);
+        }
+        toast.info(`Auto-saved ${dirtyFiles.length} file${dirtyFiles.length > 1 ? 's' : ''}`);
+      }
+
       const res = await fetch(`/api/v1/labs/${lab.id}/scripts/debug`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
@@ -84,7 +105,7 @@ export default function LabScriptsPane({ lab, debug }) {
     } catch (e) {
       toast.error(`Debug error: ${e.message}`);
     }
-  }, [lab.id, toast]);
+  }, [lab.id, toast, openFiles, saveFile]);
 
   // Open file as a tab (or switch to existing)
   const handleFileOpen = useCallback((file) => {
@@ -272,7 +293,7 @@ export default function LabScriptsPane({ lab, debug }) {
               />
             ) : file.isImage ? (
               <ZoomableImage
-                src={`${apiBasePath}/download?file=${encodeURIComponent(file.path)}&token=${localStorage.getItem('authToken')}`}
+                src={`${apiBasePath}/download?file=${encodeURIComponent(file.path)}&inline=1&token=${localStorage.getItem('authToken')}`}
                 alt={file.name}
               />
             ) : file.isPdf ? (

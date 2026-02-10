@@ -25,9 +25,9 @@ export const shadow = {
 // ─── File browser toolbar buttons ───────────────────────────────────────────
 
 export const fileBrowserButtons = {
-  refresh:      { icon: '↻',  bg: '#009771', label: 'Refresh' },
-  preview:      { icon: '▶',  bg: '#6c4599', label: 'Preview' },
-  previewHide:  { icon: '◀',  bg: '#6c4599', label: 'Hide preview' },
+  refresh:      { icon: '↻',  bg: '#720000', label: 'Refresh' },
+  preview:      { icon: '◀',  bg: '#2e412a', label: 'Preview' },
+  previewHide:  { icon: '▶',  bg: '#2e412a', label: 'Hide preview' },
   newFile:      { icon: '+', bg: '#0488d4', label: 'New file' },
   paste:        { icon: 'P', bg: '#002a69', label: '' },
   upload:       { icon: '⬆',  bg: '#005ae2', label: '' },
@@ -36,7 +36,7 @@ export const fileBrowserButtons = {
 // ─── File browser item (row) buttons ────────────────────────────────────────
 
 export const fileItemButtons = {
-  openInTab:    { icon: '📑', bg: '#4f46e5', label: 'Open in tab' },
+  openInTab:    { icon: 'O', bg: '#ff7300', label: 'Open in tab' },
   copyFile:     { icon: 'C', bg: '#000916', label: 'Copy file' },
   copyFolder:   { icon: 'C', bg: '#000916', label: 'Copy folder' },
   pasteInto:    { icon: 'P', bg: '#002a69', label: 'Paste here' },
@@ -45,7 +45,7 @@ export const fileItemButtons = {
   uploadHere:   { icon: '⬆', bg: '#005ae2', label: 'Upload here' },
   downloadZip:  { icon: '⬇',  bg: '#2f9722', label: 'Download ZIP' },
   deleteFolder: { icon: '🗑', bg: '#f81717', label: 'Delete folder' },
-  debugWorkflow:{ icon: '🛠', bg: '#ff7300', label: 'Debug workflow' },
+  debugWorkflow:{ icon: '🛠', bg: '#af24c2', label: 'Debug workflow' },
 };
 
 // ─── File preview toolbar buttons ───────────────────────────────────────────

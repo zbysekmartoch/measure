@@ -1,7 +1,8 @@
 {
   "breakpoints": {
     "analyzy/sum.py": [
-      11
+      28,
+      35
     ]
   }
 }

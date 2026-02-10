@@ -1,91 +1,79 @@
 # Measure
 
-**Modular Extensible Analytical Stack - Unfied Research Environment**
+**Modular Extensible Analytical Stack — Unified Research Environment**
 
-Measure is an internal browser-based analytical workbench. Authenticated users create **labs** (analysis projects), manage files, execute scripts (Python, R, Node.js, Shell), run ad-hoc SQL queries against multiple datasources, and debug scripts via DAP — all from a single web UI.
-
----
-
-## Highlights
-
-| Feature | Description |
-|---------|-------------|
-| **Labs** | Multi-user analysis projects with file management, script execution, and result tracking |
-| **File Manager** | Dual-pane browser: recursive tree view + Monaco-powered preview / editor |
-| **Script Execution** | Run Python, R, Node.js, and Shell scripts with real-time progress via SSE |
-| **SQL Editor** | Monaco SQL editor with AG Grid results against MySQL and SQLite datasources |
-| **Debugging** | Full DAP (Debug Adapter Protocol) integration for step-through debugging |
-| **Authentication** | JWT-based auth with registration, login, and email-based password reset |
-| **Sharing** | Labs can be shared with other users with read/write access |
+Browser-based analytical workbench. Users create **labs** (analysis projects), manage files, execute scripts (Python, R, Node.js, Shell), run SQL queries, and debug scripts via DAP — all from a single web UI.
 
 ## Architecture
 
 ```
 Browser (:5173)
-  ├── React SPA (Vite + HMR)
-  │     ├── AuthPage (login / register / password reset)
-  │     ├── Labs Tab → Lab Workspace (scripts, results, settings, SQL)
-  │     ├── Settings Tab
-  │     └── Debug UI (DAP over WebSocket)
-  │
-  └── Vite proxy ──► Express API (:3000)
-                       ├── /api/health
-                       ├── /api/v1/auth     (JWT)
-                       ├── /api/v1/labs     (CRUD + files + execution)
-                       ├── /api/v1/sql      (multi-datasource SQL)
-                       ├── /api/v1/users
-                       ├── /api/v1/debug
-                       ├── /api/v1/paste
-                       └── ws://…/dap       (Debug Adapter Protocol)
-                             │
-                       MySQL (:3306) + SQLite files + filesystem (labs/)
+  └── React SPA (Vite)
+        ├── Labs (scripts, results, settings)
+        ├── SQL Editor (Monaco + AG Grid)
+        └── Debug UI (DAP over WebSocket)
+              │
+        Vite proxy ──► Express API (:3000)
+                         ├── /api/v1/auth    (JWT)
+                         ├── /api/v1/labs    (CRUD, files, execution, debug)
+                         ├── /api/v1/sql     (multi-datasource SQL)
+                         ├── /api/v1/users
+                         ├── /api/v1/paste   (cross-root file copy)
+                         └── ws://…/dap      (Debug Adapter Protocol)
+                               │
+                         MySQL + SQLite + filesystem (labs/)
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| **Runtime** | Node.js (ES Modules) |
-| **Backend** | Express 4, MySQL (mysql2), SQLite (better-sqlite3), JWT, bcrypt |
-| **Frontend** | React 19, Vite 7, Monaco Editor, AG Grid, TanStack Table |
-| **Debug** | WebSocket DAP proxy, custom debug UI |
-| **Email** | Nodemailer (password reset flow) |
-| **Logging** | Pino |
+| Runtime | Node.js (ES Modules) |
+| Backend | Express 4, MySQL (mysql2), SQLite (better-sqlite3), JWT, bcrypt |
+| Frontend | React 19, Vite 7, Monaco Editor, AG Grid |
+| Debug | WebSocket DAP proxy, debugpy |
+| Email | Nodemailer (password reset) |
 
 ## Quick Start
 
 ```bash
-# 1. Backend
+# Backend
 cd backend
-cp .env.example .env          # configure DB, JWT secret, etc.
+cp .env.example .env   # configure DB, JWT secret, etc.
 npm install
-npm run dev                   # starts on :3000
+npm run dev             # starts on :3000
 
-# 2. Frontend
+# Frontend (new terminal)
 cd frontend
 npm install
-npm run dev                   # starts on :5173, proxies API to :3000
+npm run dev             # starts on :5173, proxies API to :3000
+
+# Database
+mysql -u root -p < backend/sql/create.sql
 ```
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [DEVELOPMENT.md](DEVELOPMENT.md) | Developer guide: architecture, modules, data flow, conventions |
-| [LABS.md](LABS.md) | Labs feature specification and API reference |
-| [backend/README.md](backend/README.md) | Backend setup, configuration, API overview |
-| [backend/API.md](backend/API.md) | Complete backend API reference |
-| [backend/HEALTH_CHECK.md](backend/HEALTH_CHECK.md) | Health check endpoint and monitoring |
-| [backend/EMAIL_TESTING.md](backend/EMAIL_TESTING.md) | Email / password-reset testing guide |
-| [backend/PYTHON_SETUP.md](backend/PYTHON_SETUP.md) | Python virtual environment setup |
-| [backend/SCRIPTS_API.md](backend/SCRIPTS_API.md) | Scripts management API for frontend developers |
-| [frontend/README.md](frontend/README.md) | Frontend setup, architecture, design decisions |
-| [frontend/API.md](frontend/API.md) | Frontend-facing API documentation |
-| [frontend/DEPLOYMENT.md](frontend/DEPLOYMENT.md) | Deployment guide (Docker, Nginx, CI/CD) |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Architecture, modules, data flow, conventions |
+| [LABS.md](LABS.md) | Labs feature spec & API reference |
+| [backend/README.md](backend/README.md) | Backend setup & configuration |
+| [backend/API.md](backend/API.md) | Complete API reference |
+| [backend/EMAIL_TESTING.md](backend/EMAIL_TESTING.md) | Email / password-reset setup |
+| [backend/PYTHON_SETUP.md](backend/PYTHON_SETUP.md) | Python venv for lab scripts |
+| [frontend/README.md](frontend/README.md) | Frontend setup & design decisions |
 
-## Datasources
+## Key Features
 
-Place SQL Server or SQLite datasource configs in `backend/datasources/`. See [backend/datasources/example.sqlserver.json](backend/datasources/example.sqlserver.json) for the format.
+- **Labs** — multi-user analysis projects with file management, script execution, result tracking
+- **File Manager** — dual-pane browser with Monaco editor, image/PDF preview, drag & drop
+- **Script Execution** — Python, R, Node.js, Shell with real-time SSE progress
+- **SQL Editor** — Monaco editor + AG Grid results against MySQL/SQLite datasources
+- **DAP Debugging** — step-through debugging with breakpoints, variables, call stack
+- **Clone Lab** — deep-copy any lab (own or shared) as a starting point
+- **Auth** — JWT with registration, login, email password reset
+- **Sharing** — labs can be shared with other users
 
 ## License
 

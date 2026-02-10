@@ -11,6 +11,24 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ===== Disable text selection on UI chrome (tabs, buttons, labels) ===== */
+* {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Re-enable selection where it makes sense */
+input, textarea, select,
+pre, code,
+[contenteditable="true"],
+.monaco-editor, .monaco-editor *,
+.ag-root-wrapper, .ag-root-wrapper *,
+.ag-cell, .ag-header-cell,
+[role="textbox"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 a {
   font-weight: 500;
   color: #646cff;

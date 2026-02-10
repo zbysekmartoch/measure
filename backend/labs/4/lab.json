@@ -5,5 +5,7 @@
   "ownerId": 2,
   "sharedWith": [],
   "createdAt": "2026-02-06T10:56:55.325Z",
-  "updatedAt": "2026-02-06T10:57:19.982Z"
+  "updatedAt": "2026-02-10T20:03:28.965Z",
+  "backupFrequency": "hourly",
+  "lastBackupAt": "2026-02-10T20:04:19.949Z"
 }

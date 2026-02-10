@@ -1,5 +1,4 @@
-backend/labs/*/scripts/analyzy/x venv/
-backend/labs/*/scripts/analyzy/*venv*/
-backend/labs/.venv/
+backend/labs/
+backend/backups/
 .venv/
 node_modules/

@@ -1,1 +1,1 @@
-select * from product limit 10;
+select * from product limit 100;

@@ -21,6 +21,7 @@ import SettingsTab from './tabs/SettingsTab';
 import LabWorkspaceTab from './tabs/LabWorkspaceTab.jsx';
 import { fetchJSON } from './lib/fetchJSON.js';
 import { icons, tabIcons } from './lib/uiConfig.js';
+import { hasDirtyFiles, hasDirtyFilesForLab } from './lib/dirtyRegistry.js';
 
 /**
  * Standalone lab view — used when opened via popup window (?lab=<id>&standalone=1).
@@ -110,6 +111,18 @@ function AppContent() {
     if (!standaloneLabId) fetchJSON('/api/v1/users').then((data) => setUsers(data?.items || [])).catch(() => setUsers([]));
   }, [standaloneLabId]);
 
+  // Warn before browser/tab close if there are unsaved files
+  useEffect(() => {
+    const handler = (e) => {
+      if (hasDirtyFiles()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
   // ---- Lab tab management ----
   const openLab = useCallback((lab) => {
     setOpenLabs((prev) => (prev.some((l) => l.id === lab.id) ? prev : [...prev, lab]));
@@ -183,6 +196,15 @@ function AppContent() {
       toast.success('Lab updated');
       await loadLabs();
     } catch (e) { toast.error(e?.message || 'Failed to update lab'); }
+  };
+
+  const handleClone = async (lab) => {
+    try {
+      const cloned = await fetchJSON(`/api/v1/labs/${lab.id}/clone`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      toast.success(`Lab "${cloned.name}" cloned`);
+      await loadLabs();
+      setSelectedLab(cloned);
+    } catch (e) { toast.error(e?.message || 'Failed to clone lab'); }
   };
 
   const toggleShare = async (lab, targetUserId, isChecked) => {
@@ -330,7 +352,11 @@ function AppContent() {
                 {icons.popOut}
               </button>
               <button
-                onClick={(e) => { e.stopPropagation(); if (!confirm(`Close lab "${lab.name}"?`)) return; closeLab(lab.id); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (hasDirtyFilesForLab(lab.id) && !confirm(`Lab "${lab.name}" has unsaved changes. Close anyway?`)) return;
+                  closeLab(lab.id);
+                }}
                 title="Close"
                 style={{
                   padding: '4px 6px',
@@ -411,13 +437,23 @@ function AppContent() {
                       {lab.description && tab === 'shared' && (
                         <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lab.description}</span>
                       )}
-                      <button
-                        className="btn btn-primary"
-                        style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }}
-                        onClick={(e) => { e.stopPropagation(); openLab(lab); }}
-                      >
-                        Enter {icons.enter}
-                      </button>
+                      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '4px 10px', fontSize: 12 }}
+                          onClick={(e) => { e.stopPropagation(); handleClone(lab); }}
+                          title="Clone lab"
+                        >
+                          📋 Clone
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: '4px 10px', fontSize: 12 }}
+                          onClick={(e) => { e.stopPropagation(); openLab(lab); }}
+                        >
+                          Enter {icons.enter}
+                        </button>
+                      </div>
                     </div>
                     {lab.description && tab === 'mine' && (
                       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{lab.description}</div>
