@@ -1,5 +1,5 @@
 // src/utils/file-manager.js
-// Zobecněný modul pro správu souborů - listing, čtení, zápis, upload, download, mazání
+// Generic file management module - listing, reading, writing, upload, download, deletion
 
 import { promises as fs } from 'fs';
 import { readFileSync } from 'fs';
@@ -10,7 +10,7 @@ import multer from 'multer';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Načti konfiguraci z config.json
+// Load configuration from config.json
 let fileManagerConfig = { defaultDepth: Infinity };
 try {
   const configPath = path.resolve(__dirname, '../../config.json');
@@ -23,7 +23,7 @@ try {
 }
 
 /**
- * Vrátí výchozí hloubku pro listování souborů
+ * Returns default depth for file listing
  * @returns {number}
  */
 export function getDefaultDepth() {
@@ -51,7 +51,7 @@ export async function copyRecursive(src, dest) {
 }
 
 /**
- * Seznam povolených přípon pro zobrazení
+ * List of allowed extensions for viewing
  */
 const ALLOWED_EXTENSIONS = [
   '.doc', '.docx', '.xls', '.xlsx', '.js', '.cjs', '.py', '.txt', '.md', 
@@ -60,7 +60,7 @@ const ALLOWED_EXTENSIONS = [
 ];
 
 /**
- * Přípony které jsou čitelné jako text
+ * Extensions readable as text
  */
 const TEXT_EXTENSIONS = [
   '.js', '.cjs', '.py', '.txt', '.md', '.json', '.workflow', '.sql', 
@@ -69,21 +69,21 @@ const TEXT_EXTENSIONS = [
 ];
 
 /**
- * Bezpečná validace cesty - zamezí path traversal
- * @param {string} rootPath - Kořenová složka (absolutní cesta)
- * @param {string} relativePath - Relativní cesta od rootPath
- * @returns {string|null} - Absolutní validní cesta nebo null
+ * Secure path validation - prevents path traversal
+ * @param {string} rootPath - Root folder (absolute path)
+ * @param {string} relativePath - Relative path from rootPath
+ * @returns {string|null} - Valid absolute path or null
  */
 export function getSecurePath(rootPath, relativePath) {
   if (!relativePath) return rootPath;
   
-  // Normalizuj cestu (odstraň .., ./, redundantní /)
+  // Normalize path (remove .., ./, redundant /)
   const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
   
-  // Vytvoř absolutní cestu
+  // Create absolute path
   const absolute = path.resolve(rootPath, normalized);
   
-  // Ověř že výsledná cesta je pod rootPath
+  // Verify the resulting path is under rootPath
   if (!absolute.startsWith(rootPath)) {
     return null;
   }
@@ -92,17 +92,17 @@ export function getSecurePath(rootPath, relativePath) {
 }
 
 /**
- * Rekurzivní výpis souborů a složek
- * @param {string} dirPath - Absolutní cesta k adresáři
- * @param {string} relativeTo - Relativní prefix pro výstup
- * @param {number} maxDepth - Maximální hloubka rekurze
- * @param {number} currentDepth - Aktuální hloubka
- * @param {Object} options - Další možnosti
- * @param {string[]} options.allowedExtensions - Povolené přípony (default: ALLOWED_EXTENSIONS)
- * @returns {Array} - Seznam souborů a složek
+ * Recursive file and directory listing
+ * @param {string} dirPath - Absolute path to directory
+ * @param {string} relativeTo - Relative prefix for output
+ * @param {number} maxDepth - Maximum recursion depth
+ * @param {number} currentDepth - Current depth
+ * @param {Object} options - Additional options
+ * @param {string[]} options.allowedExtensions - Allowed extensions (default: ALLOWED_EXTENSIONS)
+ * @returns {Array} - List of files and directories
  */
 export async function listFiles(dirPath, relativeTo = '', maxDepth = null, currentDepth = 0, options = {}) {
-  // Použij konfigurovanou hloubku pokud není specifikována (0 = unlimited)
+  // Use configured depth if not specified (0 = unlimited)
   if (maxDepth === null || maxDepth === undefined) {
     maxDepth = fileManagerConfig.defaultDepth;
   }
@@ -127,7 +127,7 @@ export async function listFiles(dirPath, relativeTo = '', maxDepth = null, curre
         const stats = await fs.stat(fullPath);
         
         if (entry.isDirectory()) {
-          // Přidej složku
+          // Add directory
           items.push({
             name: entry.name,
             path: relativePath,
@@ -139,9 +139,9 @@ export async function listFiles(dirPath, relativeTo = '', maxDepth = null, curre
               : []
           });
         } else if (entry.isFile()) {
-          // Přidej soubor
+          // Add file
           const ext = path.extname(entry.name).toLowerCase();
-          if (!allowedExts.includes(ext)) continue; // Filtr přípon
+          if (!allowedExts.includes(ext)) continue; // Extension filter
           items.push({
             name: entry.name,
             path: relativePath,
@@ -164,9 +164,9 @@ export async function listFiles(dirPath, relativeTo = '', maxDepth = null, curre
 }
 
 /**
- * Vytvoří multer upload middleware pro daný root
- * @param {string} rootPath - Kořenová složka pro upload
- * @param {number} maxFileSize - Max velikost souboru v bytech (default 50MB)
+ * Creates multer upload middleware for the given root
+ * @param {string} rootPath - Root folder for upload
+ * @param {number} maxFileSize - Max file size in bytes (default 50MB)
  * @returns {multer.Multer}
  */
 export function createUploadMiddleware(rootPath, maxFileSize = 50 * 1024 * 1024) {
@@ -181,7 +181,7 @@ export function createUploadMiddleware(rootPath, maxFileSize = 50 * 1024 * 1024)
             return cb(new Error('Invalid target path'));
           }
           
-          // Vytvoř složku pokud neexistuje
+          // Create directory if it doesn't exist
           await fs.mkdir(dirPath, { recursive: true });
           
           cb(null, dirPath);
@@ -190,7 +190,7 @@ export function createUploadMiddleware(rootPath, maxFileSize = 50 * 1024 * 1024)
         }
       },
       filename: (req, file, cb) => {
-        // Použij původní název souboru
+        // Use original file name
         cb(null, file.originalname);
       }
     }),
@@ -201,19 +201,19 @@ export function createUploadMiddleware(rootPath, maxFileSize = 50 * 1024 * 1024)
 }
 
 /**
- * Factory pro vytvoření routeru pro správu souborů
+ * Factory for creating file management router
  * @param {Object} config
- * @param {string} config.rootPath - Absolutní cesta ke kořenové složce
- * @param {Function} config.getRootPath - Funkce pro dynamické určení root path z requestu (pro results)
- * @param {string[]} config.allowedExtensions - Povolené přípony (volitelné)
- * @param {number} config.maxDepth - Max hloubka pro listing (default: 2)
- * @param {number} config.maxFileSize - Max velikost souboru pro upload (default: 50MB)
- * @param {boolean} config.createPublicRouter - Vytvořit i public router pro download (default: false)
+ * @param {string} config.rootPath - Absolute path to root folder
+ * @param {Function} config.getRootPath - Function for dynamically determining root path from request (for results)
+ * @param {string[]} config.allowedExtensions - Allowed extensions (optional)
+ * @param {number} config.maxDepth - Max depth for listing (default: 2)
+ * @param {number} config.maxFileSize - Max file size for upload (default: 50MB)
+ * @param {boolean} config.createPublicRouter - Also create public router for download (default: false)
  */
 export function createFileManagerRoutes(config) {
   const { Router } = require('express').default || require('express');
   
-  const router = Router({ mergeParams: true }); // mergeParams pro přístup k :id z parent routeru
+  const router = Router({ mergeParams: true }); // mergeParams for accessing :id from parent router
   const publicRouter = config.createPublicRouter ? Router({ mergeParams: true }) : null;
   
   const maxDepth = config.maxDepth || 2;
@@ -221,7 +221,7 @@ export function createFileManagerRoutes(config) {
   const maxFileSize = config.maxFileSize || 50 * 1024 * 1024;
   
   /**
-   * Získá root path - buď statický nebo dynamický
+   * Get root path - either static or dynamic
    */
   async function getRootPath(req) {
     if (config.getRootPath) {
@@ -231,8 +231,8 @@ export function createFileManagerRoutes(config) {
   }
   
   /**
-   * GET / - Seznam souborů
-   * Query: ?subdir=... (volitelné)
+   * GET / - List files
+   * Query: ?subdir=... (optional)
    */
   router.get('/', async (req, res, next) => {
     try {
@@ -243,19 +243,19 @@ export function createFileManagerRoutes(config) {
       
       const { subdir } = req.query;
       
-      // Validuj cestu
+      // Validate path
       const targetPath = getSecurePath(rootPath, subdir || '');
       if (!targetPath) {
         return res.status(400).json({ error: 'Invalid path' });
       }
       
-      // Ověř že cesta existuje a je to složka
+      // Verify the path exists and is a directory
       const stats = await fs.stat(targetPath);
       if (!stats.isDirectory()) {
         return res.status(400).json({ error: 'Path is not a directory' });
       }
       
-      // Vypíš obsah
+      // List contents
       const files = await listFiles(targetPath, subdir || '', maxDepth, 0, { allowedExtensions });
       
       res.json({
@@ -272,8 +272,8 @@ export function createFileManagerRoutes(config) {
   });
   
   /**
-   * GET /content - Obsah souboru
-   * Query: ?file=... (povinné)
+   * GET /content - File content
+   * Query: ?file=... (required)
    */
   router.get('/content', async (req, res, next) => {
     try {
@@ -288,19 +288,19 @@ export function createFileManagerRoutes(config) {
         return res.status(400).json({ error: 'Missing file parameter' });
       }
       
-      // Validuj cestu
+      // Validate path
       const filePath = getSecurePath(rootPath, file);
       if (!filePath) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
       
-      // Ověř že soubor existuje
+      // Verify the file exists
       const stats = await fs.stat(filePath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Path is not a file' });
       }
       
-      // Načti obsah (UTF-8)
+      // Read content (UTF-8)
       const content = await fs.readFile(filePath, 'utf-8');
       
       res.json({
@@ -318,7 +318,7 @@ export function createFileManagerRoutes(config) {
   });
   
   /**
-   * PUT /content - Uložení obsahu souboru
+   * PUT /content - Save file content
    * Body: { file: string, content: string }
    */
   router.put('/content', async (req, res, next) => {
@@ -334,13 +334,13 @@ export function createFileManagerRoutes(config) {
         return res.status(400).json({ error: 'Missing file or content parameter' });
       }
       
-      // Validuj cestu
+      // Validate path
       const filePath = getSecurePath(rootPath, file);
       if (!filePath) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
       
-      // Ověř že soubor existuje (jen update existujících)
+      // Verify the file exists (only update existing files)
       try {
         const stats = await fs.stat(filePath);
         if (!stats.isFile()) {
@@ -353,10 +353,10 @@ export function createFileManagerRoutes(config) {
         throw err;
       }
       
-      // Ulož obsah (UTF-8)
+      // Save content (UTF-8)
       await fs.writeFile(filePath, content, 'utf-8');
       
-      // Vrať nové stats
+      // Return new stats
       const stats = await fs.stat(filePath);
       
       res.json({
@@ -371,8 +371,8 @@ export function createFileManagerRoutes(config) {
   });
   
   /**
-   * GET /download - Stažení souboru
-   * Query: ?file=... (povinné)
+   * GET /download - Download file
+   * Query: ?file=... (required)
    */
   const downloadHandler = async (req, res, next) => {
     try {
@@ -387,19 +387,19 @@ export function createFileManagerRoutes(config) {
         return res.status(400).json({ error: 'Missing file parameter' });
       }
       
-      // Validuj cestu
+      // Validate path
       const filePath = getSecurePath(rootPath, file);
       if (!filePath) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
       
-      // Ověř že soubor existuje
+      // Verify the file exists
       const stats = await fs.stat(filePath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Path is not a file' });
       }
       
-      // Odešli soubor
+      // Send file
       res.download(filePath, path.basename(filePath));
     } catch (err) {
       if (err.code === 'ENOENT') {
@@ -415,10 +415,10 @@ export function createFileManagerRoutes(config) {
   }
   
   /**
-   * POST /upload - Nahrání souboru
-   * Form data: file, targetPath (volitelné)
+   * POST /upload - Upload file
+   * Form data: file, targetPath (optional)
    */
-  // Dynamický upload middleware - musíme jej vytvořit per-request
+  // Dynamic upload middleware - must be created per-request
   router.post('/upload', async (req, res, next) => {
     try {
       const rootPath = await getRootPath(req);
@@ -426,10 +426,10 @@ export function createFileManagerRoutes(config) {
         return res.status(404).json({ error: 'Root path not found' });
       }
       
-      // Vytvoř upload middleware pro tento root
+      // Create upload middleware for this root
       const upload = createUploadMiddleware(rootPath, maxFileSize);
       
-      // Použij middleware
+      // Use middleware
       upload.single('file')(req, res, async (err) => {
         if (err) {
           return next(err);
@@ -456,10 +456,39 @@ export function createFileManagerRoutes(config) {
       next(err);
     }
   });
+
+  /**
+   * POST /folder - Create new folder
+   * Body: { path: string }
+   */
+  router.post('/folder', async (req, res, next) => {
+    try {
+      const rootPath = await getRootPath(req);
+      if (!rootPath) {
+        return res.status(404).json({ error: 'Root path not found' });
+      }
+
+      const { path: folderPath } = req.body;
+      if (!folderPath?.trim()) {
+        return res.status(400).json({ error: 'Missing path parameter' });
+      }
+
+      const dirPath = getSecurePath(rootPath, folderPath.trim());
+      if (!dirPath) {
+        return res.status(400).json({ error: 'Invalid path' });
+      }
+
+      await fs.mkdir(dirPath, { recursive: true });
+
+      res.status(201).json({ success: true, path: folderPath.trim() });
+    } catch (err) {
+      next(err);
+    }
+  });
   
   /**
-   * DELETE / - Smazání souboru
-   * Query: ?file=... (povinné)
+   * DELETE / - Delete file
+   * Query: ?file=... (required)
    */
   router.delete('/', async (req, res, next) => {
     try {
@@ -474,19 +503,19 @@ export function createFileManagerRoutes(config) {
         return res.status(400).json({ error: 'Missing file parameter' });
       }
       
-      // Validuj cestu
+      // Validate path
       const filePath = getSecurePath(rootPath, file);
       if (!filePath) {
         return res.status(400).json({ error: 'Invalid file path' });
       }
       
-      // Ověř že soubor existuje
+      // Verify the file exists
       const stats = await fs.stat(filePath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Path is not a file' });
       }
       
-      // Smaž soubor
+      // Delete file
       await fs.unlink(filePath);
       
       res.json({

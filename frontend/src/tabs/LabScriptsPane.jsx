@@ -78,9 +78,9 @@ export default function LabScriptsPane({ lab, debug }) {
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
       const data = await res.json();
-      toast.success(`Debug run #${data.resultId} vytvořen pro ${workflowFile}`);
+      toast.success(`Debug run #${data.resultId} created for ${workflowFile}`);
     } catch (e) {
-      toast.error(`Chyba debug: ${e.message}`);
+      toast.error(`Debug error: ${e.message}`);
     }
   }, [lab.id, toast]);
 
@@ -347,7 +347,7 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
           {isPython && debug && (
             <span style={{
               fontSize: 10, color: breakpoints.size > 0 ? '#dc2626' : '#888', fontFamily: 'monospace',
-            }} title="Klikněte do okraje editoru pro nastavení breakpointů">
+            }} title="Click in the editor gutter to set breakpoints">
               🔴 {breakpoints.size > 0 ? `${breakpoints.size} breakpoint${breakpoints.size > 1 ? 's' : ''}` : 'breakpoints'}
             </span>
           )}

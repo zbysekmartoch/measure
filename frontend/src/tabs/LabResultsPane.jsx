@@ -93,7 +93,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ debugVisible }),
       });
-      toast.success(t('debugAnalysisStarted') || 'Debug workflow spuštěn');
+      toast.success(t('debugAnalysisStarted') || 'Debug workflow started');
 
       // Refresh results list immediately
       loadResults();
@@ -118,7 +118,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
         }
       }
     } catch (err) {
-      toast.error(`${t('errorStartingDebugAnalysis') || 'Chyba'}: ${err.message || err}`);
+      toast.error(`${t('errorStartingDebugAnalysis') || 'Error'}: ${err.message || err}`);
     } finally {
       setDebugRunning(false);
     }
@@ -137,7 +137,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      toast.success('Výsledek resetován');
+      toast.success('Result reset');
       loadResults();
     } catch (err) {
       toast.error(`Reset failed: ${err.message || err}`);
@@ -153,7 +153,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
   // ---- Formatting helpers ----
   const formatDT = (s) => {
     if (!s) return '-';
-    try { return new Date(s).toLocaleString('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+    try { return new Date(s).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
     catch { return s; }
   };
 
@@ -170,7 +170,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
   };
 
   const statusLabel = (status) => {
-    const map = { completed: 'Dokončeno', running: 'Běží', failed: 'Chyba', pending: 'Čeká', ready: 'Připraveno', aborted: 'Přerušeno', unknown: '?' };
+    const map = { completed: 'Completed', running: 'Running', failed: 'Failed', pending: 'Pending', ready: 'Ready', aborted: 'Aborted', unknown: '?' };
     return t(`status_${status}`) || map[status] || status;
   };
 
@@ -192,7 +192,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
         {/* Result picker */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <label style={{ fontWeight: 500, color: '#374151', whiteSpace: 'nowrap' }}>
-            {t('selectResult') || 'Výsledek'}:
+            {t('selectResult') || 'Result'}:
           </label>
           <select
             value={selectedResultId}
@@ -200,7 +200,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
             onFocus={loadResults}
             style={{ padding: '7px 10px', border: '1px solid #d1d5db', borderRadius: 6, minWidth: 320, background: 'white', fontSize: 13 }}
           >
-            <option value="">— {t('selectResultPlaceholder') || 'Vyberte výsledek'} —</option>
+            <option value="">— {t('selectResultPlaceholder') || 'Select a result'} —</option>
             {results.map((r) => (
               <option key={r.id} value={r.id}>
                 #{r.id} ({statusLabel(r.status)}) — {formatDT(r.createdAt)}
@@ -257,7 +257,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
 
         {selectedResult?.completedAt && !isPending && (
           <span style={{ fontSize: 12, color: '#374151' }}>
-            {t('lastCompleted') || 'Dokončeno'}: {formatDT(selectedResult.completedAt)}
+            {t('lastCompleted') || 'Completed'}: {formatDT(selectedResult.completedAt)}
           </span>
         )}
 
@@ -273,12 +273,12 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
             showDelete
             readOnly={false}
             showModificationDate
-            title={`Výsledek #${selectedResultId}`}
+            title={`Result #${selectedResultId}`}
             refreshTrigger={refreshTrigger}
           />
         ) : (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }}>
-            {t('selectResultToView') || 'Vyberte výsledek pro zobrazení souborů'}
+            {t('selectResultToView') || 'Select a result to view files'}
           </div>
         )}
       </div>

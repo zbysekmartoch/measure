@@ -1148,6 +1148,29 @@ router.get('/:id/scripts/folder/zip', async (req, res, next) => {
   }
 });
 
+// Create a new folder inside the lab's scripts directory.
+router.post('/:id/scripts/folder', async (req, res, next) => {
+  try {
+    const { path: folderPath } = req.body;
+    if (!folderPath?.trim()) return res.status(400).json({ error: 'Missing path parameter' });
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabScriptsRoot(req.params.id);
+    const dirPath = getSecurePath(root, folderPath.trim());
+    if (!dirPath) return res.status(400).json({ error: 'Invalid path' });
+
+    await fs.mkdir(dirPath, { recursive: true });
+    res.status(201).json({ success: true, path: folderPath.trim() });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Delete an entire folder recursively.
 router.delete('/:id/scripts/folder', async (req, res, next) => {
   try {

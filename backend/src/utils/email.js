@@ -4,7 +4,7 @@ import { config } from '../config.js';
 let transporter = null;
 
 /**
- * Inicializace emailového transportu
+ * Initialize email transport
  */
 function getTransporter() {
   if (!transporter && config.email?.auth?.user && config.email?.auth?.pass) {
@@ -22,16 +22,16 @@ function getTransporter() {
 }
 
 /**
- * Odeslání e-mailu pro reset hesla
- * @param {string} email - E-mail příjemce
- * @param {string} resetToken - JWT token pro reset
- * @returns {Promise<boolean>} - true pokud bylo odesláno úspěšně
+ * Send password reset email
+ * @param {string} email - Recipient email address
+ * @param {string} resetToken - JWT token for password reset
+ * @returns {Promise<boolean>} - true if sent successfully
  */
 export async function sendPasswordResetEmail(email, resetToken) {
   const transport = getTransporter();
   
   if (!transport) {
-    console.warn('Email transport není nakonfigurován. Reset token:', resetToken);
+    console.warn('Email transport is not configured. Reset token:', resetToken);
     return false;
   }
 
@@ -40,7 +40,7 @@ export async function sendPasswordResetEmail(email, resetToken) {
   const mailOptions = {
     from: config.email.from,
     to: email,
-    subject: 'Reset hesla - RPA',
+    subject: 'Password Reset - RPA',
     html: `
       <!DOCTYPE html>
       <html>
@@ -72,17 +72,17 @@ export async function sendPasswordResetEmail(email, resetToken) {
         </head>
         <body>
           <div class="container">
-            <h2>Reset hesla</h2>
-            <p>Dobrý den,</p>
-            <p>Obdrželi jste tento e-mail, protože jste (nebo někdo jiný) požádali o reset hesla pro váš účet v RPA systému.</p>
-            <p>Pro dokončení resetu hesla klikněte na následující tlačítko:</p>
-            <a href="${resetUrl}" class="button">Resetovat heslo</a>
-            <p>Případně můžete použít tento odkaz:</p>
+            <h2>Password Reset</h2>
+            <p>Hello,</p>
+            <p>You are receiving this email because you (or someone else) requested a password reset for your account in the RPA system.</p>
+            <p>To complete the password reset, click the following button:</p>
+            <a href="${resetUrl}" class="button">Reset Password</a>
+            <p>Alternatively, you can use this link:</p>
             <p><a href="${resetUrl}">${resetUrl}</a></p>
-            <p><strong>Tento odkaz vyprší za 1 hodinu.</strong></p>
-            <p>Pokud jste o reset hesla nežádali, můžete tento e-mail bezpečně ignorovat. Vaše heslo zůstane beze změny.</p>
+            <p><strong>This link will expire in 1 hour.</strong></p>
+            <p>If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
             <div class="footer">
-              <p>Toto je automatická zpráva, neodpovídejte na ni.</p>
+              <p>This is an automated message, please do not reply.</p>
               <p>RPA - Retail Prices Analyzer</p>
             </div>
           </div>
@@ -90,37 +90,37 @@ export async function sendPasswordResetEmail(email, resetToken) {
       </html>
     `,
     text: `
-Reset hesla
+Password Reset
 
-Dobrý den,
+Hello,
 
-Obdrželi jste tento e-mail, protože jste (nebo někdo jiný) požádali o reset hesla pro váš účet v RPA Backend systému.
+You are receiving this email because you (or someone else) requested a password reset for your account in the RPA Backend system.
 
-Pro dokončení resetu hesla otevřete následující odkaz ve vašem prohlížeči:
+To complete the password reset, open the following link in your browser:
 ${resetUrl}
 
-Tento odkaz vyprší za 1 hodinu.
+This link will expire in 1 hour.
 
-Pokud jste o reset hesla nežádali, můžete tento e-mail bezpečně ignorovat. Vaše heslo zůstane beze změny.
+If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.
 
 ---
-Toto je automatická zpráva, neodpovídejte na ni.
+This is an automated message, please do not reply.
 RPA Backend - Retail Prices Analyzer
     `
   };
 
   try {
     const info = await transport.sendMail(mailOptions);
-    console.log('Reset email odeslán:', info.messageId);
+    console.log('Reset email sent:', info.messageId);
     return true;
   } catch (error) {
-    console.error('Chyba při odesílání e-mailu:', error);
+    console.error('Error sending email:', error);
     return false;
   }
 }
 
 /**
- * Ověření e-mailové konfigurace
+ * Verify email configuration
  * @returns {Promise<boolean>}
  */
 export async function verifyEmailConfig() {
@@ -132,10 +132,10 @@ export async function verifyEmailConfig() {
 
   try {
     await transport.verify();
-    console.log('Email konfigurace je validní');
+    console.log('Email configuration is valid');
     return true;
   } catch (error) {
-    console.error('Email konfigurace není validní:', error.message);
+    console.error('Email configuration is not valid:', error.message);
     return false;
   }
 }

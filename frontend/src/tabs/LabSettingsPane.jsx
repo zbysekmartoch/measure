@@ -41,7 +41,7 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
 
   // ---- Save ----
   const handleSave = useCallback(async () => {
-    if (!name.trim()) { toast.error('Název nesmí být prázdný'); return; }
+    if (!name.trim()) { toast.error('Name must not be empty'); return; }
     try {
       setSaving(true);
       const updated = await fetchJSON(`/api/v1/labs/${lab.id}`, {
@@ -49,10 +49,10 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), description: description.trim() }),
       });
-      toast.success(t('labSaved') || 'Laboratoř uložena');
+      toast.success(t('labSaved') || 'Lab saved');
       onLabUpdate?.(updated);
     } catch (err) {
-      toast.error(`${t('errorSavingLab') || 'Chyba při ukládání'}: ${err.message || err}`);
+      toast.error(`${t('errorSavingLab') || 'Error saving'}: ${err.message || err}`);
     } finally {
       setSaving(false);
     }
@@ -75,7 +75,7 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
       }
       onLabUpdate?.(updated);
     } catch (err) {
-      toast.error(`Chyba: ${err.message || err}`);
+      toast.error(`Error: ${err.message || err}`);
     }
   }, [lab.id, toast, onLabUpdate]);
 
@@ -86,22 +86,22 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
 
   const formatDate = (s) => {
     if (!s) return '-';
-    try { return new Date(s).toLocaleString('cs-CZ'); } catch { return s; }
+    try { return new Date(s).toLocaleString('en-US'); } catch { return s; }
   };
 
   return (
     <div style={{ maxWidth: 640, margin: '0 auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>⚙️ {t('labSettings') || 'Nastavení laboratoře'}</h2>
+      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>⚙️ {t('labSettings') || 'Lab settings'}</h2>
 
       {/* Name */}
       <div>
-        <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>{t('name') || 'Název'}</label>
+        <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>{t('name') || 'Name'}</label>
         <input value={name} onChange={(e) => setName(e.target.value)} style={fieldStyle} />
       </div>
 
       {/* Description */}
       <div>
-        <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>{t('description') || 'Popis'}</label>
+        <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>{t('description') || 'Description'}</label>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} style={{ ...fieldStyle, resize: 'vertical' }} />
       </div>
 
@@ -113,7 +113,7 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
           disabled={!dirty || saving}
           style={{ padding: '8px 20px', boxShadow: dirty && !saving ? shadow.normal : 'none' }}
         >
-          {saving ? '⏳' : '💾'} {t('save') || 'Uložit'}
+          {saving ? '⏳' : '💾'} {t('save') || 'Save'}
         </button>
       </div>
 
@@ -123,15 +123,15 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
       <div style={{ fontSize: 13, color: '#6b7280', display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span>ID: {lab.id}</span>
         <span>Owner: #{lab.ownerId}</span>
-        <span>Vytvořeno: {formatDate(lab.createdAt)}</span>
-        <span>Aktualizováno: {formatDate(lab.updatedAt)}</span>
+        <span>Created: {formatDate(lab.createdAt)}</span>
+        <span>Updated: {formatDate(lab.updatedAt)}</span>
       </div>
 
       <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb' }} />
 
       {/* Sharing — checkboxes for all users */}
       <div>
-        <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 600 }}>👥 {t('sharing') || 'Sdílení'}</h3>
+        <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 600 }}>👥 {t('sharing') || 'Sharing'}</h3>
 
         <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto', maxHeight: 280 }}>
           {users.filter((u) => String(u.id) !== String(user?.id)).map((u) => {
@@ -153,7 +153,7 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
             );
           })}
           {users.filter((u) => String(u.id) !== String(user?.id)).length === 0 && (
-            <div style={{ padding: 12, color: '#9ca3af', fontSize: 13 }}>Žádní další uživatelé.</div>
+            <div style={{ padding: 12, color: '#9ca3af', fontSize: 13 }}>No other users.</div>
           )}
         </div>
       </div>

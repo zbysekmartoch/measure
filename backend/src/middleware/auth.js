@@ -13,7 +13,7 @@ export const authenticateToken = (req, res, next) => {
   }
 
   if (!token) {
-    return res.status(401).json({ error: 'Chybí autorizační token' });
+    return res.status(401).json({ error: 'Missing authorization token' });
   }
   
   try {
@@ -21,6 +21,6 @@ export const authenticateToken = (req, res, next) => {
     req.userId = decoded.userId;
     next();
   } catch {
-    return res.status(401).json({ error: 'Neplatný nebo vypršelý token' });
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
 };

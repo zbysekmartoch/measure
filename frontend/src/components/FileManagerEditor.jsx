@@ -63,7 +63,7 @@ require(['vs/editor/editor.main'],function(){const ed=monaco.editor.create(docum
 value:${JSON.stringify(fm.fileContent)},language:'${getLanguageFromFilename(fm.selectedFile)}',
 theme:'vs-dark',fontSize:13,minimap:{enabled:true},automaticLayout:true,wordWrap:'on',tabSize:2,readOnly:${readOnly}});
 document.getElementById('ts').addEventListener('change',e=>monaco.editor.setTheme(e.target.value));
-${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{try{const r=await fetch('${apiBasePath}/content',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${localStorage.getItem('authToken')}'},body:JSON.stringify({file:'${fm.selectedFile}',content:ed.getValue()})});if(!r.ok)throw 0;alert('Uloženo!');}catch{alert('Chyba při ukládání');}});` : ''}});<` + `/script></body></html>`;
+${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{try{const r=await fetch('${apiBasePath}/content',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${localStorage.getItem('authToken')}'},body:JSON.stringify({file:'${fm.selectedFile}',content:ed.getValue()})});if(!r.ok)throw 0;alert('Saved!');}catch{alert('Error saving');}});` : ''}});<` + `/script></body></html>`;
     w.document.write(html);
     w.document.close();
   }, [fm.selectedFile, fm.selectedFileInfo, fm.fileContent, apiBasePath, readOnly]);
@@ -96,6 +96,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
         onFileClick={(file) => fm.loadFileContent(file)}
         onFileDoubleClick={onFileDoubleClick}
         onCreateNewFile={fm.createNewFile}
+        onCreateNewFolder={fm.createNewFolder}
         onDeleteFolder={fm.deleteFolderRecursive}
         onDownloadFolderZip={fm.downloadFolderZip}
         onPasteInto={fm.pasteInto}

@@ -25,24 +25,36 @@ export const shadow = {
 // ─── File browser toolbar buttons ───────────────────────────────────────────
 
 export const fileBrowserButtons = {
-  refresh:      { icon: '↻',  bg: '#8b5cf6', label: 'Obnovit' },
-  preview:      { icon: '▶',  bg: '#3b82f6', label: 'Náhled' },
-  previewHide:  { icon: '◀',  bg: '#6b7280', label: 'Skrýt náhled' },
-  newFile:      { icon: '📝', bg: '#f59e0b', label: 'Nový soubor' },
-  paste:        { icon: '📌', bg: '#8b5cf6', label: 'Paste' },
-  upload:       { icon: '+',  bg: '#22c55e', label: 'Nahrát' },
+  refresh:      { icon: '↻',  bg: '#009771', label: 'Refresh' },
+  preview:      { icon: '▶',  bg: '#6c4599', label: 'Preview' },
+  previewHide:  { icon: '◀',  bg: '#6c4599', label: 'Hide preview' },
+  newFile:      { icon: '+', bg: '#00a2ff', label: 'New file' },
+  paste:        { icon: 'P', bg: '#003a91', label: '' },
+  upload:       { icon: '⬆',  bg: '#0066ff', label: '' },
 };
 
 // ─── File browser item (row) buttons ────────────────────────────────────────
 
 export const fileItemButtons = {
-  copyFile:     { icon: '📋', bg: '#6366f1', label: 'Kopírovat soubor' },
-  copyFolder:   { icon: '📋', bg: '#6366f1', label: 'Kopírovat složku' },
-  pasteInto:    { icon: '📌', bg: '#8b5cf6', label: 'Vložit sem' },
-  uploadHere:   { icon: '+',  bg: '#22c55e', label: 'Nahrát sem' },
-  downloadZip:  { icon: '⬇',  bg: '#3b82f6', label: 'Stáhnout ZIP' },
-  deleteFolder: { icon: '🗑', bg: '#ef4444', label: 'Smazat složku' },
-  debugWorkflow:{ icon: '🛠', bg: '#b82b2b', label: 'Debug workflow' },
+  copyFile:     { icon: 'C', bg: '#000916', label: 'Copy file' },
+  copyFolder:   { icon: 'C', bg: '#000916', label: 'Copy folder' },
+  pasteInto:    { icon: 'P', bg: '#003a91', label: 'Paste here' },
+  newFile:      { icon: '+', bg: '#00a2ff', label: 'New file' },
+  newFolder:    { icon: '+F', bg: '#00a2ff', label: 'New folder' },
+  uploadHere:   { icon: '⬆', bg: '#0066ff', label: 'Upload here' },
+  downloadZip:  { icon: '⬇',  bg: '#2f9722', label: 'Download ZIP' },
+  deleteFolder: { icon: '🗑', bg: '#f81717', label: 'Delete folder' },
+  debugWorkflow:{ icon: '🛠', bg: '#ff7300', label: 'Debug workflow' },
+};
+
+// ─── File preview toolbar buttons ───────────────────────────────────────────
+
+export const filePreviewButtons = {
+  edit:     { icon: '✏', bg: '#ff7300', label: 'Edit' },
+  download: { icon: '⬇', bg: '#2f9722', label: 'Download' },
+  delete:   { icon: '🗑', bg: '#f81717', label: 'Delete' },
+  save:     { icon: '💾', bg: '#0066ff', label: 'Save' },
+  cancel:   { icon: '✕', bg: '#6b7280', label: 'Cancel' },
 };
 
 // ─── Result pane buttons ────────────────────────────────────────────────────
@@ -50,13 +62,13 @@ export const fileItemButtons = {
 export const resultButtons = {
   run: {
     icon: '▶',
-    bg: '#b82b2b',
+    bg: '#0aad25',
     disabledBg: '#9ca3af',
     label: 'Run',
   },
   debug: {
     icon: '🛠',
-    bg: '#b82b2b',
+    bg: '#ad610a',
     disabledBg: '#9ca3af',
     label: 'Debug',
   },
@@ -80,7 +92,7 @@ export const debugButtons = {
   },
   stop: {
     icon: '⏹',
-    bg: '#991b1b',
+    bg: '#f81717',
     label: 'Stop',
   },
   continue: {
@@ -110,40 +122,48 @@ export const debugButtons = {
 // ─── Debug mode switcher buttons ────────────────────────────────────────────
 
 export const debugModes = {
-  hidden: { icon: '🚫', label: 'Skrýt' },
-  right:  { icon: '◧',  label: 'Vpravo' },
-  bottom: { icon: '⬓',  label: 'Pod' },
-  popup:  { icon: '⧉',  label: 'Nové okno' },
+  hidden: { icon: '⊘', label: 'Hide debugger' },
+  right:  { icon: '◧',  label: 'Debugger on the right' },
+  bottom: { icon: '⬓',  label: 'Debugger at bottom' },
+  popup:  { icon: '⧉',  label: 'Debugger in a separate window' },
 
   /** Panel background */
   panelBg: '#f3f4f6',
   panelBorder: '#d1d5db',
   /** Active/pressed toggle */
   activeBg: '#e0e7ff',
-  activeColor: '#3730a3',
+  activeColor: '#232925',
   activeBorder: '#012345',
   /** Inactive toggle */
   inactiveBg: '#f9fafb',
-  inactiveColor: '#6b7280',
+  inactiveColor: '#23252b',
 };
 
 // ─── General action button colors (used via CSS classes .btn-*) ─────────────
 
 export const actionButtons = {
-  add:       { bg: '#16a34a', hoverBg: '#15803d', disabledBg: '#bbf7d0' },
-  delete:    { bg: '#dc2626', hoverBg: '#b91c1c', disabledBg: '#fecaca' },
-  edit:      { bg: '#2563eb', hoverBg: '#1d4ed8', disabledBg: '#bfdbfe' },
-  primary:   { bg: '#0d9488', hoverBg: '#0f766e', disabledBg: '#99f6e4' },
+  add:       { bg: '#00a2ff', hoverBg: '#0186d3', disabledBg: '#bbf7d0' },
+  delete:    { bg: '#f81717', hoverBg: '#b91c1c', disabledBg: '#fecaca' },
+  edit:      { bg: '#eb4325', hoverBg: '#d8491d', disabledBg: '#bfdbfe' },
+  primary:   { bg: '#008f83', hoverBg: '#016e65', disabledBg: '#99f6e4' },
   secondary: { bg: '#6b7280', hoverBg: '#4b5563', disabledBg: '#e5e7eb' },
   cancel:    { bg: '#f3f4f6', hoverBg: '#e5e7eb', border: '#d1d5db', color: '#374151' },
   warning:   { bg: '#7c3aed', hoverBg: '#6d28d9', disabledBg: '#ddd6fe' },
-  logout:    { bg: '#ef4444', hoverBg: '#dc2626' },
+  logout:    { bg: '#f81717', hoverBg: '#dc2626' },
 };
 
-// ─── Icons ──────────────────────────────────────────────────────────────────
+// ─── Tab icon colors ────────────────────────────────────────────────────────
+
+export const tabIcons = {
+  close:  { icon: '×',  color: '#c20000', hoverColor: '#ff0000' },
+  popOut: { icon: '⧉', color: 'rgb(0, 101, 148)', hoverColor: '#rgb(0, 174, 255)' },
+  enter:  { icon: '↗', color: '#9ca3af', hoverColor: '#059669' },
+};
+
+// ─── Icons (legacy shortcut) ────────────────────────────────────────────────
 
 export const icons = {
   popOut: '⧉',
   close: '×',
-  enter: '⧉',
+  enter: '↗',
 };

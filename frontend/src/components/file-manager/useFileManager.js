@@ -69,7 +69,7 @@ export default function useFileManager({
   const loadFileContent = useCallback(async (file, forceLoad = false) => {
     if (!forceLoad && isEditing && fileContent !== originalContent && selectedFile && selectedFile !== file.path) {
       const msg = t('unsavedChangesConfirm') ||
-        `Soubor "${selectedFile}" má neuložené změny. Chcete je uložit?\n\nUložit = OK, Zahodit = Cancel`;
+        `File "${selectedFile}" has unsaved changes. Do you want to save them?\n\nSave = OK, Discard = Cancel`;
       if (confirm(msg)) {
         try {
           const r = await fetch(`${apiBasePath}/content`, {
@@ -78,9 +78,9 @@ export default function useFileManager({
             body: JSON.stringify({ file: selectedFile, content: fileContent }),
           });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          toast.success(t('fileSaved') || 'Soubor uložen');
+          toast.success(t('fileSaved') || 'File saved');
         } catch {
-          toast.error(t('errorSavingFile') || 'Chyba při ukládání souboru');
+          toast.error(t('errorSavingFile') || 'Error saving file');
           return;
         }
       }
@@ -105,7 +105,7 @@ export default function useFileManager({
         setPdfBlobUrl(URL.createObjectURL(await r.blob()));
         setFileContent('');
       } catch {
-        toast.error(t('errorLoadingFileContent') || 'Chyba při načítání PDF');
+        toast.error(t('errorLoadingFileContent') || 'Error loading PDF');
       } finally { setLoading(false); }
       return;
     }
@@ -122,7 +122,7 @@ export default function useFileManager({
       setFileContent(data.content || '');
       setOriginalContent(data.content || '');
     } catch {
-      toast.error(t('errorLoadingFileContent') || 'Chyba při načítání obsahu souboru');
+      toast.error(t('errorLoadingFileContent') || 'Error loading file content');
     } finally { setLoading(false); }
   }, [apiBasePath, t, onFileSelect, toast, pdfBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
 
@@ -138,16 +138,16 @@ export default function useFileManager({
       });
       if (!r.ok) throw new Error();
       setOriginalContent(fileContent);
-      toast.success(t('fileSaved') || 'Soubor uložen');
+      toast.success(t('fileSaved') || 'File saved');
     } catch {
-      toast.error(t('errorSavingFile') || 'Chyba při ukládání souboru');
+      toast.error(t('errorSavingFile') || 'Error saving file');
     } finally { setLoading(false); }
   }, [selectedFile, fileContent, t, apiBasePath, readOnly, toast]);
 
   // ---- delete file ----
   const deleteFile = useCallback(async (filepath) => {
     if (!showDelete) return;
-    if (!confirm(t('confirmDeleteFile') || `Opravdu smazat soubor "${filepath}"?`)) return;
+    if (!confirm(t('confirmDeleteFile') || `Are you sure you want to delete file "${filepath}"?`)) return;
     try {
       setLoading(true);
       await fetch(`${apiBasePath}?file=${encodeURIComponent(filepath)}`, {
@@ -156,9 +156,9 @@ export default function useFileManager({
       });
       if (selectedFile === filepath) { setSelectedFile(null); setSelectedFileInfo(null); setFileContent(''); }
       await loadFiles();
-      toast.success(t('fileDeleted') || 'Soubor smazán');
+      toast.success(t('fileDeleted') || 'File deleted');
     } catch {
-      toast.error(t('errorDeletingFile') || 'Chyba při mazání souboru');
+      toast.error(t('errorDeletingFile') || 'Error deleting file');
     } finally { setLoading(false); }
   }, [selectedFile, loadFiles, t, apiBasePath, showDelete, toast]);
 
@@ -196,16 +196,38 @@ export default function useFileManager({
         });
       }
       await loadFiles();
-      toast.success(`Soubor "${filePath}" vytvořen`);
+      toast.success(`File "${filePath}" created`);
     } catch {
-      toast.error('Chyba při vytváření souboru');
+      toast.error('Error creating file');
+    } finally { setLoading(false); }
+  }, [apiBasePath, loadFiles, toast]);
+
+  // ---- create new folder ----
+  const createNewFolder = useCallback(async (folderPath) => {
+    if (!folderPath?.trim()) return;
+    try {
+      setLoading(true);
+      const r = await fetch(`${apiBasePath}/folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ path: folderPath.trim() }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || `HTTP ${r.status}`);
+      }
+      await loadFiles();
+      setExpandedFolders((p) => ({ ...p, [folderPath.trim()]: true }));
+      toast.success(`Folder "${folderPath}" created`);
+    } catch (e) {
+      toast.error(`Error creating folder: ${e.message}`);
     } finally { setLoading(false); }
   }, [apiBasePath, loadFiles, toast]);
 
   // ---- delete folder recursively ----
   const deleteFolderRecursive = useCallback(async (folder) => {
     if (!showDelete) return;
-    if (!confirm(`Opravdu smazat celou složku "${folder}" a vše v ní?`)) return;
+    if (!confirm(`Are you sure you want to delete folder "${folder}" and all its contents?`)) return;
     try {
       setLoading(true);
       await fetch(`${apiBasePath}/folder?path=${encodeURIComponent(folder)}`, {
@@ -216,9 +238,9 @@ export default function useFileManager({
         setSelectedFile(null); setSelectedFileInfo(null); setFileContent('');
       }
       await loadFiles();
-      toast.success(`Složka "${folder}" smazána`);
+      toast.success(`Folder "${folder}" deleted`);
     } catch {
-      toast.error('Chyba při mazání složky');
+      toast.error('Error deleting folder');
     } finally { setLoading(false); }
   }, [apiBasePath, showDelete, selectedFile, loadFiles, toast]);
 
@@ -250,9 +272,9 @@ export default function useFileManager({
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
       await loadFiles();
       if (targetFolder) setExpandedFolders((p) => ({ ...p, [targetFolder]: true }));
-      toast.success('Vloženo');
+      toast.success('Pasted');
     } catch (e) {
-      toast.error(`Chyba při vkládání: ${e.message}`);
+      toast.error(`Error pasting: ${e.message}`);
     } finally { setLoading(false); }
   }, [apiBasePath, loadFiles, toast]);
 
@@ -262,7 +284,7 @@ export default function useFileManager({
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const folder = prompt(t('enterFolderPath') || 'Zadejte cestu ke složce (prázdné pro root):', '');
+    const folder = prompt(t('enterFolderPath') || 'Enter folder path (empty for root):', '');
     if (folder === null) return;
     const formData = new FormData();
     if (folder) formData.append('targetPath', folder);
@@ -275,9 +297,9 @@ export default function useFileManager({
         body: formData,
       });
       await loadFiles();
-      toast.success(t('fileUploaded') || 'Soubor nahrán');
+      toast.success(t('fileUploaded') || 'File uploaded');
     } catch {
-      toast.error(t('errorUploadingFile') || 'Chyba při nahrávání souboru');
+      toast.error(t('errorUploadingFile') || 'Error uploading file');
     } finally { setLoading(false); }
   }, [loadFiles, t, apiBasePath, showUpload, toast]);
 
@@ -298,9 +320,9 @@ export default function useFileManager({
       });
       await loadFiles();
       setExpandedFolders((p) => ({ ...p, [uploadTargetFolder]: true }));
-      toast.success(`${t('fileUploadedToFolder') || 'Soubor nahrán do'} ${uploadTargetFolder}`);
+      toast.success(`${t('fileUploadedToFolder') || 'File uploaded to'} ${uploadTargetFolder}`);
     } catch {
-      toast.error(t('errorUploadingFile') || 'Chyba při nahrávání souboru');
+      toast.error(t('errorUploadingFile') || 'Error uploading file');
     } finally { setLoading(false); setUploadTargetFolder(null); }
   }, [loadFiles, t, apiBasePath, showUpload, uploadTargetFolder, toast]);
 
@@ -326,13 +348,13 @@ export default function useFileManager({
           body: formData,
         });
       } catch {
-        toast.error(`${t('errorUploadingFile') || 'Chyba'}: ${file.name}`);
+        toast.error(`${t('errorUploadingFile') || 'Error'}: ${file.name}`);
       }
     }
     await loadFiles();
     setLoading(false);
     setExpandedFolders((p) => ({ ...p, [targetFolder]: true }));
-    toast.success(t('filesUploaded') || `Nahráno ${dropped.length} soubor(ů)`);
+    toast.success(t('filesUploaded') || `Uploaded ${dropped.length} file(s)`);
   }, [loadFiles, t, apiBasePath, showUpload, toast]);
 
   // ---- folder toggle ----
@@ -354,7 +376,7 @@ export default function useFileManager({
     pdfBlobUrl, isEditing, expandedFolders,
     dragOverFolder, folderUploadRef, apiBasePath,
     loadFiles, loadFileContent, saveFileContent, deleteFile, downloadFile,
-    createNewFile, deleteFolderRecursive, downloadFolderZip,
+    createNewFile, createNewFolder, deleteFolderRecursive, downloadFolderZip,
     pasteInto,
     handleFileUpload, handleFolderUpload, triggerFolderUpload, handleDrop,
     toggleFolder, handleDragOver, handleDragLeave,

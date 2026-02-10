@@ -47,7 +47,7 @@ export const LanguageProvider = ({ children }) => {
   }, [language]);
 
   const t = (key, params = {}) => {
-    let text = translations[language]?.[key] || translations.cz[key] || key;
+    let text = translations[language]?.[key] || translations.en[key] || key;
     
     // Interpolate parameters {param}
     if (params && typeof params === 'object') {

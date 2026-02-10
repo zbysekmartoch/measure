@@ -254,7 +254,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           padding: 2,
           boxShadow: shadow.small,
         }}>
-          <span style={{ fontSize: 11, color: '#6b7280', padding: '0 6px', whiteSpace: 'nowrap' }}>🛠</span>
+          <span style={{ fontSize: 16, color: '#6b7280', padding: '0 6px', whiteSpace: 'nowrap' }}>🛠|</span>
           {DEBUG_MODES.map((m) => {
             const isActive = debugMode === m.key;
             return (

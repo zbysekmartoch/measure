@@ -1,4 +1,4 @@
-// src/routes/index.js – hlavní router backendu
+// src/routes/index.js – main backend router
 import { Router } from 'express';
 import { notFound, errorHandler } from '../middleware/error.js';
 import { config } from '../config.js';
@@ -19,10 +19,10 @@ const __dirname = path.dirname(__filename);
 
 const router = Router();
 
-// Rozšířený healthcheck s informacemi o systému
+// Extended healthcheck with system information
 router.get('/health', async (req, res) => {
   try {
-    // Načti verzi z package.json
+    // Read version from package.json
     const packageJsonPath = path.join(__dirname, '../../package.json');
     let version = 'unknown';
     let appName = 'rpa-backend';
@@ -35,7 +35,7 @@ router.get('/health', async (req, res) => {
       console.warn('Failed to read package.json:', e.message);
     }
 
-    // Získej hostname a port
+    // Get hostname and port
     const hostname = os.hostname();
     const port = config.port || process.env.PORT || 3000;
 
@@ -68,10 +68,10 @@ router.get('/health', async (req, res) => {
   }
 });
 
-// API routes - auth endpoint bez autentifikace
+// API routes - auth endpoint without authentication
 router.use('/v1/auth', auth);
 
-// Všechny ostatní v1 routes vyžadují autentifikaci
+// All other v1 routes require authentication
 router.use('/v1/sql', authenticateToken, sql);
 router.use('/v1/labs', authenticateToken, labs);
 router.use('/v1/users', authenticateToken, users);
@@ -150,7 +150,7 @@ router.post('/v1/paste', authenticateToken, async (req, res, next) => {
   }
 });
 
-// Middleware na konec
+// Middleware at the end
 router.use(notFound);
 router.use(errorHandler);
 

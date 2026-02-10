@@ -1,917 +1,426 @@
-# DEVELOPMENT.md — Podrobný vývojářský průvodce aplikací Measure
+# Development Guide
 
-> Poslední aktualizace: únor 2026
-
----
-
-## 1. Přehled projektu
-
-**MEASURE** (Modular Extensible Analytical Stack — UOHS Research Environment) je webová analytická platforma pro data scientisty. Umožňuje:
-
-- Tvorbu a editaci analytických skriptů (Python, JavaScript, R, Shell)
-- Spouštění vícekrokových workflow
-- Prohlížení výsledků s live logem
-- Ad-hoc SQL dotazy nad MySQL, SQLite a externími datasourcy
-- Správu osobních a sdílených laboratoří (Labs)
-- Debug režim – opakované spuštění nad existujícím `data.json`
-
-Projekt vznikl refaktorem z původního retailového analytického nástroje (RPA). Doménová logika (produkty, košíky, kategorie, harvesting) byla odstraněna a zůstalo obecné analytické jádro.
+Comprehensive developer reference for the Measure application.
 
 ---
 
-## 2. Architektura
+## Table of Contents
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Frontend (React 19 + Vite 7)         │
-│  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌──────┐ ┌─────┐ │
-│  │AnalysesTab│ │LabsTab   │ │Results │ │Debug │ │Sett.│ │
-│  │ Execution │ │ My/Shared│ │Tab     │ │Tab   │ │Tab  │ │
-│  │ Definition│ │ Lab tabs │ │        │ │      │ │     │ │
-│  └──────────┘ └──────────┘ └────────┘ └──────┘ └─────┘ │
-│  ┌────────────────────────────┐ ┌──────────────────────┐ │
-│  │ FileManagerEditor (Monaco) │ │ SqlEditorTab (Monaco)│ │
-│  └────────────────────────────┘ └──────────────────────┘ │
-│  ┌──────────────┐ ┌───────────┐ ┌──────────────────────┐ │
-│  │ AuthContext   │ │ Lang/i18n │ │ SettingsContext      │ │
-│  └──────────────┘ └───────────┘ └──────────────────────┘ │
-└──────────────────────────┬──────────────────────────────┘
-                           │ Vite proxy /api → :3000
-┌──────────────────────────▼──────────────────────────────┐
-│                  Backend (Node.js + Express)             │
-│  ┌──────────────────────────────────────────────────────┐│
-│  │ Middleware: Helmet, CORS, Rate Limit, JWT Auth       ││
-│  └──────────────────────────────────────────────────────┘│
-│  Routes:                                                 │
-│  /api/v1/auth      – login, register, me, reset-password│
-│  /api/v1/analyses  – CRUD + run                         │
-│  /api/v1/results   – list, detail, log, download, debug │
-│  /api/v1/workflows – list .workflow soubory             │
-│  /api/v1/scripts   – file manager nad scripts/          │
-│  /api/v1/sql       – ad-hoc SQL dotazy                  │
-│  /api/v1/labs      – CRUD, sharing, state, scripts      │
-│  /api/v1/users     – seznam uživatelů                   │
-│  /api/health       – healthcheck                        │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ Utilities: file-manager.js, email.js               │ │
-│  └────────────────────────────────────────────────────┘ │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-              ┌────────────▼────────────┐
-              │      MySQL/MariaDB       │
-              │ Tabulky: usr, analysis,  │
-              │ result, password_resets  │
-              └─────────────────────────┘
-              ┌─────────────────────────┐
-              │      Filesystem          │
-              │ backend/scripts/         │
-              │ backend/results/{id}/    │
-              │ backend/labs/{uuid}/     │
-              │ backend/datasources/     │
-              └─────────────────────────┘
-```
-
-### Komunikační tok
-
-1. Frontend posílá HTTP requesty přes `fetchJSON()`, automaticky přidává JWT `Authorization: Bearer <token>`.
-2. Vite dev server proxy přesměrovává `/api/*` na backend port 3000.
-3. Backend middleware `authenticateToken` dekóduje JWT a nastaví `req.userId`.
-4. Routy pracují s MySQL (přes `mysql2/promise` pool) a souborovým systémem.
+1. [Overview](#overview)
+2. [Project Structure](#project-structure)
+3. [Architecture](#architecture)
+4. [Backend Modules](#backend-modules)
+5. [Frontend Modules](#frontend-modules)
+6. [Database Schema](#database-schema)
+7. [Configuration](#configuration)
+8. [API Endpoints](#api-endpoints)
+9. [Data Flow](#data-flow)
+10. [Security](#security)
+11. [Development Setup](#development-setup)
+12. [Code Conventions](#code-conventions)
+13. [Known Limitations](#known-limitations)
 
 ---
 
-## 3. Technologický stack
+## Overview
 
-### Frontend
-| Technologie | Verze | Účel |
-|---|---|---|
-| React | 19.x | UI framework (hooks, functional components) |
-| Vite | 7.x | Build tool, HMR, dev server s proxy |
-| Monaco Editor | `@monaco-editor/react` 4.7 | Editace kódu (Python, JS, SQL, JSON…) |
-| AG Grid Community | 34.x | Data gridy se sort/filter/virtualizací |
-| TanStack Table | 8.x | (dostupný, ale primárně se používá AG Grid) |
-
-### Backend
-| Technologie | Verze | Účel |
-|---|---|---|
-| Node.js | (ES Modules) | Runtime |
-| Express | 4.19 | HTTP framework |
-| mysql2 | 3.11 | MySQL connection pool |
-| better-sqlite3 | 11.x | SQLite pro SQL editor datasources |
-| jsonwebtoken | 9.x | JWT generování a ověření |
-| bcryptjs | 3.x | Hashování hesel |
-| multer | 2.x | Upload souborů (multipart) |
-| archiver | 7.x | ZIP export výsledků |
-| nodemailer | 7.x | Email pro password reset |
-| helmet | 7.x | Security HTTP headers |
-| pino / pino-http | 9.x / 10.x | Strukturované logování |
-| dotenv | 16.x | Environment variables |
-
-### Analytické skripty
-| Jazyk | Interpret | Konfigurace v `config.json` |
-|---|---|---|
-| Python | `.venv/bin/python` (lokální venv) | `.py` |
-| JavaScript / CJS | `node` | `.js`, `.cjs` |
-| Shell | `bash` | `.sh` |
-| R | `Rscript` | `.r`, `.R` |
+Measure is a browser-based analytical workbench. Users authenticate, create **labs** (analysis projects), manage files (scripts and results), execute scripts in multiple languages, run SQL queries, and debug scripts — all through a React SPA backed by an Express API.
 
 ---
 
-## 4. Adresářová struktura
+## Project Structure
 
 ```
 measure/
-├── DEVELOPMENT.md          ← tento dokument
-├── README.md               ← přehled projektu
-├── LABS.md                 ← specifikace Labs funkcionality
-├── CURRENT_STATE.md        ← archivní popis před refaktorem
-├── TARGET_STATE_AND_PLAN.md← archivní plán refaktoru (splněno)
-│
 ├── backend/
-│   ├── package.json        ← measure-backend v0.2.1, type: module
-│   ├── config.json         ← runtime konfigurace (cesty, script commands, logging)
-│   ├── .env                ← env proměnné (DB_HOST, JWT_SECRET, EMAIL_*)
-│   ├── eslint.config.js
-│   ├── API.md              ← kompletní API dokumentace
-│   ├── README.md
-│   ├── HEALTH_CHECK.md
-│   ├── EMAIL_TESTING.md
-│   ├── PYTHON_SETUP.md
-│   ├── SCRIPTS_API.md
-│   │
+│   ├── config.json              # Runtime configuration (script runners, logging, etc.)
+│   ├── .env                     # Secrets (DB, JWT, email)
+│   ├── package.json
+│   ├── datasources/             # SQL Server / SQLite connection configs
+│   ├── labs/                    # Lab data on disk (scripts, results, state)
+│   │   └── <id>/
+│   │       ├── lab.json         # Lab metadata
+│   │       ├── scripts/         # User scripts
+│   │       ├── results/         # Execution results
+│   │       └── state/           # Per-user UI state
+│   ├── sql/                     # Database DDL and migration scripts
 │   ├── src/
-│   │   ├── index.js        ← Express app bootstrap (helmet, cors, rate limit, pino)
-│   │   ├── config.js       ← konfigurace z .env (DB, CORS, JWT, email)
-│   │   ├── db.js           ← MySQL connection pool (mysql2/promise)
+│   │   ├── index.js             # Express server entry point
+│   │   ├── config.js            # Environment configuration loader
+│   │   ├── db.js                # MySQL connection pool
+│   │   ├── debug/               # DAP debug proxy (WebSocket)
 │   │   ├── middleware/
-│   │   │   ├── auth.js     ← JWT authenticateToken middleware
-│   │   │   └── error.js    ← 404 + centrální error handler
+│   │   │   ├── auth.js          # JWT authentication middleware
+│   │   │   └── error.js         # Global error handler
 │   │   ├── routes/
-│   │   │   ├── index.js    ← hlavní router – mountuje všechny subrouty
-│   │   │   ├── auth.js     ← login, register, /me, password reset
-│   │   │   ├── analyses.js ← CRUD analýz, /run, workflow resolution, script execution
-│   │   │   ├── results.js  ← list/detail/log/download(ZIP)/debug/delete výsledků
-│   │   │   ├── results-public.js ← public download DOCX/XLSX/ZIP bez auth
-│   │   │   ├── result-files.js   ← file manager pro results/{id}/ složku
-│   │   │   ├── workflows.js     ← list .workflow souborů z scripts/
-│   │   │   ├── scripts.js       ← file manager pro scripts/ (list/read/write/upload/delete)
-│   │   │   ├── sql.js           ← SQL executor (MySQL + SQLite), schema introspekce, datasources
-│   │   │   ├── labs.js          ← Labs CRUD, sharing, per-user state, lab scripts
-│   │   │   └── users.js         ← seznam uživatelů (pro sharing v Labs)
+│   │   │   ├── index.js         # Main router (mounts all sub-routers)
+│   │   │   ├── auth.js          # Login, register, password reset
+│   │   │   ├── labs.js          # Labs CRUD, files, execution, debugging
+│   │   │   ├── sql.js           # SQL execution against datasources
+│   │   │   └── users.js         # User listing (for sharing)
 │   │   └── utils/
-│   │       ├── file-manager.js  ← getSecurePath, listFiles, createUploadMiddleware
-│   │       └── email.js         ← nodemailer transport, sendPasswordResetEmail
-│   │
-│   ├── scripts/             ← globální analytické skripty a workflow šablony
-│   │   ├── *.workflow       ← workflow definice (řádky = kroky)
-│   │   ├── analyzy/         ← Python analytické skripty + venv
-│   │   │   ├── setup-python-env.sh
-│   │   │   ├── requirements.txt
-│   │   │   ├── dbsettings.py
-│   │   │   ├── export_to_csv.py
-│   │   │   ├── prepare_stats.py
-│   │   │   └── .venv/       ← Python virtual environment
-│   │   └── reports/         ← DOCX/PDF reportovací skripty (reporter.js)
-│   │
-│   ├── results/             ← výstupy analýz (složka per result ID)
-│   │   └── {id}/
-│   │       ├── data.json    ← vstupní konfigurace analýzy
-│   │       ├── progress.json← stav běhu (step, elapsed time)
-│   │       ├── analysis.log ← stdout log
-│   │       ├── analysis.err ← stderr log
-│   │       ├── *.docx/xlsx  ← reporty
-│   │       └── img/         ← vygenerované grafy
-│   │
-│   ├── labs/                ← laboratoře (složka per lab UUID)
-│   │   └── {uuid}/
-│   │       ├── lab.json     ← metadata (id, name, ownerId, sharedWith[], …)
-│   │       ├── scripts/     ← skripty laboratoře
-│   │       ├── results/     ← výsledky laboratoře (reserved)
-│   │       └── state/       ← per-user UI stav ({userId}.json)
-│   │
-│   ├── datasources/         ← SQL datasource konfigurace
-│   │   ├── *.sqlite         ← SQLite databáze
-│   │   ├── *.sqlserver.json ← SQL Server connection config
-│   │   └── *.mysql.json     ← MySQL connection config
-│   │
-│   ├── sql/                 ← DDL skripty
-│   │   ├── create.sql       ← CREATE TABLE statements
-│   │   ├── before-import.sql
-│   │   ├── after-import.sql
-│   │   └── migration-*.sql
-│   │
-│   ├── logs/                ← aplikační logy (pino)
-│   └── temp/                ← dočasné soubory
+│   │       ├── email.js         # Nodemailer wrapper
+│   │       └── file-manager.js  # Generic file management (list, read, write, upload, download, delete)
+│   └── temp/                    # Temporary files
 │
-└── frontend/
-    ├── package.json         ← measure-frontend, type: module
-    ├── vite.config.js       ← dev server port 5173, proxy /api → :3000
-    ├── index.html           ← SPA entry point
-    ├── eslint.config.js
-    ├── API.md
-    ├── README.md
-    ├── DEPLOYMENT.md
-    │
-    ├── public/              ← statické assety (logo, favicon)
-    │
-    └── src/
-        ├── main.jsx         ← ReactDOM mount, AG Grid module registrace
-        ├── App.jsx          ← root component, tab navigace, context providers
-        ├── App.css
-        ├── index.css
-        │
-        ├── components/      ← znovupoužitelné UI komponenty
-        │   ├── AuthPage.jsx           ← kontejner pro login/register/reset formuláře
-        │   ├── LoginForm.jsx          ← přihlašovací formulář
-        │   ├── RegisterForm.jsx       ← registrační formulář
-        │   ├── ResetPasswordForm.jsx  ← žádost o reset hesla
-        │   ├── ConfirmResetPasswordForm.jsx ← nastavení nového hesla
-        │   ├── FileManagerEditor.jsx  ← souborový prohlížeč + Monaco editor (1254 ř.)
-        │   ├── LanguageSelector.jsx   ← přepínač jazyka (CZ/SK/EN)
-        │   └── Toast.jsx             ← notifikační systém (success/error/warning)
-        │
-        ├── tabs/            ← hlavní záložky aplikace
-        │   ├── AnalysesTab.jsx            ← kontejner s sub-taby Execution/Definition
-        │   ├── AnalysisExecutionTab.jsx   ← seznam analýz + JSON editor + Run
-        │   ├── AnalysisDefinitionTab.jsx  ← File editor + SQL editor sub-taby
-        │   ├── ResultsTab.jsx             ← výsledky s live logem a pollingem
-        │   ├── LabsTab.jsx                ← My labs / Shared labs + dynamické lab taby
-        │   ├── SqlEditorTab.jsx           ← SQL editor s Monaco, autocomplete, datasources
-        │   ├── DebugTab.jsx               ← debug režim – editace result files + re-run
-        │   └── SettingsTab.jsx            ← jazyk, pokročilé UI toggle
-        │
-        ├── context/         ← React Context providers
-        │   ├── AuthContext.jsx    ← JWT auth (login/logout/register/resetPassword)
-        │   ├── LanguageContext.jsx ← i18n s detekcí jazyka prohlížeče
-        │   └── SettingsContext.jsx ← uživatelské preference (showAdvancedUI)
-        │
-        ├── hooks/           ← (prázdné – připraveno pro custom hooks)
-        │
-        ├── lib/             ← utility moduly
-        │   ├── fetchJSON.js    ← HTTP wrapper s auto JWT injection
-        │   ├── appConfig.js    ← konstanty (poll interval, toast duration)
-        │   ├── gridConfig.js   ← centrální AG Grid konfigurace (styly, filtry)
-        │   └── inferSchema.js  ← JSON → JSON Schema inference (historický)
-        │
-        ├── i18n/
-        │   └── translations.js ← překlady CZ/SK/EN (~170+ klíčů)
-        │
-        ├── schemas/         ← (odstraněno při refaktoru)
-        └── assets/          ← statické assety importované v kódu
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.js           # Vite config (proxy to backend)
+│   ├── index.html
+│   ├── public/
+│   └── src/
+│       ├── main.jsx             # React entry point
+│       ├── App.jsx              # Root component (auth gate + tab layout)
+│       ├── components/
+│       │   ├── AuthPage.jsx     # Login / register / reset password
+│       │   ├── LoginForm.jsx
+│       │   ├── RegisterForm.jsx
+│       │   ├── ResetPasswordForm.jsx
+│       │   ├── ConfirmResetPasswordForm.jsx
+│       │   ├── LanguageSelector.jsx
+│       │   ├── Toast.jsx        # Notification system
+│       │   ├── FileManagerEditor.jsx  # File manager barrel export
+│       │   └── file-manager/
+│       │       ├── FileBrowserPane.jsx   # Tree-based file browser
+│       │       ├── FilePreviewPane.jsx   # File preview / editor
+│       │       ├── useFileManager.js     # File manager state hook
+│       │       ├── ClipboardContext.jsx  # Cross-pane copy/paste
+│       │       └── fileUtils.js          # File type detection, formatting
+│       ├── context/
+│       │   ├── AuthContext.jsx       # JWT auth state
+│       │   ├── LanguageContext.jsx   # i18n provider
+│       │   └── SettingsContext.jsx   # User preferences
+│       ├── debug/
+│       │   ├── dap-client.js         # WebSocket DAP client
+│       │   ├── DebugEditor.jsx       # Debug code viewer
+│       │   ├── DebugPanel.jsx        # Debug controls (breakpoints, variables)
+│       │   └── useDebugSession.js    # Debug session hook
+│       ├── i18n/
+│       │   └── translations.js       # Translation strings
+│       ├── lib/
+│       │   ├── appConfig.js          # App-level constants
+│       │   ├── fetchJSON.js          # Authenticated fetch wrapper
+│       │   ├── gridConfig.js         # AG Grid configuration
+│       │   ├── inferSchema.js        # Schema inference for forms
+│       │   └── uiConfig.js           # Centralized UI styles (buttons, colors, shadows)
+│       └── tabs/
+│           ├── LabsTab.jsx           # Lab browser + dynamic sub-tabs
+│           ├── LabWorkspaceTab.jsx    # Lab workspace container
+│           ├── LabScriptsPane.jsx     # Scripts file manager + execution
+│           ├── LabResultsPane.jsx     # Results viewer
+│           ├── LabSettingsPane.jsx    # Lab metadata + sharing
+│           ├── SettingsTab.jsx        # App settings
+│           └── SqlEditorTab.jsx       # SQL editor + results grid
 ```
 
 ---
 
-## 5. Databázové schéma (MySQL)
+## Architecture
 
-Aktivní tabulky po refaktoru:
+### Backend
 
-### `usr` — uživatelé
-| Sloupec | Typ | Popis |
-|---|---|---|
-| `id` | BIGINT UNSIGNED PK AI | ID uživatele |
-| `first_name` | VARCHAR(100) | Jméno |
-| `last_name` | VARCHAR(100) | Příjmení |
-| `email` | VARCHAR(255) UNIQUE | E-mail (login) |
-| `password_hash` | VARCHAR(255) | bcrypt hash hesla |
-| `created_at` | TIMESTAMP | Datum registrace |
+- **Express 4** with ES Modules, mounted at `/api/v1/`.
+- **MySQL** (mysql2/promise) for user data; **SQLite** (better-sqlite3) for read-only datasource queries.
+- **Labs stored on disk** — each lab is a directory with `lab.json` metadata, `scripts/`, `results/`, and `state/` sub-folders.
+- **Script execution** — spawns child processes using configurable commands from `config.json` (Python venv, Node.js, bash, Rscript).
+- **DAP debugging** — WebSocket proxy between the browser and debugpy (Python DAP server).
+- **JWT authentication** — stateless, 7-day expiry, bcrypt password hashing.
+- **Security** — Helmet, CORS, rate limiting (300 req/min), path traversal protection.
 
-### `analysis` — definice analýz
-| Sloupec | Typ | Popis |
-|---|---|---|
-| `id` | INT PK AI | ID analýzy |
-| `name` | VARCHAR(255) | Název analýzy |
-| `settings` | TEXT | JSON konfigurace (workflow, parametry) |
-| `created_at` | DATETIME | Datum vytvoření |
+### Frontend
 
-### `result` — výsledky běhů analýz
-| Sloupec | Typ | Popis |
-|---|---|---|
-| `id` | INT PK AI | ID výsledku |
-| `analysis_id` | INT | FK na analysis.id |
-| `status` | VARCHAR(255) | pending / running / completed / failed |
-| `output` | VARCHAR(255) | Textový výstup (legacy) |
-| `report` | TEXT | Report text (legacy) |
-| `created_at` | DATETIME | Datum spuštění |
-| `completed_at` | DATETIME | Datum dokončení/selhání |
-
-### `password_resets` — tokeny pro reset hesla
-| Sloupec | Typ | Popis |
-|---|---|---|
-| `id` | BIGINT UNSIGNED PK AI | ID |
-| `user_id` | INT | FK na usr.id |
-| `token` | VARCHAR(255) UNIQUE | JWT reset token |
-| `expires_at` | TIMESTAMP | Expirace tokenu |
-
-> **Pozůstalé tabulky** z retail éry (basket, bp, product, price, imp_price, imp_product, ds, harvester, schedule) stále existují v `create.sql`, ale v kódu se nepoužívají. Mohou být odstraněny.
+- **React 19** SPA with Vite 7 (HMR in dev, static build for production).
+- **Tab-based layout** — Labs tab with dynamic sub-tabs for each open lab, Settings tab.
+- **Monaco Editor** — for script editing and SQL queries.
+- **AG Grid** — for SQL query results and data tables.
+- **Context providers** — Auth, Language, Settings, Toast, FileClipboard.
+- **State preservation** — tab content persists when switching between tabs (CSS `display:none` toggle).
 
 ---
 
-## 6. Backend – detailní popis modulů
+## Backend Modules
 
-### 6.1 Entry point (`src/index.js`)
+### `src/index.js` — Server Entry Point
 
-- Vytváří Express app s middleware řetězem: `pino-http` → `helmet` → `cors` → `express.json` → `rate-limit` → `api routes` → `notFound` → `errorHandler`.
-- CORS origin kontrola přes `config.corsOrigins`.
-- Rate limit: 300 req/min na `/api/`.
-- Graceful shutdown: odchytí SIGINT/SIGTERM, uzavře server a DB pool.
+Sets up Express with middleware (Helmet, CORS, rate limiter, JSON parsing, pino-http logging), mounts the main router, WebSocket DAP proxy, and handles graceful shutdown.
 
-### 6.2 Konfigurace (`src/config.js`)
+### `src/routes/auth.js` — Authentication
 
-Načítá proměnné z `.env`:
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/auth/login` | POST | Email + password → JWT token |
+| `/auth/register` | POST | Create new user (bcrypt hash) |
+| `/auth/me` | GET | Verify token, return user profile |
+| `/auth/reset-password` | POST | Request password reset email |
+| `/auth/confirm-reset-password` | POST | Set new password with reset token |
 
-| Proměnná | Povinná | Výchozí | Popis |
-|---|---|---|---|
-| `DB_HOST` | ✅ | — | MySQL host |
-| `DB_PORT` | — | 3306 | MySQL port |
-| `DB_USER` | ✅ | — | MySQL uživatel |
-| `DB_PASSWORD` | ✅ | — | MySQL heslo |
-| `DB_NAME` | ✅ | — | Název databáze |
-| `PORT` | — | 3000 | Port backendu |
-| `CORS_ORIGINS` | — | `""` (vše) | Čárkou oddělené origins |
-| `JWT_SECRET` | — | fallback | Secret pro JWT signing |
-| `EMAIL_HOST` | — | smtp.gmail.com | SMTP server |
-| `EMAIL_PORT` | — | 587 | SMTP port |
-| `EMAIL_USER` | — | — | SMTP uživatel |
-| `EMAIL_PASSWORD` | — | — | SMTP heslo |
-| `FRONTEND_URL` | — | http://localhost:5173 | URL frontendu (pro reset links) |
+### `src/routes/labs.js` — Labs (1200+ lines)
 
-### 6.3 Databáze (`src/db.js`)
+Handles everything related to labs: CRUD, sharing, file management (scripts & results), script execution with SSE progress, debug sessions, and ZIP downloads. See [LABS.md](LABS.md) for the full specification.
 
-- `mysql2/promise` connection pool s 10 spojeními.
-- `keepAlive` aktivní (10s interval).
-- Export: `getPool()` a helper `query(sql, params)`.
+### `src/routes/sql.js` — SQL Execution
 
-### 6.4 Autentizace (`src/routes/auth.js` + `src/middleware/auth.js`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/sql` | POST | Execute SQL against a datasource |
+| `/sql/datasources` | GET | List available datasources |
+| `/sql/datasources/:name/schema` | GET | Get tables + columns for a datasource |
 
-- **POST `/login`** — ověří email + bcrypt hash → vrátí JWT (7 dní expirace) + user objekt.
-- **POST `/register`** — hashuje heslo (bcrypt, cost 12), vloží do `usr`.
-- **GET `/me`** — ověří JWT z headeru, vrátí user detail z DB.
-- **POST `/reset-password`** — vygeneruje JWT reset token (1h expirace), odešle email.
-- **POST `/reset-password/confirm`** — ověří token, změní heslo v DB.
-- **Middleware `authenticateToken`** — dekóduje JWT z `Authorization: Bearer <token>`, nastaví `req.userId`.
+Supports MySQL (read/write) and SQLite (read-only) datasources.
 
-### 6.5 Analýzy (`src/routes/analyses.js`) — 692 řádků, klíčový modul
+### `src/routes/users.js` — User Management
 
-#### CRUD
-- **GET `/`** — seznam analýz (volitelně `?search=`).
-- **GET `/:id`** — detail s parsed settings.
-- **POST `/`** — vytvoření (name + optional settings JSON).
-- **PUT `/:id`** — aktualizace name/settings.
-- **DELETE `/:id`** — smazání.
-- **GET `/config`** — vrátí podporované typy skriptů a konfiguraci.
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/users` | GET | List all users (for lab sharing) |
 
-#### Spuštění analýzy (`POST /:id/run`)
+### `src/utils/file-manager.js` — Generic File Management
 
-Tok:
-1. Načte `analysis.settings` z DB.
-2. Zavolá `runAnalysis(analysisId, settings)` (asynchronně, neblokuje response).
-3. `runAnalysis`:
-   a. Resolvuje workflow kroky voláním `resolveWorkflowSteps()`.
-   b. Vloží nový `result` záznam se statusem `pending`.
-   c. Vytvoří složku `results/{resultId}/`.
-   d. Zapíše `data.json` s resolvnutým workflow.
-   e. Inicializuje `analysis.log` a `analysis.err` s hlavičkou.
-   f. Zavolá `executeWorkflowSteps()`.
+Factory function `createFileManagerRoutes()` creates an Express router with endpoints for:
+- `GET /` — list files (recursive tree)
+- `GET /content` — read file content
+- `PUT /content` — save file content
+- `POST /upload` — upload file
+- `POST /folder` — create new folder
+- `GET /download` — download file
+- `DELETE /` — delete file
 
-#### Workflow Resolution (`resolveWorkflowSteps`)
+Includes path traversal protection via `getSecurePath()`.
 
-`settings.workflow` může být:
-- **Array** → použije se přímo.
-- **Víceřádkový string** → splitne na řádky.
-- **Jednořádkový string** → načte `scripts/{name}.workflow` soubor.
+### `src/utils/email.js` — Email
 
-#### Workflow Execution (`executeWorkflowSteps`)
+Nodemailer wrapper for sending password reset emails. Supports Gmail, SMTP, Mailtrap, SendGrid.
 
-- **Zámek**: globální `workflowLockPromise` zajišťuje sériové provádění (fronta).
-- Kroky začínající `#` jsou odfiltrované (komentáře).
-- Pro každý krok volá `runScript()`.
-- Zapisuje `progress.json` s aktuálním krokem, časem, statusem.
-- Po dokončení/selhání aktualizuje `result.status` v DB.
+### `src/debug/` — DAP Debug Proxy
 
-#### Spuštění skriptu (`runScript`)
-
-- Z přípony souboru zjistí interpret (z `config.json.scriptCommands`).
-- Spustí `spawn(command, [fullScriptPath, workDir])`.
-- `stdout` → `analysis.log`, `stderr` → `analysis.err`.
-- Vrátí `true` pokud exit code = 0.
-
-#### Debug režim (`runDebugAnalysis`)
-
-- Nečte settings z DB, ale z existujícího `data.json` v result složce.
-- Nevytváří nový result záznam — aktualizuje existující.
-- Přepíše log soubory s `[DEBUG MODE]` prefixem.
-- Exportováno a voláno z `results.js`.
-
-### 6.6 Výsledky (`src/routes/results.js`) — 352 řádků
-
-- **GET `/`** — seznam výsledků (volitelně `?analysis_id=`), JOIN s `analysis.name`.
-- **GET `/:id`** — detail + `progress.json` + seznam DOCX/XLSX souborů.
-- **GET `/:id/log`** — plain text obsah `analysis.log`.
-- **GET `/:id/download`** — ZIP celé results složky.
-- **POST `/:id/debug`** — spustí debug analýzu (deleguje na `runDebugAnalysis`).
-- **DELETE `/:id`** — smaže result z DB + `rm -rf` result složku.
-
-### 6.7 Skripty (`src/routes/scripts.js`) — 262 řádků
-
-File manager nad `backend/scripts/`:
-- **GET `/`** — rekurzivní listing (volitelně `?subdir=`).
-- **GET `/content?file=`** — čtení obsahu souboru (UTF-8).
-- **PUT `/content`** — zápis obsahu (`{ file, content }`).
-- **POST `/upload`** — multipart upload (až 50 MB).
-- **DELETE `/?file=`** — smazání souboru.
-- **GET `/download?file=`** — public download (bez auth).
-
-### 6.8 SQL editor (`src/routes/sql.js`)
-
-- **GET `/datasources`** — seznam datasources z `backend/datasources/` (SQLite soubory + JSON config soubory).
-- **GET `/schema?datasource=`** — introspekce tabulek a sloupců (SHOW TABLES/COLUMNS pro MySQL, PRAGMA pro SQLite).
-- **POST `/`** — exekuce SQL dotazu (`{ query, datasource }`). Vrátí `{ rows, columns, rowCount, source }`.
-
-Podporované datasource typy:
-- **default** — hlavní MySQL z `.env` konfigurace.
-- **SQLite** — `.sqlite`, `.db`, `.sqlite3` soubory v `datasources/`.
-- **MySQL/SQL Server JSON** — `*.mysql.json`, `*.sqlserver.json` s connection credentials.
-
-### 6.9 Laboratoře (`src/routes/labs.js`) — 408 řádků
-
-Viz také [LABS.md](LABS.md).
-
-Data uložena na disku v `backend/labs/{uuid}/`:
-
-#### Endpointy
-| Endpoint | Method | Popis | Oprávnění |
-|---|---|---|---|
-| `/` | GET | Moje laboratoře | auth |
-| `/shared` | GET | Sdílené se mnou | auth |
-| `/` | POST | Vytvoření lab | auth |
-| `/:id` | GET | Detail lab | owner/shared |
-| `/:id` | PATCH | Úprava name/desc | owner |
-| `/:id` | DELETE | Smazání lab | owner |
-| `/:id/share` | POST | Sdílení s uživatelem | owner |
-| `/:id/share/:userId` | DELETE | Zrušení sdílení | owner |
-| `/:id/state` | GET | Per-user UI stav | owner/shared |
-| `/:id/state` | PUT | Uložení UI stavu | owner/shared |
-| `/:id/scripts` | GET | Seznam skriptů | owner/shared |
-| `/:id/scripts/content` | GET | Čtení skriptu | owner/shared |
-| `/:id/scripts/content` | PUT | Zápis skriptu | owner/shared |
-| `/:id/scripts/upload` | POST | Upload skriptu | owner/shared |
-| `/:id/scripts` | DELETE | Smazání skriptu | owner/shared |
-
-#### Datový model (`lab.json`)
-```json
-{
-  "id": "8534c87a-59c2-4a23-b480-3924c383c9ec",
-  "name": "Analýza cenového indexu",
-  "description": "Popis laboratoře",
-  "ownerId": 1,
-  "sharedWith": [2, 3],
-  "createdAt": "2026-01-15T10:00:00.000Z",
-  "updatedAt": "2026-02-01T14:30:00.000Z"
-}
-```
-
-### 6.10 Utility moduly
-
-#### `file-manager.js`
-Zobecněný modul používaný jak pro `scripts/` tak pro `results/{id}/` a `labs/{id}/scripts/`:
-- `getSecurePath(root, relative)` — ochrana proti path traversal.
-- `listFiles(dir, prefix, maxDepth)` — rekurzivní výpis s filtrováním přípon; hloubka neomezená (default `0` = Infinity).
-- `createUploadMiddleware(root, maxSize)` — multer storage s dynamickou destination.
-- `copyRecursive(src, dest)` — rekurzivní kopírování souborů/složek.
-- Konfigurováno z `config.json` (`fileManager.defaultDepth` (0=unlimited), `hiddenFilePrefixes`).
-
-#### `email.js` (142 řádků)
-- Nodemailer transport (lazy init).
-- `sendPasswordResetEmail(email, token)` — HTML šablona s reset linkem.
-
-### 6.11 Workflows (`src/routes/workflows.js`)
-
-- **GET `/`** — vrací seznam `.workflow` souborů z `scripts/` (bez přípony).
-- **GET `/:name`** — obsah konkrétního workflow souboru.
-
-Formát `.workflow` souboru:
-```
-# komentář (přeskočeno při spuštění)
-analyzy/prepare_stats.py
-analyzy/export_to_csv.py
-reports/reporter.js
-```
-Každý řádek = cesta ke skriptu relativně k `scripts/`.
+- `debug-engine.js` — manages debugpy process lifecycle
+- `debug-routes.js` — REST endpoints for debug session control
+- `dap-proxy.js` — WebSocket proxy between browser and debugpy
 
 ---
 
-## 7. Frontend – detailní popis modulů
+## Frontend Modules
 
-### 7.1 Entry point a hlavní komponenty
+### Context Providers
 
-**`main.jsx`** — mount Reactu, registrace AG Grid modulů, import globálních stylů.
+| Provider | Purpose |
+|----------|---------|
+| `AuthContext` | JWT token storage, login/logout, user state |
+| `LanguageContext` | Translation function `t()`, language switching |
+| `SettingsContext` | User preferences (advanced UI toggle, etc.) |
+| `Toast` | Notification system (success/error/info toasts) |
+| `FileClipboardProvider` | Cross-pane file copy/paste state |
 
-**`App.jsx`** — kořenový component:
-- Vnořené providery: `LanguageProvider` → `SettingsProvider` → `AuthProvider` → `ToastProvider`.
-- Pokud uživatel není přihlášen, zobrazí `AuthPage`.
-- Po přihlášení zobrazí tabový layout s hlavními záložkami.
-- Tab switching přes `display:none` (nikoliv conditional rendering) — zachovává stav komponent.
-- Detekce `?lab=<id>` v URL → automaticky otevře Labs tab.
+### Tab Components
 
-### 7.2 Tabový systém
+| Component | Description |
+|-----------|-------------|
+| `LabsTab` | Lab browser (My Labs / Shared Labs), creates sub-tabs for open labs |
+| `LabWorkspaceTab` | Container for a single lab: Scripts, Results, Settings sub-panes |
+| `LabScriptsPane` | File manager for lab scripts + run/debug controls |
+| `LabResultsPane` | Execution results viewer with file browser |
+| `LabSettingsPane` | Lab name, description, sharing management |
+| `SqlEditorTab` | Monaco SQL editor + datasource selector + AG Grid results |
+| `SettingsTab` | App-level settings (language, advanced UI) |
 
-| Tab ID | Komponenta | Viditelnost | Popis |
-|---|---|---|---|
-| `analytika` | `AnalysesTab` | Vždy | Hlavní analytický modul |
-| `labs` | `LabsTab` | Vždy | Laboratoře |
-| `vysledky` | `ResultsTab` | Vždy | Prohlížeč výsledků |
-| `debug` | `DebugTab` | Jen advanced UI | Debug/re-run analýz |
-| `nastaveni` | `SettingsTab` | Vždy | Nastavení uživatele |
+### File Manager
 
-### 7.3 AnalysesTab
+A decomposed module in `components/file-manager/`:
 
-Kontejner se dvěma sub-taby:
-- **Execution** (`AnalysisExecutionTab`) — vždy viditelný:
-  - Vlevo: AG Grid seznam analýz (ID, název, datum).
-  - Vpravo: detail vybrané analýzy — název + JSON textarea pro `settings`.
-  - Auto-save: při změně se po debounce automaticky uloží.
-  - Tlačítko Run → `POST /api/v1/analyses/:id/run`.
-  - Tlačítko „+ Přidat analýzu" nad gridem.
+- **`useFileManager`** — hook managing all file state and operations (CRUD, upload, download, paste, drag-drop)
+- **`FileBrowserPane`** — recursive tree view with a virtual root folder, per-folder action buttons (new file, new folder, copy, paste, upload, download ZIP, delete)
+- **`FilePreviewPane`** — file preview with Monaco editor (for text), image/PDF viewers, and action buttons (edit, save, download, delete)
+- **`ClipboardContext`** — enables copy/paste across different file manager instances
+- **`fileUtils`** — file type detection, icon mapping, size/date formatting
 
-- **Definition** (`AnalysisDefinitionTab`) — jen advanced UI:
-  - File editor → `FileManagerEditor` nad `/api/v1/scripts`.
-  - SQL editor → `SqlEditorTab`.
+### Debug UI
 
-### 7.4 LabsTab (370 řádků)
+- **`DebugEditor`** — Monaco-based code viewer with breakpoint gutters
+- **`DebugPanel`** — step controls (continue, step over/in/out), variable inspection, call stack
+- **`useDebugSession`** — React hook managing DAP WebSocket connection and debug state
+- **`dap-client`** — low-level WebSocket DAP protocol client
 
-Implementuje dynamické tab rozhraní pro laboratoře:
+### UI Configuration (`lib/uiConfig.js`)
 
-**Hlavní taby:**
-- **My labs** — seznam vlastních, + Create / - Remove, editace názvu/popisu, sharing panel.
-- **Shared labs** — read-only seznam sdílených, tlačítko Enter.
-
-**Dynamické lab taby:**
-- Kliknutím „Enter" se otevře nový tab `lab:{id}`.
-- Každý lab tab zobrazuje `FileManagerEditor` (scoped na lab scripts) + `SqlEditorTab`.
-- Tlačítka: close (✕), open in new window (▢).
-- Otevření v novém okně přidá `?lab=<id>` do URL.
-
-**Sharing:**
-- Seznam uživatelů s checkboxy (multi-select).
-- Toggle `POST/DELETE /api/v1/labs/:id/share`.
-
-### 7.5 ResultsTab (612 řádků)
-
-Dual-panel layout:
-- **Levý panel**: AG Grid se seznamem výsledků (ID, analýza, status, datum).
-- **Pravý panel**: detail výsledku:
-  - Status badge (completed/failed/pending/running).
-  - Progress info (krok X/Y, elapsed time).
-  - Live log viewer s auto-scrollem a error highlighting.
-  - Seznam DOCX/XLSX souborů ke stažení.
-  - Tlačítko „Download ZIP" pro celý result.
-  - Tlačítko „Debug" (re-run).
-
-**Polling:**
-- Pokud `status === 'pending' || 'running'`: polluje log a detail každých 5 sekund.
-- Při změně výsledku se polling automaticky zastaví/restartuje.
-
-### 7.6 SqlEditorTab (420 řádků)
-
-- Monaco editor pro SQL s motivy (Light/Dark/High Contrast).
-- Datasource selector (dropdown) — výchozí MySQL + external SQLite/JSON datasources.
-- Schema introspekce → Monaco autocomplete (tabulky + sloupce).
-- Spuštění Ctrl+Enter nebo tlačítkem.
-- Výsledky v tabulce s dynamickými sloupci.
-- Connection status indikátor (connected/connecting/error).
-- Tlačítko „Open in new window" — plně funkční standalone SQL editor.
-
-### 7.7 FileManagerEditor — decomposed file-manager module
-
-Znovupoužitelný file browser + kódový editor (decomposed into `file-manager/` submodules):
-
-**Props:**
-- `apiBasePath` — base API cesta (např. `/api/v1/scripts` nebo `/api/v1/labs/:id/scripts`).
-- `showUpload`, `showDelete`, `readOnly` — ovládání funkcí.
-- `showModificationDate`, `title`, `refreshTrigger`.
-- `onDebugWorkflow` — callback pro debug `.workflow` souborů.
-
-**Funkce:**
-- **Recursive tree view** — proper nested folder/file tree (unlimited depth).
-- **Copy / Paste** across any file-manager instance via `FileClipboardProvider` context.
-- Monaco editor s syntax highlighting dle přípony souboru.
-- Drag & drop upload do konkrétní složky.
-- Detekce změn (diff oproti uloženému obsahu).
-- Náhled obrázků (PNG, JPG, SVG…) a PDF.
-- Otevření editoru v novém okně (standalone).
-- Theme přepínání sdílené přes localStorage.
-- 🐛 Debug button on `.workflow` files.
-
-### 7.8 DebugTab (492 řádků)
-
-- Dropdown výběr existujícího výsledku.
-- Dvoupanelový split (draggable splitter):
-  - Levý: `FileManagerEditor` nad result files (editovatelné).
-  - Pravý: log viewer.
-- Tlačítko „Run & Debug" → `POST /api/v1/results/:id/debug`.
-- Polling statusu a logu při běhu.
-
-### 7.9 Context providers
-
-#### AuthContext
-- State: `user`, `isAuthenticated`, `loading`.
-- Methods: `login()`, `logout()`, `register()`, `resetPassword()`.
-- JWT token v `localStorage('authToken')`.
-- Auto-ověření při mountu přes `GET /me`.
-
-#### LanguageContext
-- Podporované jazyky: `cz` (čeština), `sk` (slovenština), `en` (angličtina).
-- Auto-detekce jazyka prohlížeče.
-- Funkce `t(key, params)` s interpolací `{param}`.
-- ~170+ překladových klíčů.
-
-#### SettingsContext
-- `showAdvancedUI` toggle — persistován v localStorage.
-- Ovládá viditelnost: Definition tab, Debug tab, ID sloupce v gridech.
-
-### 7.10 Utility knihovny
-
-#### `fetchJSON.js`
-- Wrapper nad `fetch()`.
-- Auto-inject `Authorization: Bearer` z localStorage.
-- Parsování JSON response.
-- Robustní error handling s HTTP statusem a response body.
-
-#### `gridConfig.js` (167 řádků)
-- `defaultColDef` — sortable, resizable, tooltips.
-- `commonGridProps` — theme, rowHeight, virtualization settings.
-- `gridThemeStyles` — CSS custom properties pro konzistentní styling.
-- Filter konfigurace (text, number, date).
-
-#### `appConfig.js`
-- `RESULT_LOG_POLL_INTERVAL_MS = 5000`
-- `TOAST_DURATION_MS = 4000`
+Centralized button styles, colors, shadows, and icons. All inline-styled components reference this file for consistent theming.
 
 ---
 
-## 8. Konfigurace runtime (`backend/config.json`)
+## Database Schema
+
+```sql
+CREATE TABLE usr (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  email       VARCHAR(255) UNIQUE NOT NULL,
+  password    VARCHAR(255) NOT NULL,
+  first_name  VARCHAR(100),
+  last_name   VARCHAR(100)
+);
+
+CREATE TABLE password_resets (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  user_id     INT NOT NULL,
+  token       VARCHAR(255) NOT NULL,
+  expires_at  DATETIME NOT NULL,
+  used        BOOLEAN DEFAULT FALSE,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES usr(id)
+);
+```
+
+Lab data is stored on disk (not in MySQL) — see [LABS.md](LABS.md).
+
+---
+
+## Configuration
+
+### Environment Variables (`.env`)
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `PORT` | Server port | `3000` |
+| `DB_HOST` | MySQL host | `localhost` |
+| `DB_USER` | MySQL user | `root` |
+| `DB_PASSWORD` | MySQL password | `secret` |
+| `DB_NAME` | MySQL database | `measure` |
+| `JWT_SECRET` | JWT signing secret | `your-secret-key` |
+| `CORS_ORIGIN` | Allowed CORS origins | `http://localhost:5173` |
+| `EMAIL_HOST` | SMTP host | `smtp.gmail.com` |
+| `EMAIL_PORT` | SMTP port | `587` |
+| `EMAIL_USER` | SMTP username | `user@gmail.com` |
+| `EMAIL_PASS` | SMTP password | `app-password` |
+| `FRONTEND_URL` | Frontend URL (for reset links) | `http://localhost:5173` |
+
+### Runtime Config (`config.json`)
+
+Controls script execution commands, logging, file manager settings:
 
 ```json
 {
-  "paths": {
-    "scripts": "scripts",
-    "results": "results"
+  "scripts": {
+    "commands": {
+      ".py": "labs/.venv/bin/python",
+      ".js": "node",
+      ".sh": "bash",
+      ".r": "Rscript",
+      ".R": "Rscript"
+    }
   },
-  "scriptCommands": {
-    ".py": { "command": "./scripts/analyzy/.venv/bin/python" },
-    ".js": { "command": "node" },
-    ".cjs": { "command": "node" },
-    ".sh": { "command": "bash" },
-    ".r": { "command": "Rscript" },
-    ".R": { "command": "Rscript" }
-  },
-  "logging": {
-    "logFileName": "analysis.log",
-    "errorFileName": "analysis.err",
-    "timestampFormat": "ISO",
-    "separatorChar": "=",
-    "separatorLength": 80
-  },
-  "analysis": {
-    "defaultTimeout": 300000,
-    "maxConcurrentAnalyses": 5
-  },
+  "logging": { "level": "info" },
   "fileManager": {
     "defaultDepth": 0,
-    "hiddenFilePrefixes": [".", "_", "node_modules"]
+    "hiddenFilePrefixes": [".", "__"]
   }
 }
 ```
 
-> Pozn.: `maxConcurrentAnalyses` je v konfiguraci, ale aktuální implementace používá globální zámek (sériové provádění).
+---
+
+## API Endpoints
+
+See [backend/API.md](backend/API.md) for the complete reference.
+
+| Group | Prefix | Key Endpoints |
+|-------|--------|---------------|
+| Health | `/api/health` | System status check |
+| Auth | `/api/v1/auth` | login, register, me, reset-password |
+| Labs | `/api/v1/labs` | CRUD, sharing, scripts, results, execution, debug |
+| SQL | `/api/v1/sql` | Execute queries, list datasources, get schema |
+| Users | `/api/v1/users` | List users |
+| Debug | `/api/v1/debug` | Debug session management |
+| Paste | `/api/v1/paste` | Cross-root file copy |
+| DAP | `ws://…/dap` | Debug Adapter Protocol WebSocket |
 
 ---
 
-## 9. API endpointy — kompletní přehled
+## Data Flow
 
-### Veřejné (bez auth)
-| Method | Endpoint | Popis |
-|---|---|---|
-| GET | `/api/health` | Healthcheck + verze + server info |
-| POST | `/api/v1/auth/login` | Přihlášení |
-| POST | `/api/v1/auth/register` | Registrace |
-| POST | `/api/v1/auth/reset-password` | Žádost o reset hesla |
-| POST | `/api/v1/auth/reset-password/confirm` | Potvrzení nového hesla |
-| GET | `/api/v1/scripts/download?file=` | Public download skriptu |
-| GET | `/api/v1/results-public/:id/files/:filename` | Public download DOCX/XLSX/ZIP |
-| GET | `/api/v1/results/:id/files/download?file=` | Public download result file |
+### Authentication Flow
 
-### Chráněné (vyžadují JWT)
-| Method | Endpoint | Popis |
-|---|---|---|
-| GET | `/api/v1/auth/me` | Info o přihlášeném uživateli |
-| GET | `/api/v1/analyses` | Seznam analýz |
-| GET | `/api/v1/analyses/config` | Konfigurace (podporované typy skriptů) |
-| GET | `/api/v1/analyses/:id` | Detail analýzy |
-| POST | `/api/v1/analyses` | Vytvoření analýzy |
-| PUT | `/api/v1/analyses/:id` | Aktualizace analýzy |
-| DELETE | `/api/v1/analyses/:id` | Smazání analýzy |
-| POST | `/api/v1/analyses/:id/run` | Spuštění analýzy |
-| GET | `/api/v1/results` | Seznam výsledků |
-| GET | `/api/v1/results/:id` | Detail výsledku |
-| GET | `/api/v1/results/:id/log` | Log výsledku (plain text) |
-| GET | `/api/v1/results/:id/download` | ZIP download výsledku |
-| POST | `/api/v1/results/:id/debug` | Debug re-run |
-| DELETE | `/api/v1/results/:id` | Smazání výsledku |
-| GET | `/api/v1/results/:id/files` | Seznam souborů výsledku |
-| GET | `/api/v1/results/:id/files/content` | Obsah souboru výsledku |
-| PUT | `/api/v1/results/:id/files/content` | Zápis souboru výsledku |
-| POST | `/api/v1/results/:id/files/upload` | Upload do výsledku |
-| DELETE | `/api/v1/results/:id/files` | Smazání souboru výsledku |
-| GET | `/api/v1/workflows` | Seznam workflow šablon |
-| GET | `/api/v1/workflows/:name` | Obsah workflow |
-| GET | `/api/v1/scripts` | Seznam skriptů |
-| GET | `/api/v1/scripts/content` | Obsah skriptu |
-| PUT | `/api/v1/scripts/content` | Zápis skriptu |
-| POST | `/api/v1/scripts/upload` | Upload skriptu |
-| DELETE | `/api/v1/scripts` | Smazání skriptu |
-| GET | `/api/v1/sql/datasources` | Seznam datasources |
-| GET | `/api/v1/sql/schema` | DB schema introspekce |
-| POST | `/api/v1/sql` | Exekuce SQL dotazu |
-| GET | `/api/v1/labs` | Moje laboratoře |
-| GET | `/api/v1/labs/shared` | Sdílené laboratoře |
-| POST | `/api/v1/labs` | Vytvoření laboratoře |
-| GET | `/api/v1/labs/:id` | Detail laboratoře |
-| PATCH | `/api/v1/labs/:id` | Úprava laboratoře |
-| DELETE | `/api/v1/labs/:id` | Smazání laboratoře |
-| POST | `/api/v1/labs/:id/share` | Sdílení laboratoře |
-| DELETE | `/api/v1/labs/:id/share/:userId` | Zrušení sdílení |
-| GET | `/api/v1/labs/:id/state` | Per-user UI stav |
-| PUT | `/api/v1/labs/:id/state` | Uložení UI stavu |
-| GET | `/api/v1/labs/:id/scripts` | Seznam lab skriptů |
-| GET | `/api/v1/labs/:id/scripts/content` | Obsah lab skriptu |
-| PUT | `/api/v1/labs/:id/scripts/content` | Zápis lab skriptu |
-| POST | `/api/v1/labs/:id/scripts/upload` | Upload lab skriptu |
-| DELETE | `/api/v1/labs/:id/scripts` | Smazání lab skriptu |
-| GET | `/api/v1/users` | Seznam uživatelů |
-
----
-
-## 10. Klíčové datové toky
-
-### 10.1 Přihlášení uživatele
 ```
-Frontend                              Backend
-LoginForm.jsx                         auth.js
-    │ POST /auth/login                    │
-    │ {email, password}  ────────────►    │ query: SELECT usr WHERE email=?
-    │                                     │ bcrypt.compare(password, hash)
-    │ ◄──────────────────────────────     │ jwt.sign({userId}, secret, 7d)
-    │ {token, user}                       │
-    │ localStorage.setItem('authToken')   │
-    │ setUser(user)                       │
+Browser → POST /auth/login { email, password }
+       ← { token, user: { id, email, firstName, lastName } }
+Browser stores token in localStorage
+All subsequent requests include: Authorization: Bearer <token>
 ```
 
-### 10.2 Spuštění analýzy
+### Script Execution Flow
+
 ```
-Frontend                              Backend
-AnalysisExecutionTab                  analyses.js
-    │ POST /analyses/:id/run              │
-    │ ◄── 201 {status: 'pending'}         │
-    │                                     │ runAnalysis() [async, fire-and-forget]
-    │                                     │   ├── resolveWorkflowSteps()
-    │                                     │   ├── INSERT result (pending)
-    │                                     │   ├── mkdir results/{id}/
-    │                                     │   ├── write data.json
-    │                                     │   ├── write log headers
-    │                                     │   └── executeWorkflowSteps()
-    │                                     │       ├── acquireWorkflowLock() [čekání ve frontě]
-    │                                     │       ├── for each step:
-    │                                     │       │   ├── write progress.json
-    │                                     │       │   ├── runScript(step) [spawn]
-    │                                     │       │   │   stdout → analysis.log
-    │                                     │       │   │   stderr → analysis.err
-    │                                     │       │   └── if exit≠0 → failed
-    │                                     │       ├── UPDATE result SET status=completed
-    │                                     │       └── release lock
-    │                                     │
-ResultsTab                            results.js
-    │ GET /results/:id ──────────────►    │ detail + progress.json
-    │ GET /results/:id/log ──────────►    │ plain text log
-    │  [polling every 5s while pending]   │
+Browser → POST /labs/:id/scripts/run { file }
+       ← SSE stream:
+           data: { step, status: 'running', ... }
+           data: { step, status: 'running', progress: 50, ... }
+           data: { step, status: 'completed', resultId: 42 }
+           [stream ends]
+Browser → GET /labs/:id/results/:resultId  (fetch result files)
 ```
 
-### 10.3 Vytvoření a práce s Lab
+### Debug Flow
+
 ```
-Frontend                              Backend
-LabsTab                               labs.js
-    │ POST /labs {name, desc}             │
-    │ ◄── 201 {id, name, ownerId, ...}   │ mkdir labs/{uuid}/
-    │                                     │ mkdir scripts/, results/, state/
-    │                                     │ write lab.json
-    │                                     │
-    │ [user opens lab]                    │
-    │ GET /labs/:id/scripts ─────────►    │ listFiles(labs/{id}/scripts/)
-    │ FileManagerEditor scoped            │
-    │                                     │
-    │ PUT /labs/:id/scripts/content       │ write file in labs/{id}/scripts/
-    │ PUT /labs/:id/state                 │ write state/{userId}.json
+Browser → POST /labs/:id/scripts/debug { file }
+       ← { resultId, sessionId }
+Browser → WebSocket ws://…/dap?sessionId=...
+       ↔ DAP messages (initialize, setBreakpoints, continue, stepOver, ...)
+Browser → POST /labs/:id/debug/end { sessionId }
 ```
 
 ---
 
-## 11. Bezpečnostní opatření
+## Security
 
-| Oblast | Implementace |
-|---|---|
-| **Autentizace** | JWT (HS256), 7 dní expirace, bcrypt cost 12 |
-| **Autorizace** | `authenticateToken` middleware na všech `/v1/*` routách (kromě auth) |
-| **CORS** | Konfigurovatelný allowlist origins |
-| **Rate limiting** | 300 req/min na `/api/` |
-| **HTTP headers** | Helmet (CSP, HSTS, X-Frame-Options, …) |
-| **Path traversal** | `getSecurePath()` — normalizace + prefix check |
-| **SQL injection** | Parametrizované dotazy (`mysql2 execute` / `better-sqlite3 prepare`) |
-| **File upload** | Multer s 50 MB limitem, destination validation |
-| **Labs access** | Owner/shared kontrola na každém lab endpointu |
-| **Public downloads** | Omezeny na DOCX/XLSX/ZIP přípony |
+- **Helmet** — standard HTTP security headers
+- **CORS** — configurable origin whitelist via `CORS_ORIGIN`
+- **Rate limiting** — 300 requests/minute on `/api/v1/`
+- **Path traversal protection** — `getSecurePath()` validates all file paths against the root
+- **JWT** — stateless authentication, 7-day expiry
+- **bcrypt** — 12-round password hashing
+- **Graceful shutdown** — SIGINT/SIGTERM close server and DB pool
 
 ---
 
-## 12. Spuštění vývojového prostředí
+## Development Setup
 
-### Prerekvizity
-- Node.js 18+
-- MySQL/MariaDB
-- Python 3.x (pro analytické skripty)
-
-### Backend
 ```bash
+# Prerequisites: Node.js 18+, MySQL 8+
+
+# 1. Clone and install
+git clone <repo-url>
+cd measure
+
+# 2. Backend
 cd backend
-cp .env.example .env   # upravit DB credentials a JWT_SECRET
+cp .env.example .env   # edit with your DB credentials, JWT secret
 npm install
-npm run dev             # nodemon --watch src
-```
+npm run dev            # nodemon, watches src/
 
-### Frontend
-```bash
+# 3. Frontend (in a new terminal)
 cd frontend
 npm install
-npm run dev             # vite dev server na :5173
-```
+npm run dev            # Vite dev server with HMR
 
-### Python analytické prostředí
-```bash
-cd backend/scripts/analyzy
-./setup-python-env.sh   # vytvoří .venv a nainstaluje requirements.txt
-```
-
-### Databáze
-```bash
+# 4. Database
 mysql -u root -p < backend/sql/create.sql
 ```
 
 ---
 
-## 13. Konvence a vzory v kódu
+## Code Conventions
 
-### Backend
-- **ES Modules** (`type: "module"` v package.json) — `import/export`.
-- **Async/await** všude, žádné callbacky.
-- Chyby propagovány přes `next(e)` do centrálního error handleru.
-- Logování přes `console.log/error` + pino-http request logging.
-- Konfigurace: env proměnné (`.env`) + runtime JSON (`config.json`).
-
-### Frontend
-- **Funkcionální komponenty** s hooks (žádné class components).
-- **Context API** pro globální stav (žádný Redux/Zustand).
-- **AG Grid** pro tabulky, **Monaco Editor** pro kód.
-- **Inline styly** (žádný CSS-in-JS framework, žádný Tailwind).
-- Tab switching přes `display: none/block` pro zachování stavu.
-- `fetchJSON()` jako jediný HTTP komunikační bod.
-
-### Pojmenování
-- Backend routes: kebab-case URL, camelCase v kódu.
-- Frontend: PascalCase pro komponenty, camelCase pro funkce/proměnné.
-- DB sloupce: snake_case.
-- Překlady: camelCase klíče v `translations.js`.
+- **ES Modules** throughout (`import`/`export`, `"type": "module"` in package.json)
+- **Functional React** — hooks only, no class components
+- **Inline styles** — UI components use inline styles referencing `uiConfig.js` for consistency
+- **`fetchJSON`** — all API calls go through the centralized fetch wrapper that adds JWT headers
+- **Error handling** — backend uses Express error middleware; frontend uses Toast notifications
+- **File naming** — PascalCase for React components, camelCase for hooks/utilities
 
 ---
 
-## 14. Známé limitace a technický dluh
+## Known Limitations
 
-1. **Sériová exekuce workflow** — globální zámek umožňuje jen jednu analýzu najednou (config má `maxConcurrentAnalyses`, ale není implementováno).
-2. **Plaintext credentials** — `data.json` obsahuje MySQL přihlašovací údaje v plaintextu.
-3. **Pozůstalé DB tabulky** — retail tabulky (product, basket, price, harvester, …) stále existují.
-4. **Žádné testy** — chybí unit i e2e testy.
-5. **Lab results/workflow** — Labs mají `results/` složku, ale spouštění workflow v kontextu labu ještě není implementováno.
-6. **Lab state persistence** — State endpointy existují, ale UI je zatím plně nevyužívá.
-7. **Inline CSS** — veškeré styly jsou inline, žádný design systém.
-8. **Lokalizace** — české chybové hlášky v auth endpointech (backend) vs anglické v ostatních.
-9. **Žádný RBAC** — sdílení labů nemá role (read vs write).
-10. **Chybí pagination** — seznamy analýz/výsledků nemají stránkování.
-
----
-
-## 15. Plánované rozšíření (viz LABS.md)
-
-- Persistace editor stavu (otevřené soubory, aktivní taby) přes `/state` endpointy.
-- Spouštění workflow v kontextu laboratoře (lab-scoped execution).
-- Prohlížení výsledků v rámci laboratoře.
-- Role pro sdílené laboratoře (read-only vs editor).
-- Možnost spouštět skripty z jiných sdílených laboratoří.
+- Lab data is stored on the filesystem, not in the database (no backup/replication built-in)
+- File manager has a configurable depth limit for directory listing
+- SQLite datasources are read-only
+- No WebSocket reconnection logic in the DAP client (page refresh required)
+- No real-time collaboration (single-user file editing)

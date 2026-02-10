@@ -100,7 +100,7 @@ function ToastItem({ id, message, type = 'info', onClose, duration }) {
           padding: '0 4px',
           opacity: 0.7,
         }}
-        title="Zavřít"
+        title="Close"
       >
         ×
       </button>

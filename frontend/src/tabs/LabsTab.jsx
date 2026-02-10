@@ -11,7 +11,7 @@ import { fetchJSON } from '../lib/fetchJSON.js';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import LabWorkspaceTab from './LabWorkspaceTab.jsx';
-import { icons } from '../lib/uiConfig.js';
+import { icons, tabIcons } from '../lib/uiConfig.js';
 
 export default function LabsTab() {
   const { user } = useAuth();
@@ -276,14 +276,14 @@ export default function LabsTab() {
                   borderRadius: 0,
                   background: isActive ? '#fff' : '#f3f4f6',
                   cursor: 'pointer',
-                  color: '#9ca3af',
+                  color: tabIcons.popOut.color,
                   fontSize: 11,
                   display: 'flex',
                   alignItems: 'center',
                   outline: 'none',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = '#2563eb'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = tabIcons.popOut.hoverColor; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = tabIcons.popOut.color; }}
               >
                 {icons.popOut}
               </button>
@@ -304,14 +304,14 @@ export default function LabsTab() {
                   borderRadius: '0 8px 0 0',
                   background: isActive ? '#fff' : '#f3f4f6',
                   cursor: 'pointer',
-                  color: '#9ca3af',
+                  color: tabIcons.close.color,
                   fontSize: 13,
                   display: 'flex',
                   alignItems: 'center',
                   outline: 'none',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = tabIcons.close.hoverColor; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = tabIcons.close.color; }}
               >
                 ×
               </button>

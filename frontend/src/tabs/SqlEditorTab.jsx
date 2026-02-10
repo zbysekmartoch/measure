@@ -132,7 +132,7 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
   const openInNewWindow = useCallback(() => {
     const newWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!newWindow) {
-      setError(t('popupBlocked') || 'Povolit vyskakovací okna pro tuto stránku');
+      setError(t('popupBlocked') || 'Allow pop-ups for this page');
       return;
     }
 
@@ -345,7 +345,7 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
           type="button"
           onClick={openInNewWindow}
         >
-          {t('openInNewWindow') || 'Otevřít v novém okně'}
+          {t('openInNewWindow') || 'Open in new window'}
         </button>
         <select
           value={editorTheme}

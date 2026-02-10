@@ -3,11 +3,11 @@
  * Renders a proper recursive tree (directories with children).
  *
  * Features:
- *   - Collapsible folders at any nesting depth
+ *   - Root folder row with all actions (new file, new folder, paste, upload, zip, etc.)
+ *   - Collapsible folders at any nesting depth with per-folder actions
  *   - Single click on file → preview; double click → open in separate tab
  *   - Copy / Paste buttons on files and folders (cross-instance via ClipboardContext)
  *   - Drag-and-drop upload into any folder
- *   - Folder actions: upload here, download ZIP, delete, paste
  */
 import React, { useCallback } from 'react';
 import { useLanguage } from '../../context/LanguageContext';
@@ -41,12 +41,14 @@ function FolderNode({
   node, depth, expandedFolders, selectedFile, dragOverFolder,
   showUpload, showDelete, showModificationDate, loading,
   onToggleFolder, onFileClick, onFileDoubleClick,
+  onCreateNewFile, onCreateNewFolder,
   onTriggerFolderUpload, onDownloadFolderZip, onDeleteFolder,
   onDrop, onDragOver, onDragLeave,
   onCopyFile, onCopyFolder, onPasteInto, clipboard, apiBasePath,
   onDebugWorkflow,
+  isRoot,
 }) {
-  const isExpanded = expandedFolders[node.path] ?? (depth === 0);
+  const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
   const indent = depth * 16;
 
   // Count all files recursively in this folder
@@ -89,15 +91,33 @@ function FolderNode({
           {dragOverFolder === node.path && showUpload && (
             <span style={{ color: '#3b82f6', fontSize: 10 }}>⬆</span>
           )}
+          <IBtn
+            title={fiBtn.newFile.label}
+            onClick={() => {
+              const prefix = isRoot ? '' : (node.path + '/');
+              const name = prompt('New file name:', '');
+              if (name) onCreateNewFile(prefix + name);
+            }}
+            bg={fiBtn.newFile.bg} disabled={loading}
+          >{fiBtn.newFile.icon}</IBtn>
+          <IBtn
+            title={fiBtn.newFolder.label}
+            onClick={() => {
+              const prefix = isRoot ? '' : (node.path + '/');
+              const name = prompt('New folder name:', '');
+              if (name) onCreateNewFolder(prefix + name);
+            }}
+            bg={fiBtn.newFolder.bg} disabled={loading}
+          >{fiBtn.newFolder.icon}</IBtn>
           <IBtn title={fiBtn.copyFolder.label} onClick={() => onCopyFolder(node.path)} bg={fiBtn.copyFolder.bg}>{fiBtn.copyFolder.icon}</IBtn>
           {clipboard && (
-            <IBtn title={fiBtn.pasteInto.label} onClick={() => onPasteInto(node.path)} bg={fiBtn.pasteInto.bg}>{fiBtn.pasteInto.icon}</IBtn>
+            <IBtn title={fiBtn.pasteInto.label} onClick={() => onPasteInto(isRoot ? '' : node.path)} bg={fiBtn.pasteInto.bg}>{fiBtn.pasteInto.icon}</IBtn>
           )}
           {showUpload && (
-            <IBtn title={fiBtn.uploadHere.label} onClick={() => onTriggerFolderUpload(node.path)} bg={fiBtn.uploadHere.bg} disabled={loading}>{fiBtn.uploadHere.icon}</IBtn>
+            <IBtn title={fiBtn.uploadHere.label} onClick={() => onTriggerFolderUpload(isRoot ? '.' : node.path)} bg={fiBtn.uploadHere.bg} disabled={loading}>{fiBtn.uploadHere.icon}</IBtn>
           )}
-          <IBtn title={fiBtn.downloadZip.label} onClick={() => onDownloadFolderZip(node.path)} bg={fiBtn.downloadZip.bg} disabled={loading}>{fiBtn.downloadZip.icon}</IBtn>
-          {showDelete && (
+          <IBtn title={fiBtn.downloadZip.label} onClick={() => onDownloadFolderZip(isRoot ? '.' : node.path)} bg={fiBtn.downloadZip.bg} disabled={loading}>{fiBtn.downloadZip.icon}</IBtn>
+          {showDelete && !isRoot && (
             <IBtn title={fiBtn.deleteFolder.label} onClick={() => onDeleteFolder(node.path)} bg={fiBtn.deleteFolder.bg} disabled={loading}>{fiBtn.deleteFolder.icon}</IBtn>
           )}
         </div>
@@ -120,6 +140,8 @@ function FolderNode({
             onToggleFolder={onToggleFolder}
             onFileClick={onFileClick}
             onFileDoubleClick={onFileDoubleClick}
+            onCreateNewFile={onCreateNewFile}
+            onCreateNewFolder={onCreateNewFolder}
             onTriggerFolderUpload={onTriggerFolderUpload}
             onDownloadFolderZip={onDownloadFolderZip}
             onDeleteFolder={onDeleteFolder}
@@ -184,26 +206,6 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
   );
 }
 
-/* ── root-level files (files at the top level that aren't inside any folder) ─ */
-function RootFiles({
-  files, selectedFile, showModificationDate, onFileClick, onFileDoubleClick, onCopyFile, onDebugWorkflow,
-}) {
-  if (!files.length) return null;
-  return files.map((file) => (
-    <FileRow
-      key={file.path}
-      file={file}
-      depth={0}
-      isSelected={selectedFile === file.path}
-      showModificationDate={showModificationDate}
-      onClick={onFileClick}
-      onDoubleClick={onFileDoubleClick}
-      onCopy={onCopyFile}
-      onDebugWorkflow={onDebugWorkflow}
-    />
-  ));
-}
-
 /* ── main export ────────────────────────────────────────────────────────────── */
 export default function FileBrowserPane({
   title,
@@ -220,7 +222,6 @@ export default function FileBrowserPane({
   // actions
   onRefresh,
   onTogglePreview,
-  onUpload,
   onFolderUpload,
   onTriggerFolderUpload,
   onDrop,
@@ -230,6 +231,7 @@ export default function FileBrowserPane({
   onFileClick,
   onFileDoubleClick,
   onCreateNewFile,
+  onCreateNewFolder,
   onDeleteFolder,
   onDownloadFolderZip,
   onPasteInto,
@@ -253,11 +255,13 @@ export default function FileBrowserPane({
     onPasteInto(targetFolder, clipboard);
   }, [clipboard, onPasteInto]);
 
-  const uploadId = 'file-upload-input-' + (apiBasePath || '').replace(/[^a-zA-Z0-9]/g, '-');
-
-  // Separate root-level files and directories
-  const rootDirs = (tree || []).filter((n) => n.type === 'directory');
-  const rootFiles = (tree || []).filter((n) => n.type === 'file');
+  // Build a virtual root node that wraps all top-level items
+  const rootNode = {
+    name: title || t('files') || 'Files',
+    path: '',
+    type: 'directory',
+    children: tree || [],
+  };
 
   return (
     <section
@@ -273,12 +277,12 @@ export default function FileBrowserPane({
         flex: showPreview ? 'none' : 1,
       }}
     >
-      {/* Title bar + toolbar */}
+      {/* Compact title bar — only title + refresh + preview toggle */}
       <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
-          {title || t('files') || 'Soubory'}
+          {title || t('files') || 'Files'}
         </h3>
-        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 3 }}>
           <IBtn title={t('refresh') || fbBtn.refresh.label} onClick={onRefresh} bg={fbBtn.refresh.bg} disabled={loading}>{fbBtn.refresh.icon}</IBtn>
           <IBtn
             title={showPreview ? (t('hidePreview') || fbBtn.previewHide.label) : (t('showPreview') || fbBtn.preview.label)}
@@ -287,27 +291,6 @@ export default function FileBrowserPane({
           >
             {showPreview ? fbBtn.previewHide.icon : fbBtn.preview.icon}
           </IBtn>
-          <IBtn
-            title={fbBtn.newFile.label}
-            onClick={() => {
-              const name = prompt('Název nového souboru (např. folder/query.sql):');
-              if (name) onCreateNewFile(name);
-            }}
-            bg={fbBtn.newFile.bg} disabled={loading}
-          >
-            {fbBtn.newFile.icon}
-          </IBtn>
-          {clipboard && (
-            <IBtn title={fbBtn.paste.label} onClick={() => handlePaste('')} bg={fbBtn.paste.bg}>{fbBtn.paste.icon} {fbBtn.paste.label}</IBtn>
-          )}
-          {showUpload && (
-            <>
-              <IBtn title={t('upload') || fbBtn.upload.label} onClick={() => document.getElementById(uploadId)?.click()} bg={fbBtn.upload.bg} disabled={loading}>
-                {fbBtn.upload.icon} {t('upload') || fbBtn.upload.label}
-              </IBtn>
-              <input id={uploadId} type="file" style={{ display: 'none' }} onChange={onUpload} />
-            </>
-          )}
         </div>
       </div>
 
@@ -318,51 +301,40 @@ export default function FileBrowserPane({
         <input ref={folderUploadRef} type="file" style={{ display: 'none' }} onChange={onFolderUpload} />
       )}
 
-      {/* Root-level files first */}
-      <RootFiles
-        files={rootFiles}
+      {/* Root folder node — acts as the top-level "folder" with all actions */}
+      <FolderNode
+        node={rootNode}
+        depth={0}
+        expandedFolders={expandedFolders}
         selectedFile={selectedFile}
+        dragOverFolder={dragOverFolder}
+        showUpload={showUpload}
+        showDelete={showDelete}
         showModificationDate={showModificationDate}
+        loading={loading}
+        onToggleFolder={onToggleFolder}
         onFileClick={onFileClick}
         onFileDoubleClick={onFileDoubleClick}
+        onCreateNewFile={onCreateNewFile}
+        onCreateNewFolder={onCreateNewFolder}
+        onTriggerFolderUpload={onTriggerFolderUpload}
+        onDownloadFolderZip={onDownloadFolderZip}
+        onDeleteFolder={onDeleteFolder}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
         onCopyFile={handleCopyFile}
+        onCopyFolder={handleCopyFolder}
+        onPasteInto={handlePaste}
+        clipboard={clipboard}
+        apiBasePath={apiBasePath}
         onDebugWorkflow={onDebugWorkflow}
+        isRoot
       />
-
-      {/* Directory tree */}
-      {rootDirs.map((node) => (
-        <FolderNode
-          key={node.path}
-          node={node}
-          depth={0}
-          expandedFolders={expandedFolders}
-          selectedFile={selectedFile}
-          dragOverFolder={dragOverFolder}
-          showUpload={showUpload}
-          showDelete={showDelete}
-          showModificationDate={showModificationDate}
-          loading={loading}
-          onToggleFolder={onToggleFolder}
-          onFileClick={onFileClick}
-          onFileDoubleClick={onFileDoubleClick}
-          onTriggerFolderUpload={onTriggerFolderUpload}
-          onDownloadFolderZip={onDownloadFolderZip}
-          onDeleteFolder={onDeleteFolder}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onCopyFile={handleCopyFile}
-          onCopyFolder={handleCopyFolder}
-          onPasteInto={handlePaste}
-          clipboard={clipboard}
-          apiBasePath={apiBasePath}
-          onDebugWorkflow={onDebugWorkflow}
-        />
-      ))}
 
       {files.length === 0 && !loading && (
         <div style={{ color: '#6b7280', fontSize: 13, textAlign: 'center', marginTop: 20 }}>
-          {t('noFiles') || 'Žádné soubory'}
+          {t('noFiles') || 'No files'}
         </div>
       )}
     </section>

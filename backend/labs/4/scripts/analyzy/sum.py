@@ -1,12 +1,18 @@
 from uohs_dbsettings import load_data_json  # centrální DB nastavení
+import os
+#import re
+import sys
+import json
+
+
 
 def main():
     global data
-
+    print("start")
     # Vyžadujeme povinný parametr work_dir
     if len(sys.argv) != 2:
         print("Chybí parametr <work_dir>")
-        sys.exit(1)
+        sys.exit(1) 
 
     work_dir = sys.argv[1]
 
@@ -26,9 +32,11 @@ def main():
     b = data.get("b", 0)
 
     # spočítáme součet
-    data["a_plus_b"] = a + b
+    data["a_plus_b"] = a + b + 1
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
     print("Hotovo.")
+
+main()

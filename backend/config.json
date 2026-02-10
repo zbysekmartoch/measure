@@ -5,7 +5,7 @@
   },
   "scriptCommands": {
     ".py": {
-      "command": "./scripts/analyzy/.venv/bin/python",
+      "command": "./labs/.venv/bin/python",
       "description": "Python scripts"
     },
     ".js": {

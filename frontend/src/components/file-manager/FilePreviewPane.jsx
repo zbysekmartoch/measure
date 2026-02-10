@@ -7,6 +7,7 @@ import React, { useMemo } from 'react';
 import Editor from '@monaco-editor/react';
 import { useLanguage } from '../../context/LanguageContext';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate } from './fileUtils.js';
+import { filePreviewButtons as fpBtn, shadow } from '../../lib/uiConfig.js';
 
 export default function FilePreviewPane({
   selectedFile,
@@ -62,7 +63,7 @@ export default function FilePreviewPane({
   if (!selectedFile || !selectedFileInfo) {
     return (
       <section style={{ flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
-        {t('selectFileToView') || 'Vyberte soubor pro zobrazení'}
+        {t('selectFileToView') || 'Select a file to view'}
       </section>
     );
   }
@@ -88,28 +89,49 @@ export default function FilePreviewPane({
           {/* Edit / Save / Cancel */}
           {isText && !readOnly && isEditing ? (
             <>
-              <button className="btn btn-add" onClick={onSave} disabled={loading}>{t('save') || 'Uložit'}</button>
-              <button className="btn btn-cancel" onClick={onCancel} disabled={loading}>{t('cancel') || 'Zrušit'}</button>
+              <button
+                className="btn"
+                onClick={onSave}
+                disabled={loading}
+                style={{ padding: '4px 10px', background: fpBtn.save.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+              >
+                {fpBtn.save.icon} {t('save') || fpBtn.save.label}
+              </button>
+              <button
+                className="btn"
+                onClick={onCancel}
+                disabled={loading}
+                style={{ padding: '4px 10px', background: fpBtn.cancel.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+              >
+                {fpBtn.cancel.icon} {t('cancel') || fpBtn.cancel.label}
+              </button>
             </>
           ) : isText && !readOnly ? (
-            <button className="btn btn-edit" onClick={onEdit} disabled={loading}>{t('edit') || 'Upravit'}</button>
+            <button
+              className="btn"
+              onClick={onEdit}
+              disabled={loading}
+              style={{ padding: '4px 10px', background: fpBtn.edit.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+            >
+              {fpBtn.edit.icon} {t('edit') || fpBtn.edit.label}
+            </button>
           ) : null}
           {/* Download */}
           <button
             onClick={() => onDownloadFile(selectedFile)}
-            style={{ padding: '4px 10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}
-            title={t('download') || 'Stáhnout'}
+            style={{ padding: '4px 10px', background: fpBtn.download.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+            title={t('download') || fpBtn.download.label}
           >
-            ⬇ {t('download') || 'Stáhnout'}
+            {fpBtn.download.icon} {t('download') || fpBtn.download.label}
           </button>
           {/* Delete */}
           {showDelete && (
             <button
               onClick={() => onDeleteFile(selectedFile)}
-              style={{ padding: '4px 10px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}
-              title={t('delete') || 'Smazat'}
+              style={{ padding: '4px 10px', background: fpBtn.delete.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+              title={t('delete') || fpBtn.delete.label}
             >
-              🗑 {t('delete') || 'Smazat'}
+              {fpBtn.delete.icon} {t('delete') || fpBtn.delete.label}
             </button>
           )}
         </div>
@@ -130,7 +152,7 @@ export default function FilePreviewPane({
             <embed src={pdfBlobUrl} type="application/pdf" style={{ flex: 1, width: '100%', minHeight: 400 }} />
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280' }}>
-              {t('loading') || 'Načítání...'}
+              {t('loading') || 'Loading...'}
             </div>
           )}
         </div>
@@ -149,7 +171,7 @@ export default function FilePreviewPane({
               </span>
               {readOnly && (
                 <span style={{ background: 'rgba(239,68,68,0.2)', color: '#dc2626', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
-                  {t('readOnly') || 'Pouze pro čtení'}
+                  {t('readOnly') || 'Read only'}
                 </span>
               )}
               <select
@@ -187,7 +209,7 @@ export default function FilePreviewPane({
               onChange={(value) => onContentChange(value || '')}
               options={editorOptions}
               theme={editorTheme}
-              loading={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>{t('loading') || 'Načítání editoru...'}</div>}
+              loading={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>{t('loading') || 'Loading editor...'}</div>}
             />
           </div>
         </div>
@@ -195,9 +217,9 @@ export default function FilePreviewPane({
         /* Binary file */
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6b7280', gap: 16 }}>
           <div style={{ fontSize: 64 }}>📦</div>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>{t('binaryFile') || 'Binární soubor'}</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>{t('binaryFile') || 'Binary file'}</div>
           <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 400 }}>
-            {t('binaryFileDescription') || 'Tento soubor je binární a nelze jej zobrazit. Můžete jej stáhnout nebo smazat.'}
+            {t('binaryFileDescription') || 'This file is binary and cannot be displayed. You can download or delete it.'}
           </div>
         </div>
       )}
