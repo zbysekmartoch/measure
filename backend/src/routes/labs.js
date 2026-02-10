@@ -28,6 +28,22 @@ function getLabPath(id) {
   return path.join(LABS_ROOT, String(id));
 }
 
+// Calculate total size of a directory recursively (in bytes).
+async function getDirectorySize(dirPath) {
+  let totalSize = 0;
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      totalSize += await getDirectorySize(entryPath);
+    } else if (entry.isFile()) {
+      const stat = await fs.stat(entryPath);
+      totalSize += stat.size;
+    }
+  }
+  return totalSize;
+}
+
 // Read lab metadata from lab.json.
 async function readLabMetadata(labPath) {
   const data = await fs.readFile(path.join(labPath, 'lab.json'), 'utf-8');
@@ -156,6 +172,22 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+// Get lab folder size (owner or shared).
+router.get('/:id/size', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const sizeBytes = await getDirectorySize(labPath);
+    res.json({ sizeBytes });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
+    next(e);
+  }
+});
+
 // Update lab name/description (owner only).
 router.patch('/:id', async (req, res, next) => {
   try {
@@ -172,7 +204,7 @@ router.patch('/:id', async (req, res, next) => {
     // Optional backup frequency: 'manual', 'daily', 'weekly', 'monthly', or null/undefined
     const { backupFrequency } = req.body ?? {};
     if (backupFrequency !== undefined) {
-      const allowed = [null, 'manual', 'daily', 'weekly', 'monthly'];
+      const allowed = [null, 'manual', 'hourly', 'daily', 'weekly', 'monthly'];
       lab.backupFrequency = allowed.includes(backupFrequency) ? backupFrequency : null;
     }
 

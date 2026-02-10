@@ -208,6 +208,9 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         )}
       </div>
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+        {onDoubleClick && (
+          <IBtn title="Open in tab" onClick={(e) => { e.stopPropagation(); onDoubleClick(file); }} bg="#4f46e5">📑</IBtn>
+        )}
         {isWorkflow && onDebugWorkflow && (
           <IBtn title={fiBtn.debugWorkflow.label} onClick={() => onDebugWorkflow(file.path)} bg={fiBtn.debugWorkflow.bg}>{fiBtn.debugWorkflow.icon}</IBtn>
         )}

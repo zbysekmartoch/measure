@@ -37,6 +37,7 @@ export default function useFileManager({
   const [fileContent, setFileContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  const [imageBlobUrl, setImageBlobUrl] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [dragOverFolder, setDragOverFolder] = useState(null);
@@ -62,8 +63,11 @@ export default function useFileManager({
 
   useEffect(() => { loadFiles(); }, [loadFiles, refreshTrigger]);
 
-  // Cleanup PDF blob on unmount
-  useEffect(() => () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); }, [pdfBlobUrl]);
+  // Cleanup PDF/image blob on unmount
+  useEffect(() => () => {
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    if (imageBlobUrl) URL.revokeObjectURL(imageBlobUrl);
+  }, [pdfBlobUrl, imageBlobUrl]);
 
   // ---- load file content ----
   const loadFileContent = useCallback(async (file, forceLoad = false) => {
@@ -87,13 +91,27 @@ export default function useFileManager({
     }
 
     if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
+    if (imageBlobUrl) { URL.revokeObjectURL(imageBlobUrl); setImageBlobUrl(null); }
 
     setSelectedFile(file.path);
     setSelectedFileInfo(file);
     setIsEditing(false);
     onFileSelect?.(file);
 
-    if (isImageFile(file.path)) { setFileContent(''); return; }
+    if (isImageFile(file.path)) {
+      try {
+        setLoading(true);
+        const r = await fetch(`${apiBasePath}/download?file=${encodeURIComponent(file.path)}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        });
+        if (!r.ok) throw new Error();
+        setImageBlobUrl(URL.createObjectURL(await r.blob()));
+        setFileContent('');
+      } catch {
+        toast.error(t('errorLoadingFileContent') || 'Error loading image');
+      } finally { setLoading(false); }
+      return;
+    }
 
     if (isPdfFile(file.path)) {
       try {
@@ -124,7 +142,7 @@ export default function useFileManager({
     } catch {
       toast.error(t('errorLoadingFileContent') || 'Error loading file content');
     } finally { setLoading(false); }
-  }, [apiBasePath, t, onFileSelect, toast, pdfBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
+  }, [apiBasePath, t, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
 
   // ---- save ----
   const saveFileContent = useCallback(async () => {
@@ -373,7 +391,7 @@ export default function useFileManager({
 
   return {
     tree, files, loading, selectedFile, selectedFileInfo, fileContent, originalContent,
-    pdfBlobUrl, isEditing, expandedFolders,
+    pdfBlobUrl, imageBlobUrl, isEditing, expandedFolders,
     dragOverFolder, folderUploadRef, apiBasePath,
     loadFiles, loadFileContent, saveFileContent, deleteFile, downloadFile,
     createNewFile, createNewFolder, deleteFolderRecursive, downloadFolderZip,

@@ -108,7 +108,6 @@ export async function listFiles(dirPath, relativeTo = '', maxDepth = null, curre
   }
   if (maxDepth === 0) maxDepth = Infinity;
   const items = [];
-  const allowedExts = options.allowedExtensions || ALLOWED_EXTENSIONS;
   
   if (currentDepth >= maxDepth) return items;
   

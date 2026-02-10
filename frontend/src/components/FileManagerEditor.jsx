@@ -109,12 +109,12 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
           selectedFileInfo={fm.selectedFileInfo}
           fileContent={fm.fileContent}
           pdfBlobUrl={fm.pdfBlobUrl}
+          imageBlobUrl={fm.imageBlobUrl}
           isEditing={fm.isEditing}
           loading={fm.loading}
           readOnly={readOnly}
           editorTheme={editorTheme}
           showDelete={showDelete}
-          apiBasePath={apiBasePath}
           onEdit={() => fm.setIsEditing(true)}
           onSave={fm.saveFileContent}
           onCancel={() => { fm.setIsEditing(false); fm.loadFileContent(fm.selectedFileInfo); }}

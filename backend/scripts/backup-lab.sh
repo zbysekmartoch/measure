@@ -29,18 +29,22 @@ mkdir -p "$BACKUPS_DIR"
 LAB_ID="$(basename "$LAB_DIR")"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 TMP_ZIP="$(mktemp /tmp/lab-backup-XXXXXX.zip)"
+# Remove the empty temp file — zip needs to create it fresh
+rm -f "$TMP_ZIP"
 
-# Create ZIP archive (quiet mode, recurse, from parent dir)
-(cd "$(dirname "$LAB_DIR")" && zip -r -q "$TMP_ZIP" "$LAB_ID")
+# Create ZIP archive (quiet mode, recurse, from parent dir, no extra attributes)
+(cd "$(dirname "$LAB_DIR")" && zip -r -q -X "$TMP_ZIP" "$LAB_ID")
 
-# Compute SHA-256 of the new archive
-NEW_HASH="$(sha256sum "$TMP_ZIP" | awk '{print $1}')"
+# Compute a content-based hash by listing the archive entries with CRCs.
+# This makes the hash stable across runs with identical content, even though
+# the ZIP metadata (timestamps etc.) changes.
+NEW_HASH="$(unzip -lv "$TMP_ZIP" | grep -E '^\s+[0-9]' | awk '{print $7, $8}' | sort | sha256sum | awk '{print $1}')"
 
 # Check for duplicates among existing backups for this lab
 DUPLICATE=false
 for existing in "$BACKUPS_DIR"/lab-"${LAB_ID}"-*.zip; do
   [ -f "$existing" ] || continue
-  EXISTING_HASH="$(sha256sum "$existing" | awk '{print $1}')"
+  EXISTING_HASH="$(unzip -lv "$existing" | grep -E '^\s+[0-9]' | awk '{print $7, $8}' | sort | sha256sum | awk '{print $1}')"
   if [ "$NEW_HASH" = "$EXISTING_HASH" ]; then
     DUPLICATE=true
     break

@@ -18,6 +18,8 @@ import { fetchJSON } from '../lib/fetchJSON.js';
 import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '../components/Toast';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
+import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
+import Editor from '@monaco-editor/react';
 import { appConfig } from '../lib/appConfig.js';
 import { shadow, resultButtons as rbtn } from '../lib/uiConfig.js';
 
@@ -31,6 +33,11 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
   const [loading] = useState(false);
   const [debugRunning, setDebugRunning] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // ---- Open file tabs (sub-tabs within Results) ----
+  const [activeSubTab, setActiveSubTab] = useState('browser');
+  const [openFiles, setOpenFiles] = useState([]);
+  const [editorTheme] = useState(() => localStorage.getItem('monacoTheme') || 'vs-dark');
 
   const pollIntervalRef = useRef(null);
 
@@ -180,6 +187,48 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     return `/api/v1/labs/${lab.id}/results/${selectedResultId}/files`;
   }, [lab.id, selectedResultId]);
 
+  // ---- Open file in a sub-tab (double-click or button) ----
+  const handleFileOpen = useCallback((file) => {
+    if (!fileManagerApiPath) return;
+    const filePath = file.path;
+    if (openFiles.find((f) => f.path === filePath)) {
+      setActiveSubTab(`file:${filePath}`);
+      return;
+    }
+
+    const isImg = isImageFile(filePath);
+    const isPd = isPdfFile(filePath);
+    const isTxt = file.isText || isTextFile(filePath);
+
+    if (isTxt) {
+      fetch(`${fileManagerApiPath}/content?file=${encodeURIComponent(filePath)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      })
+        .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+        .then((data) => {
+          setOpenFiles((prev) => [...prev, {
+            path: filePath, name: file.name,
+            content: data.content || '',
+            language: getLanguageFromFilename(filePath),
+            isImage: false, isPdf: false, isText: true,
+          }]);
+          setActiveSubTab(`file:${filePath}`);
+        })
+        .catch(() => toast.error(`Failed to load ${filePath}`));
+    } else if (isImg || isPd) {
+      setOpenFiles((prev) => [...prev, {
+        path: filePath, name: file.name, content: '',
+        language: 'plaintext', isImage: isImg, isPdf: isPd, isText: false,
+      }]);
+      setActiveSubTab(`file:${filePath}`);
+    }
+  }, [openFiles, fileManagerApiPath, toast]);
+
+  const handleFileClose = useCallback((filePath) => {
+    setOpenFiles((prev) => prev.filter((f) => f.path !== filePath));
+    setActiveSubTab((prev) => (prev === `file:${filePath}` ? 'browser' : prev));
+  }, []);
+
   const canRun = selectedResult && !debugRunning && !isPending;
 
   return (
@@ -264,23 +313,117 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
         {loading && <span style={{ color: '#6b7280', fontSize: 12 }}>{t('loading')}</span>}
       </div>
 
-      {/* File browser */}
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {selectedResultId && fileManagerApiPath ? (
-          <FileManagerEditor
-            apiBasePath={fileManagerApiPath}
-            showUpload
-            showDelete
-            readOnly={false}
-            showModificationDate
-            title={`Result #${selectedResultId}`}
-            refreshTrigger={refreshTrigger}
-          />
-        ) : (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }}>
-            {t('selectResultToView') || 'Select a result to view files'}
+      {/* File browser with sub-tabs for opened files */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* Sub-tab bar (only if files are open) */}
+        {selectedResultId && openFiles.length > 0 && (
+          <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', marginBottom: -1, zIndex: 1 }}>
+            <button
+              onClick={() => setActiveSubTab('browser')}
+              style={{
+                padding: '5px 10px', border: '1px solid #012345', borderBottom: 'none',
+                borderRadius: '6px 6px 0 0', fontSize: 12,
+                background: activeSubTab === 'browser' ? '#fff' : '#f3f4f6',
+                fontWeight: activeSubTab === 'browser' ? 600 : 400,
+                cursor: 'pointer', outline: 'none',
+              }}
+            >
+              📁 Browser
+            </button>
+            {openFiles.map((file) => {
+              const isActive = activeSubTab === `file:${file.path}`;
+              return (
+                <span key={file.path} style={{ display: 'inline-flex', alignItems: 'stretch', marginBottom: isActive ? -1 : 0, zIndex: isActive ? 1 : 0 }}>
+                  <button
+                    onClick={() => setActiveSubTab(`file:${file.path}`)}
+                    title={file.path}
+                    style={{
+                      padding: '5px 10px', border: '1px solid #012345', borderBottom: 'none', borderRight: 'none',
+                      borderRadius: '6px 0 0 0', fontSize: 12,
+                      background: isActive ? '#fff' : '#f3f4f6', fontWeight: isActive ? 600 : 400,
+                      cursor: 'pointer', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', outline: 'none',
+                    }}
+                  >
+                    📄 {file.name}
+                  </button>
+                  <button
+                    onClick={() => handleFileClose(file.path)}
+                    style={{
+                      padding: '4px 6px', border: '1px solid #012345', borderBottom: 'none', borderLeft: 'none',
+                      borderRadius: '0 6px 0 0', background: isActive ? '#fff' : '#f3f4f6',
+                      cursor: 'pointer', color: '#9ca3af', fontSize: 12, display: 'flex', alignItems: 'center', outline: 'none',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; }}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
           </div>
         )}
+
+        <div style={{ flex: 1, minHeight: 0, border: openFiles.length > 0 ? '1px solid #012345' : 'none', position: 'relative' }}>
+          {/* File browser */}
+          <div style={{ height: '100%', display: activeSubTab === 'browser' ? 'block' : 'none', padding: openFiles.length > 0 ? 6 : 0 }}>
+            {selectedResultId && fileManagerApiPath ? (
+              <FileManagerEditor
+                apiBasePath={fileManagerApiPath}
+                showUpload
+                showDelete
+                readOnly={false}
+                showModificationDate
+                title={`Result #${selectedResultId}`}
+                refreshTrigger={refreshTrigger}
+                onFileDoubleClick={handleFileOpen}
+              />
+            ) : (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+                {t('selectResultToView') || 'Select a result to view files'}
+              </div>
+            )}
+          </div>
+
+          {/* Open file editors */}
+          {openFiles.map((file) => (
+            <div
+              key={file.path}
+              style={{
+                height: '100%',
+                display: activeSubTab === `file:${file.path}` ? 'flex' : 'none',
+                flexDirection: 'column', padding: 6,
+              }}
+            >
+              {file.isImage ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', borderRadius: 6, border: '1px solid #e5e7eb' }}>
+                  <img
+                    src={`${fileManagerApiPath}/download?file=${encodeURIComponent(file.path)}&token=${localStorage.getItem('authToken')}`}
+                    alt={file.name}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  />
+                </div>
+              ) : file.isPdf ? (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 6, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                  <embed
+                    src={`${fileManagerApiPath}/download?file=${encodeURIComponent(file.path)}&token=${localStorage.getItem('authToken')}`}
+                    type="application/pdf" style={{ flex: 1, width: '100%' }}
+                  />
+                </div>
+              ) : (
+                <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden' }}>
+                  <Editor
+                    height="100%"
+                    language={file.language}
+                    value={file.content}
+                    theme={editorTheme}
+                    options={{ readOnly: true, minimap: { enabled: true }, fontSize: 13, wordWrap: 'on', automaticLayout: true }}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
       <style>{`@keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:.4 } }`}</style>

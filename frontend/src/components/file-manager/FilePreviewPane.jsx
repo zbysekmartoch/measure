@@ -14,12 +14,12 @@ export default function FilePreviewPane({
   selectedFileInfo,
   fileContent,
   pdfBlobUrl,
+  imageBlobUrl,
   isEditing,
   loading,
   readOnly,
   editorTheme,
   showDelete,
-  apiBasePath,
   // actions
   onEdit,
   onSave,
@@ -140,11 +140,15 @@ export default function FilePreviewPane({
       {/* Content area */}
       {isImg ? (
         <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 16 }}>
-          <img
-            src={`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`}
-            alt={selectedFile}
-            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
-          />
+          {imageBlobUrl ? (
+            <img
+              src={imageBlobUrl}
+              alt={selectedFile}
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+            />
+          ) : (
+            <div style={{ color: '#6b7280' }}>{t('loading') || 'Loading...'}</div>
+          )}
         </div>
       ) : isPdf ? (
         <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#f8fafc' }}>
