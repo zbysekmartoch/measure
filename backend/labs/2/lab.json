@@ -1,11 +1,11 @@
 {
   "id": "2",
-  "name": "n1",
-  "description": "nějaký popis",
+  "name": "Reporty",
+  "description": "ladění generátoru reportů",
   "ownerId": 2,
   "sharedWith": [
     "3"
   ],
   "createdAt": "2026-02-06T10:12:04.004Z",
-  "updatedAt": "2026-02-06T10:20:36.200Z"
+  "updatedAt": "2026-02-23T08:12:46.290Z"
 }

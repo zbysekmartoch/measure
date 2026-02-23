@@ -82,6 +82,25 @@ export default function LabScriptsPane({ lab, debug }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stoppedRelPath, debug?.status]);
 
+  const saveFile = useCallback(async (filePath) => {
+    const file = openFiles.find((f) => f.path === filePath);
+    if (!file) return;
+    try {
+      const res = await fetch(`${apiBasePath}/content`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ file: filePath, content: file.content }),
+      });
+      if (!res.ok) throw new Error();
+      setOpenFiles((prev) =>
+        prev.map((f) => (f.path === filePath ? { ...f, originalContent: f.content, dirty: false } : f)),
+      );
+      toast.success(`${file.name} saved`);
+    } catch {
+      toast.error(`Failed to save ${file.name}`);
+    }
+  }, [openFiles, apiBasePath, toast]);
+
   // ---- Debug workflow: save dirty files, create result run, notify user ----
   const handleDebugWorkflow = useCallback(async (workflowFile) => {
     try {
@@ -161,25 +180,6 @@ export default function LabScriptsPane({ lab, debug }) {
       ),
     );
   }, []);
-
-  const saveFile = useCallback(async (filePath) => {
-    const file = openFiles.find((f) => f.path === filePath);
-    if (!file) return;
-    try {
-      const res = await fetch(`${apiBasePath}/content`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
-        body: JSON.stringify({ file: filePath, content: file.content }),
-      });
-      if (!res.ok) throw new Error();
-      setOpenFiles((prev) =>
-        prev.map((f) => (f.path === filePath ? { ...f, originalContent: f.content, dirty: false } : f)),
-      );
-      toast.success(`${file.name} saved`);
-    } catch {
-      toast.error(`Failed to save ${file.name}`);
-    }
-  }, [openFiles, apiBasePath, toast]);
 
   const tabStyle = (isActive) => ({
     padding: '6px 10px',

@@ -38,7 +38,7 @@ export default function LabsTab() {
   const [newName, setNewName] = useState('');
 
   const currentList = useMemo(
-    () => (activeTab === 'mine' ? myLabs : sharedLabs),
+    () => [...(activeTab === 'mine' ? myLabs : sharedLabs)].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })),
     [activeTab, myLabs, sharedLabs],
   );
   const showList = activeTab === 'mine' || activeTab === 'shared';

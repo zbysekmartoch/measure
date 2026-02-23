@@ -32,7 +32,7 @@ def main():
     b = data.get("b", 0)
 
     # spočítáme součet
-    data["a_plus_b"] = a + b + 20
+    data["a_plus_b"] = a + b
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

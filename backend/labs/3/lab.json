@@ -1,11 +1,11 @@
 {
   "id": "3",
-  "name": "x1",
-  "description": "nějaký popis",
+  "name": "Elektromobilita",
+  "description": "data a skripty pro analýzu elektromobility",
   "ownerId": 2,
   "sharedWith": [
     "2"
   ],
   "createdAt": "2026-02-06T10:12:04.004Z",
-  "updatedAt": "2026-02-06T10:20:36.200Z"
+  "updatedAt": "2026-02-23T08:13:47.959Z"
 }

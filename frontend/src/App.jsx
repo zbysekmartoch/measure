@@ -221,7 +221,7 @@ function AppContent() {
   };
 
   const currentList = (tab === 'mine' || tab === 'shared')
-    ? (tab === 'mine' ? myLabs : sharedLabs)
+    ? [...(tab === 'mine' ? myLabs : sharedLabs)].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
     : [];
   const showList = tab === 'mine' || tab === 'shared';
 
