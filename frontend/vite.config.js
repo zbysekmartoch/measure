@@ -5,16 +5,16 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 50101,
     proxy: {
-      // Forward all /api requests to the backend running on :3000
+      // Forward all /api requests to the backend running on :50100
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:50100',
         changeOrigin: true
       },
       // Forward DAP WebSocket proxy
       '/dap': {
-        target: 'ws://localhost:3000',
+        target: 'ws://localhost:50100',
         ws: true
       }
     }
