@@ -1,19 +1,19 @@
 # Measure
 
-**Modular Extensible Analytical Stack — Unified Research Environment**
+**Modular Extensible Analytical Stack for a Unified Research Environment**
 
 Browser-based analytical workbench. Users create **labs** (analysis projects), manage files, execute scripts (Python, R, Node.js, Shell), run SQL queries, and debug scripts via DAP — all from a single web UI.
 
 ## Architecture
 
 ```
-Browser (:5173)
+Browser (:50101)
   └── React SPA (Vite)
         ├── Labs (scripts, results, settings)
         ├── SQL Editor (Monaco + AG Grid)
         └── Debug UI (DAP over WebSocket)
               │
-        Vite proxy ──► Express API (:3000)
+        Vite proxy ──► Express API (:50100)
                          ├── /api/v1/auth    (JWT)
                          ├── /api/v1/labs    (CRUD, files, execution, debug)
                          ├── /api/v1/sql     (multi-datasource SQL)
@@ -41,12 +41,13 @@ Browser (:5173)
 cd backend
 cp .env.example .env   # configure DB, JWT secret, etc.
 npm install
-npm run dev             # starts on :3000
+npm run dev             # starts on :50100
 
 # Frontend (new terminal)
 cd frontend
+cp vite.config.js.example vite.config.js   # adjust ports if needed
 npm install
-npm run dev             # starts on :5173, proxies API to :3000
+npm run dev             # starts on :50101, proxies API to :50100
 
 # Database
 mysql -u root -p < backend/sql/create.sql

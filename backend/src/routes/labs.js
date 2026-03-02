@@ -671,6 +671,43 @@ router.post('/:id/results/:resultId/files/upload', async (req, res, next) => {
   }
 });
 
+// Rename a file or folder inside result files.
+router.post('/:id/results/:resultId/files/rename', async (req, res, next) => {
+  try {
+    const { oldPath, newPath } = req.body;
+    if (!oldPath?.trim() || !newPath?.trim()) {
+      return res.status(400).json({ error: 'Both oldPath and newPath are required' });
+    }
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const resultRoot = path.join(getLabResultsRoot(req.params.id), req.params.resultId);
+    const secureResult = getSecurePath(getLabResultsRoot(req.params.id), req.params.resultId);
+    if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
+
+    const srcPath = getSecurePath(resultRoot, oldPath.trim());
+    const dstPath = getSecurePath(resultRoot, newPath.trim());
+    if (!srcPath || !dstPath) return res.status(400).json({ error: 'Invalid path' });
+
+    try { await fs.stat(srcPath); } catch (e) {
+      if (e.code === 'ENOENT') return res.status(404).json({ error: 'Source not found' });
+      throw e;
+    }
+    await fs.mkdir(path.dirname(dstPath), { recursive: true });
+    try { await fs.stat(dstPath); return res.status(409).json({ error: 'Destination already exists' }); }
+    catch { /* good */ }
+
+    await fs.rename(srcPath, dstPath);
+    res.json({ success: true, oldPath: oldPath.trim(), newPath: newPath.trim() });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ─── Abort / Reset a running result ────────────────────────────────────────────
 
 /**
@@ -1046,14 +1083,27 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
     let dataJsonCopied = false;
     const srcDataJson = path.join(scriptsRoot, 'data.json');
     const dstDataJson = path.join(resultDir, 'data.json');
+    let dataJson = {};
     try {
       await fs.access(srcDataJson);
-      await fs.copyFile(srcDataJson, dstDataJson);
+      const raw = await fs.readFile(srcDataJson, 'utf-8');
+      dataJson = JSON.parse(raw);
       dataJsonCopied = true;
     } catch {
-      // data.json doesn't exist in scripts — create empty
-      await fs.writeFile(dstDataJson, '{}', 'utf-8');
+      // data.json doesn't exist or is invalid — start empty
+      dataJson = {};
     }
+
+    // Add "workflow" key — read lines from the .workflow file as an array of step strings
+    try {
+      const wfContent = await fs.readFile(wfPath, 'utf-8');
+      const steps = wfContent.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      dataJson.workflow = steps;
+    } catch {
+      dataJson.workflow = [workflowFile];
+    }
+
+    await fs.writeFile(dstDataJson, JSON.stringify(dataJson, null, 2), 'utf-8');
 
     // Write initial progress.json
     const now = new Date().toISOString();
@@ -1293,6 +1343,46 @@ router.post('/:id/scripts/folder', async (req, res, next) => {
 
     await fs.mkdir(dirPath, { recursive: true });
     res.status(201).json({ success: true, path: folderPath.trim() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Rename a file or folder inside lab scripts.
+router.post('/:id/scripts/rename', async (req, res, next) => {
+  try {
+    const { oldPath, newPath } = req.body;
+    if (!oldPath?.trim() || !newPath?.trim()) {
+      return res.status(400).json({ error: 'Both oldPath and newPath are required' });
+    }
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabScriptsRoot(req.params.id);
+    const srcPath = getSecurePath(root, oldPath.trim());
+    const dstPath = getSecurePath(root, newPath.trim());
+    if (!srcPath || !dstPath) return res.status(400).json({ error: 'Invalid path' });
+    if (srcPath === root) return res.status(400).json({ error: 'Cannot rename scripts root' });
+
+    // Ensure source exists
+    try { await fs.stat(srcPath); } catch (e) {
+      if (e.code === 'ENOENT') return res.status(404).json({ error: 'Source not found' });
+      throw e;
+    }
+
+    // Ensure destination parent exists
+    await fs.mkdir(path.dirname(dstPath), { recursive: true });
+
+    // Ensure destination doesn't already exist
+    try { await fs.stat(dstPath); return res.status(409).json({ error: 'Destination already exists' }); }
+    catch { /* good — doesn't exist */ }
+
+    await fs.rename(srcPath, dstPath);
+    res.json({ success: true, oldPath: oldPath.trim(), newPath: newPath.trim() });
   } catch (e) {
     next(e);
   }

@@ -12,6 +12,9 @@ build/
 .env.test.local
 .env.production.local
 
+# Vite config (machine-specific ports; use vite.config.js.example)
+vite.config.js
+
 # IDE
 .vscode/
 .idea/

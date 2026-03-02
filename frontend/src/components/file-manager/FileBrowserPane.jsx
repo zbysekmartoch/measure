@@ -45,7 +45,7 @@ function FolderNode({
   onTriggerFolderUpload, onDownloadFolderZip, onDeleteFolder,
   onDrop, onDragOver, onDragLeave,
   onCopyFile, onCopyFolder, onPasteInto, clipboard, apiBasePath,
-  onDebugWorkflow,
+  onDebugWorkflow, onRename,
   isRoot,
 }) {
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
@@ -120,6 +120,16 @@ function FolderNode({
             <IBtn title={fiBtn.uploadHere.label} onClick={() => onTriggerFolderUpload(isRoot ? '.' : node.path)} bg={fiBtn.uploadHere.bg} disabled={loading}>{fiBtn.uploadHere.icon}</IBtn>
           )}
           <IBtn title={fiBtn.downloadZip.label} onClick={() => onDownloadFolderZip(isRoot ? '.' : node.path)} bg={fiBtn.downloadZip.bg} disabled={loading}>{fiBtn.downloadZip.icon}</IBtn>
+          {!isRoot && (
+            <IBtn title={fiBtn.renameFolder.label} onClick={() => {
+              const newName = prompt('New name:', node.name);
+              if (newName && newName !== node.name) {
+                const parts = node.path.split('/');
+                parts[parts.length - 1] = newName;
+                onRename(node.path, parts.join('/'));
+              }
+            }} bg={fiBtn.renameFolder.bg} disabled={loading}>{fiBtn.renameFolder.icon}</IBtn>
+          )}
           {showDelete && !isRoot && (
             <IBtn title={fiBtn.deleteFolder.label} onClick={() => onDeleteFolder(node.path)} bg={fiBtn.deleteFolder.bg} disabled={loading}>{fiBtn.deleteFolder.icon}</IBtn>
           )}
@@ -162,6 +172,7 @@ function FolderNode({
             clipboard={clipboard}
             apiBasePath={apiBasePath}
             onDebugWorkflow={onDebugWorkflow}
+            onRename={onRename}
           />
         ) : (
           <FileRow
@@ -174,6 +185,7 @@ function FolderNode({
             onDoubleClick={onFileDoubleClick}
             onCopy={onCopyFile}
             onDebugWorkflow={onDebugWorkflow}
+            onRename={onRename}
           />
         ),
       )}
@@ -182,7 +194,7 @@ function FolderNode({
 }
 
 /* ── file row ───────────────────────────────────────────────────────────────── */
-function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow }) {
+function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename }) {
   const indent = depth * 16 + 12;
   const isWorkflow = file.name?.endsWith('.workflow');
   return (
@@ -214,6 +226,14 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         {isWorkflow && onDebugWorkflow && (
           <IBtn title={fiBtn.debugWorkflow.label} onClick={() => onDebugWorkflow(file.path)} bg={fiBtn.debugWorkflow.bg}>{fiBtn.debugWorkflow.icon}</IBtn>
         )}
+        <IBtn title={fiBtn.renameFile.label} onClick={() => {
+          const newName = prompt('New name:', file.name);
+          if (newName && newName !== file.name) {
+            const parts = file.path.split('/');
+            parts[parts.length - 1] = newName;
+            onRename(file.path, parts.join('/'));
+          }
+        }} bg={fiBtn.renameFile.bg}>{fiBtn.renameFile.icon}</IBtn>
         <IBtn title={fiBtn.copyFile.label} onClick={() => onCopy(file.path)} bg={fiBtn.copyFile.bg}>{fiBtn.copyFile.icon}</IBtn>
       </div>
     </div>
@@ -250,6 +270,7 @@ export default function FileBrowserPane({
   onDownloadFolderZip,
   onPasteInto,
   onDebugWorkflow,
+  onRename,
   showModificationDate,
   apiBasePath,
 }) {
@@ -343,6 +364,7 @@ export default function FileBrowserPane({
         clipboard={clipboard}
         apiBasePath={apiBasePath}
         onDebugWorkflow={onDebugWorkflow}
+        onRename={onRename}
         isRoot
       />
 

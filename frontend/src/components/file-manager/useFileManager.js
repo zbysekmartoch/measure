@@ -242,6 +242,33 @@ export default function useFileManager({
     } finally { setLoading(false); }
   }, [apiBasePath, loadFiles, toast]);
 
+  // ---- rename (file or folder) ----
+  const renameItem = useCallback(async (oldPath, newPath) => {
+    if (!oldPath?.trim() || !newPath?.trim()) return;
+    try {
+      setLoading(true);
+      const r = await fetch(`${apiBasePath}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ oldPath: oldPath.trim(), newPath: newPath.trim() }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || `HTTP ${r.status}`);
+      }
+      // Update selected file reference if it was the renamed item
+      if (selectedFile === oldPath) {
+        setSelectedFile(newPath.trim());
+      } else if (selectedFile?.startsWith(oldPath + '/')) {
+        setSelectedFile(selectedFile.replace(oldPath, newPath.trim()));
+      }
+      await loadFiles();
+      toast.success(`Renamed "${oldPath}" → "${newPath}"`);
+    } catch (e) {
+      toast.error(`Error renaming: ${e.message}`);
+    } finally { setLoading(false); }
+  }, [apiBasePath, selectedFile, loadFiles, toast]);
+
   // ---- delete folder recursively ----
   const deleteFolderRecursive = useCallback(async (folder) => {
     if (!showDelete) return;
@@ -394,7 +421,7 @@ export default function useFileManager({
     pdfBlobUrl, imageBlobUrl, isEditing, expandedFolders,
     dragOverFolder, folderUploadRef, apiBasePath,
     loadFiles, loadFileContent, saveFileContent, deleteFile, downloadFile,
-    createNewFile, createNewFolder, deleteFolderRecursive, downloadFolderZip,
+    createNewFile, createNewFolder, renameItem, deleteFolderRecursive, downloadFolderZip,
     pasteInto,
     handleFileUpload, handleFolderUpload, triggerFolderUpload, handleDrop,
     toggleFolder, handleDragOver, handleDragLeave,

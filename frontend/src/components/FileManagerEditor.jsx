@@ -101,6 +101,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
         onDownloadFolderZip={fm.downloadFolderZip}
         onPasteInto={fm.pasteInto}
         onDebugWorkflow={onDebugWorkflow}
+        onRename={fm.renameItem}
       />
 
       {showPreview && (

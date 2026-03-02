@@ -2,12 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
+// Copy this file to vite.config.js and adjust ports to match your environment.
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 50101,
     proxy: {
-      // Forward all /api requests to the backend running on :50100
+      // Forward all /api requests to the backend
       '/api': {
         target: 'http://localhost:50100',
         changeOrigin: true

@@ -13,7 +13,7 @@ measure/
 │   ├── .env                     # Secrets (DB, JWT, email)
 │   ├── package.json
 │   ├── datasources/             # SQL Server / SQLite connection configs
-│   ├── labs/                    # Lab data on disk (gitignored)
+│   ├── labs/                    # Lab data on disk (individual labs gitignored)
 │   ├── backups/                 # Lab backups (gitignored)
 │   ├── sql/                     # Database DDL and migration scripts
 │   ├── src/
@@ -37,7 +37,7 @@ measure/
 │
 ├── frontend/
 │   ├── package.json
-│   ├── vite.config.js           # Vite config (proxy to backend)
+│   ├── vite.config.js.example   # Vite config template (copy to vite.config.js)
 │   ├── index.html
 │   └── src/
 │       ├── main.jsx             # React entry point
@@ -131,13 +131,13 @@ Lab data is stored on disk — see [LABS.md](LABS.md).
 
 | Variable | Example |
 |----------|---------|
-| `PORT` | `3000` |
+| `PORT` | `50100` |
 | `DB_HOST` | `localhost` |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | MySQL credentials |
 | `JWT_SECRET` | signing secret |
-| `CORS_ORIGIN` | `http://localhost:5173` |
+| `CORS_ORIGIN` | `http://localhost:50101` |
 | `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_USER` / `EMAIL_PASS` | SMTP config |
-| `FRONTEND_URL` | `http://localhost:5173` |
+| `FRONTEND_URL` | `http://localhost:50101` |
 
 ### `config.json`
 
@@ -169,6 +169,6 @@ Lab data is stored on disk — see [LABS.md](LABS.md).
 # Prerequisites: Node.js 18+, MySQL 8+
 
 cd backend && cp .env.example .env && npm install && npm run dev
-cd frontend && npm install && npm run dev
+cd frontend && cp vite.config.js.example vite.config.js && npm install && npm run dev
 mysql -u root -p < backend/sql/create.sql
 ```

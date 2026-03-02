@@ -1,0 +1,5 @@
+# Ignore individual lab folders (numbered) — these are user data.
+# Only keep shared library code and the global requirements.
+[0-9]*/
+.venv/
+__pycache__/
