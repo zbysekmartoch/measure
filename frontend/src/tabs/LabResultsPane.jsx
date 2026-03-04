@@ -69,10 +69,11 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
 
   // ---- Refresh content of all open file tabs (when workflow completes) ----
   const refreshOpenFileTabs = useCallback(() => {
-    if (!fileManagerApiPath || openFiles.length === 0) return;
+    if (!selectedResultId || openFiles.length === 0) return;
+    const apiPath = `/api/v1/labs/${lab.id}/results/${selectedResultId}/files`;
     openFiles.forEach((file) => {
       if (!file.isText) return;
-      fetch(`${fileManagerApiPath}/content?file=${encodeURIComponent(file.path)}`, {
+      fetch(`${apiPath}/content?file=${encodeURIComponent(file.path)}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
       })
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
@@ -83,7 +84,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
         })
         .catch(() => { /* ignore */ });
     });
-  }, [fileManagerApiPath, openFiles]);
+  }, [lab.id, selectedResultId, openFiles]);
 
   useEffect(() => {
     if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
