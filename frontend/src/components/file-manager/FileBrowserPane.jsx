@@ -45,7 +45,7 @@ function FolderNode({
   onTriggerFolderUpload, onDownloadFolderZip, onDeleteFolder,
   onDrop, onDragOver, onDragLeave,
   onCopyFile, onCopyFolder, onPasteInto, clipboard, apiBasePath,
-  onDebugWorkflow, onRename,
+  onDebugWorkflow, onRename, changedFiles,
   isRoot,
 }) {
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
@@ -173,6 +173,7 @@ function FolderNode({
             apiBasePath={apiBasePath}
             onDebugWorkflow={onDebugWorkflow}
             onRename={onRename}
+            changedFiles={changedFiles}
           />
         ) : (
           <FileRow
@@ -186,6 +187,7 @@ function FolderNode({
             onCopy={onCopyFile}
             onDebugWorkflow={onDebugWorkflow}
             onRename={onRename}
+            isChanged={changedFiles?.has(child.path)}
           />
         ),
       )}
@@ -194,23 +196,26 @@ function FolderNode({
 }
 
 /* ── file row ───────────────────────────────────────────────────────────────── */
-function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename }) {
+function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged }) {
   const indent = depth * 16 + 12;
   const isWorkflow = file.name?.endsWith('.workflow');
+  const changedBg = '#fef9c3';  // light yellow for changed files
+  const baseBg = isSelected ? '#dbeafe' : isChanged ? changedBg : 'transparent';
   return (
     <div
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '3px 6px', paddingLeft: indent,
         borderRadius: 4,
-        background: isSelected ? '#dbeafe' : 'transparent',
+        background: baseBg,
+        borderLeft: isChanged ? '3px solid #eab308' : '3px solid transparent',
         cursor: 'pointer', fontSize: 12,
-        transition: 'background 0.1s',
+        transition: 'background 0.3s, border-color 0.3s',
       }}
       onClick={() => onClick(file)}
       onDoubleClick={() => onDoubleClick?.(file)}
-      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f5f7fa'; }}
-      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = isChanged ? '#fef08a' : '#f5f7fa'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = baseBg; }}
     >
       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span>{fileIcon(file.name)}</span>
@@ -271,6 +276,7 @@ export default function FileBrowserPane({
   onPasteInto,
   onDebugWorkflow,
   onRename,
+  changedFiles,
   showModificationDate,
   apiBasePath,
 }) {
@@ -365,6 +371,7 @@ export default function FileBrowserPane({
         apiBasePath={apiBasePath}
         onDebugWorkflow={onDebugWorkflow}
         onRename={onRename}
+        changedFiles={changedFiles}
         isRoot
       />
 

@@ -45,6 +45,10 @@ export default function useFileManager({
   const [uploadTargetFolder, setUploadTargetFolder] = useState(null);
   const folderUploadRef = useRef(null);
 
+  // Track file modification times for change detection
+  const prevMtimesRef = useRef(new Map());
+  const [changedFiles, setChangedFiles] = useState(new Set());
+
   // flat file list (derived from tree)
   const files = useMemo(() => extractFiles(tree), [tree]);
 
@@ -53,7 +57,39 @@ export default function useFileManager({
     try {
       setLoading(true);
       const data = await fetchJSON(apiBasePath);
-      setTree(data.items || []);
+      const newItems = data.items || [];
+      setTree(newItems);
+
+      // Build a new mtime map and detect changed files
+      const newMtimes = new Map();
+      const collectMtimes = (nodes) => {
+        for (const n of (nodes || [])) {
+          if (n.type === 'file' && n.mtime) newMtimes.set(n.path, n.mtime);
+          if (n.type === 'directory' && n.children) collectMtimes(n.children);
+        }
+      };
+      collectMtimes(newItems);
+
+      const prev = prevMtimesRef.current;
+      if (prev.size > 0) {
+        const changed = new Set();
+        for (const [path, mtime] of newMtimes) {
+          const prevMtime = prev.get(path);
+          if (!prevMtime) {
+            // New file
+            changed.add(path);
+          } else if (prevMtime !== mtime) {
+            // Modified file
+            changed.add(path);
+          }
+        }
+        if (changed.size > 0) {
+          setChangedFiles(changed);
+          // Auto-clear highlights after 15 seconds
+          setTimeout(() => setChangedFiles(new Set()), 15000);
+        }
+      }
+      prevMtimesRef.current = newMtimes;
     } catch {
       setTree([]);
     } finally {
@@ -144,6 +180,38 @@ export default function useFileManager({
     } finally { setLoading(false); }
   }, [apiBasePath, t, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
 
+  // Auto-reload selected file content when it was modified externally (e.g. after workflow)
+  useEffect(() => {
+    if (!selectedFile || !selectedFileInfo) return;
+    if (changedFiles.size === 0) return;
+    if (!changedFiles.has(selectedFile)) return;
+    if (isEditing) return; // don't overwrite user edits
+
+    // Re-fetch the file content
+    if (isTextFile(selectedFile) || selectedFileInfo.isText) {
+      fetch(`${apiBasePath}/content?file=${encodeURIComponent(selectedFile)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      })
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(data => {
+          setFileContent(data.content || '');
+          setOriginalContent(data.content || '');
+        })
+        .catch(() => { /* ignore */ });
+    } else if (isImageFile(selectedFile)) {
+      fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      })
+        .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
+        .then(blob => {
+          if (imageBlobUrl) URL.revokeObjectURL(imageBlobUrl);
+          setImageBlobUrl(URL.createObjectURL(blob));
+        })
+        .catch(() => { /* ignore */ });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [changedFiles]);
+
   // ---- save ----
   const saveFileContent = useCallback(async () => {
     if (!selectedFile || readOnly) return;
@@ -181,14 +249,25 @@ export default function useFileManager({
   }, [selectedFile, loadFiles, t, apiBasePath, showDelete, toast]);
 
   // ---- download file ----
-  const downloadFile = useCallback((filepath) => {
-    const link = document.createElement('a');
-    link.href = `${apiBasePath}/download?file=${encodeURIComponent(filepath)}`;
-    link.download = filepath.split('/').pop();
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [apiBasePath]);
+  const downloadFile = useCallback(async (filepath) => {
+    try {
+      const r = await fetch(`${apiBasePath}/download?file=${encodeURIComponent(filepath)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filepath.split('/').pop();
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t('errorDownloadingFile') || 'Error downloading file');
+    }
+  }, [apiBasePath, toast, t]);
 
   // ---- create new empty file ----
   const createNewFile = useCallback(async (filePath) => {
@@ -290,14 +369,25 @@ export default function useFileManager({
   }, [apiBasePath, showDelete, selectedFile, loadFiles, toast]);
 
   // ---- download folder as zip ----
-  const downloadFolderZip = useCallback((folder) => {
-    const link = document.createElement('a');
-    link.href = `${apiBasePath}/folder/zip?path=${encodeURIComponent(folder)}`;
-    link.download = `${folder.replace(/\//g, '_')}.zip`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [apiBasePath]);
+  const downloadFolderZip = useCallback(async (folder) => {
+    try {
+      const r = await fetch(`${apiBasePath}/folder/zip?path=${encodeURIComponent(folder)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${folder.replace(/\//g, '_') || 'root'}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t('errorDownloadingFolder') || 'Error downloading folder');
+    }
+  }, [apiBasePath, toast, t]);
 
   // ---- paste (from global clipboard) ----
   const pasteInto = useCallback(async (targetFolder, clipboardItem) => {
@@ -418,7 +508,7 @@ export default function useFileManager({
 
   return {
     tree, files, loading, selectedFile, selectedFileInfo, fileContent, originalContent,
-    pdfBlobUrl, imageBlobUrl, isEditing, expandedFolders,
+    pdfBlobUrl, imageBlobUrl, isEditing, expandedFolders, changedFiles,
     dragOverFolder, folderUploadRef, apiBasePath,
     loadFiles, loadFileContent, saveFileContent, deleteFile, downloadFile,
     createNewFile, createNewFolder, renameItem, deleteFolderRecursive, downloadFolderZip,

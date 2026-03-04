@@ -67,6 +67,24 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
   // ---- Polling for running results ----
   const isPending = selectedResult?.status === 'pending' || selectedResult?.status === 'running';
 
+  // ---- Refresh content of all open file tabs (when workflow completes) ----
+  const refreshOpenFileTabs = useCallback(() => {
+    if (!fileManagerApiPath || openFiles.length === 0) return;
+    openFiles.forEach((file) => {
+      if (!file.isText) return;
+      fetch(`${fileManagerApiPath}/content?file=${encodeURIComponent(file.path)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      })
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(data => {
+          setOpenFiles(prev => prev.map(f =>
+            f.path === file.path ? { ...f, content: data.content || '' } : f
+          ));
+        })
+        .catch(() => { /* ignore */ });
+    });
+  }, [fileManagerApiPath, openFiles]);
+
   useEffect(() => {
     if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
     if (!selectedResultId || !isPending) return;
@@ -81,6 +99,8 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
           setSelectedResult(updated);
           if (updated.status !== 'pending' && updated.status !== 'running') {
             setRefreshTrigger((p) => p + 1);
+            // Refresh content of any open file tabs
+            refreshOpenFileTabs();
             clearInterval(pollIntervalRef.current);
             pollIntervalRef.current = null;
           }
@@ -89,7 +109,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     }, appConfig.RESULT_LOG_POLL_INTERVAL_MS || 3000);
 
     return () => { if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; } };
-  }, [selectedResultId, isPending, lab.id]);
+  }, [selectedResultId, isPending, lab.id, refreshOpenFileTabs]);
 
   // ---- Run debug workflow ----
   const handleRunDebug = useCallback(async () => {

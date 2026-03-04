@@ -102,6 +102,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
         onPasteInto={fm.pasteInto}
         onDebugWorkflow={onDebugWorkflow}
         onRename={fm.renameItem}
+        changedFiles={fm.changedFiles}
       />
 
       {showPreview && (

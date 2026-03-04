@@ -320,13 +320,13 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           overflow: 'hidden',
           position: 'relative',
         }}>
-          <div style={{ height: '100%', display: activeTab === 'scripts' ? 'flex' : 'none', flexDirection: 'column', padding: 6 }}>
+          <div style={{ flex: 1, minHeight: 0, display: activeTab === 'scripts' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
             <LabScriptsPane lab={lab} debug={debug} />
           </div>
-          <div style={{ height: '100%', display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6 }}>
+          <div style={{ flex: 1, minHeight: 0, display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
             <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} />
           </div>
-          <div style={{ height: '100%', display: activeTab === 'settings' ? 'block' : 'none', overflow: 'auto' }}>
+          <div style={{ flex: 1, minHeight: 0, display: activeTab === 'settings' ? 'block' : 'none', overflow: 'auto' }}>
             <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />
           </div>
         </div>
