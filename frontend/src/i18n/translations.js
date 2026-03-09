@@ -169,6 +169,15 @@ const en = {
   errorStartingDebugAnalysis: 'Error starting debug analysis',
   readOnly: 'Read only',
 
+  // Workflow execution
+  workflowStarted: 'Workflow started',
+  debugWorkflowStarted: 'Debug workflow started',
+  errorStartingWorkflow: 'Error starting workflow',
+  stopOnFailure: 'Stop on failure',
+  workflowProgress: 'Workflow Progress',
+  waitingForDebugger: 'Waiting for debugger',
+  pausedInDebugger: 'Paused in debugger',
+
   // Common
   save: 'Save',
   cancel: 'Cancel',

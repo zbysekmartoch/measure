@@ -14,8 +14,14 @@
     "@tanstack/react-table": "^8.21.3",
     "ag-grid-community": "^34.1.1",
     "ag-grid-react": "^34.1.1",
+    "katex": "^0.16.35",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",

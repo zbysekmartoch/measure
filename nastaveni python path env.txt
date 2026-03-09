@@ -1,0 +1,29 @@
+const { spawn } = require('child_process');
+const path = require('path');
+
+const projectRoot = path.resolve(__dirname, '..');
+const pythonPathExtra = path.join(projectRoot, 'labs', 'LIB');
+
+const env = {
+  ...process.env,
+  PYTHONPATH: process.env.PYTHONPATH
+    ? `${pythonPathExtra}${path.delimiter}${process.env.PYTHONPATH}`
+    : pythonPathExtra,
+};
+
+const pythonExecutable = path.join(projectRoot, '.venv', 'bin', 'python'); // Linux/macOS
+// const pythonExecutable = path.join(projectRoot, '.venv', 'Scripts', 'python.exe'); // Windows
+
+const child = spawn(
+  pythonExecutable,
+  [path.join(projectRoot, 'scripts', 'run_task.py')],
+  { env }
+);
+
+child.stdout.on('data', (data) => {
+  console.log(data.toString());
+});
+
+child.stderr.on('data', (data) => {
+  console.error(data.toString());
+});

@@ -2,10 +2,12 @@ import { Router } from 'express';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import archiver from 'archiver';
-import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth } from '../utils/file-manager.js';
-import { startDebugSession, getDebugStatus, getDebugEvents, endDebugSession } from '../debug/debug-engine.js';
+import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth, copyRecursive } from '../utils/file-manager.js';
+import { getDebugStatus, endDebugSession } from '../debug/debug-engine.js';
+import { startWorkflowRun, abortWorkflowRun } from '../workflow/workflow-runner.js';
+import { query } from '../db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,9 +20,35 @@ const BACKUP_SCRIPT = path.resolve(__dirname, '../../scripts/backup-lab.sh');
 
 const router = Router();
 
+// Path to shared aliases registry (shortName → labId).
+const ALIASES_FILE = path.join(LABS_ROOT, 'aliases.json');
+
 // Ensure base labs folder exists (called before listing/creating).
 async function ensureLabsRoot() {
   await fs.mkdir(LABS_ROOT, { recursive: true });
+}
+
+// ── Aliases (shortName) helpers ───────────────────────────────────────────────
+
+/** Read aliases.json → { alias: labId, ... } */
+async function readAliases() {
+  try {
+    const raw = await fs.readFile(ALIASES_FILE, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+/** Write aliases.json */
+async function writeAliases(aliases) {
+  await fs.writeFile(ALIASES_FILE, JSON.stringify(aliases, null, 2), 'utf-8');
+}
+
+/** Resolve a shortName alias to a lab id. Returns null if not found. */
+export async function resolveAlias(alias) {
+  const aliases = await readAliases();
+  return aliases[alias] ?? null;
 }
 
 // Resolve lab folder path from lab id (id is a string like "1", "2", …).
@@ -122,6 +150,16 @@ router.get('/shared', async (req, res, next) => {
   }
 });
 
+// Get all lab aliases (shortName → labId).
+router.get('/aliases', async (_req, res, next) => {
+  try {
+    const aliases = await readAliases();
+    res.json(aliases);
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Create a new lab with scripts/results/state subfolders.
 router.post('/', async (req, res, next) => {
   try {
@@ -213,6 +251,8 @@ router.get('/:id', async (req, res, next) => {
     if (!hasAccess(lab, req.userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
+    // Ensure current_output directory exists
+    await fs.mkdir(getLabCurrentOutputRoot(req.params.id), { recursive: true });
     res.json(lab);
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
@@ -256,6 +296,38 @@ router.patch('/:id', async (req, res, next) => {
       lab.backupFrequency = allowed.includes(backupFrequency) ? backupFrequency : null;
     }
 
+    // Optional shortName (alias) — must be unique across all labs
+    const { shortName } = req.body ?? {};
+    if (shortName !== undefined) {
+      const trimmed = shortName ? String(shortName).trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') : '';
+      if (trimmed) {
+        // Validate uniqueness
+        const aliases = await readAliases();
+        const existingLabId = aliases[trimmed];
+        if (existingLabId && String(existingLabId) !== String(lab.id)) {
+          return res.status(409).json({
+            error: `Alias "${trimmed}" is already used by lab #${existingLabId}`,
+            conflictLabId: existingLabId,
+          });
+        }
+        // Remove old alias if lab had a different one
+        if (lab.shortName && lab.shortName !== trimmed) {
+          delete aliases[lab.shortName];
+        }
+        aliases[trimmed] = lab.id;
+        await writeAliases(aliases);
+        lab.shortName = trimmed;
+      } else {
+        // Remove alias
+        const aliases = await readAliases();
+        if (lab.shortName && aliases[lab.shortName] === lab.id) {
+          delete aliases[lab.shortName];
+          await writeAliases(aliases);
+        }
+        lab.shortName = undefined;
+      }
+    }
+
     lab.updatedAt = new Date().toISOString();
 
     await writeLabMetadata(labPath, lab);
@@ -273,6 +345,14 @@ router.delete('/:id', async (req, res, next) => {
     const lab = await readLabMetadata(labPath);
     if (!isOwner(lab, req.userId)) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+    // Remove alias from aliases.json if lab had one
+    if (lab.shortName) {
+      const aliases = await readAliases();
+      if (aliases[lab.shortName] === lab.id) {
+        delete aliases[lab.shortName];
+        await writeAliases(aliases);
+      }
     }
     await fs.rm(labPath, { recursive: true, force: true });
     res.json({ success: true });
@@ -448,6 +528,11 @@ function getLabResultsRoot(labId) {
   return path.join(getLabPath(labId), 'results');
 }
 
+// Helper for lab current_output root.
+function getLabCurrentOutputRoot(labId) {
+  return path.join(getLabPath(labId), 'current_output');
+}
+
 // ─── Lab Results ──────────────────────────────────────────────────────────────
 
 // List result subfolders inside a lab (each subfolder = one result run).
@@ -482,6 +567,14 @@ router.get('/:id/results', async (req, res, next) => {
         progress = JSON.parse(raw);
       } catch { /* no progress.json — that's fine */ }
 
+      // Try to read environment.json for run metadata
+      let run = null;
+      try {
+        const raw = await fs.readFile(path.join(dirPath, 'environment.json'), 'utf-8');
+        const envJson = JSON.parse(raw);
+        if (envJson.run) run = envJson.run;
+      } catch { /* no environment.json or no run key — that's fine */ }
+
       items.push({
         id: entry.name,
         name: entry.name,
@@ -493,12 +586,13 @@ router.get('/:id/results', async (req, res, next) => {
         totalSteps: progress?.totalSteps || null,
         currentStep: progress?.currentStep || null,
         currentStepName: progress?.currentStepName || null,
+        run,
       });
     }
 
     // Sort newest first
     items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-    res.json({ items });
+    res.json({ items, currentUserId: req.userId });
   } catch (e) {
     next(e);
   }
@@ -522,6 +616,34 @@ router.get('/:id/results/:resultId/files', async (req, res, next) => {
 
     const files = await listFiles(root, '', getDefaultDepth());
     res.json({ root: '', items: files, count: files.length });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Result not found' });
+    next(e);
+  }
+});
+
+// Delete a result folder (entire subfolder).
+router.delete('/:id/results/:resultId', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const resultsRoot = getLabResultsRoot(req.params.id);
+    const securePath = getSecurePath(resultsRoot, req.params.resultId);
+    if (!securePath) return res.status(400).json({ error: 'Invalid result id' });
+
+    const resultDir = path.join(resultsRoot, req.params.resultId);
+    const stat = await fs.stat(resultDir);
+    if (!stat.isDirectory()) return res.status(400).json({ error: 'Not a directory' });
+
+    // Abort any running workflow for this result
+    abortWorkflowRun(req.params.id, req.params.resultId);
+
+    await fs.rm(resultDir, { recursive: true, force: true });
+    res.json({ ok: true, message: `Result ${req.params.resultId} removed` });
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Result not found' });
     next(e);
@@ -714,22 +836,28 @@ router.post('/:id/results/:resultId/files/rename', async (req, res, next) => {
  * POST /api/v1/labs/:id/results/:resultId/abort
  *
  * Resets a running/pending result to "aborted" status.
- * Kills any active debug session and updates progress.json.
+ * Kills any active debug session / workflow run and updates progress.json.
  */
 router.post('/:id/results/:resultId/abort', async (req, res, next) => {
   try {
     const labPath = getLabPath(req.params.id);
     const resultId = req.params.resultId;
+    const labId = req.params.id;
     const resultDir = getSecurePath(path.join(labPath, 'results'), resultId);
     if (!resultDir) return res.status(400).json({ error: 'Invalid result id' });
 
-    // Kill debug session if active
-    try {
-      const debugStatus = getDebugStatus();
-      if (debugStatus.active && String(debugStatus.resultId) === String(resultId)) {
-        endDebugSession();
-      }
-    } catch { /* ignore */ }
+    // Abort workflow run if active (this also kills debug session)
+    const aborted = abortWorkflowRun(labId, resultId);
+
+    if (!aborted) {
+      // Fallback: try to kill standalone debug session
+      try {
+        const debugStatus = getDebugStatus();
+        if (debugStatus.active && String(debugStatus.resultId) === String(resultId)) {
+          endDebugSession();
+        }
+      } catch { /* ignore */ }
+    }
 
     // Update progress.json
     const progressPath = path.join(resultDir, 'progress.json');
@@ -749,20 +877,20 @@ router.post('/:id/results/:resultId/abort', async (req, res, next) => {
   }
 });
 
-// ─── Lab Result Debug Execution ────────────────────────────────────────────────
+// ─── Lab Result Workflow Execution ─────────────────────────────────────────────
 
 /**
  * POST /api/v1/labs/:id/results/:resultId/debug
- * Body: { debugVisible?: boolean }
+ * Body: { debugVisible?: boolean, stopOnFailure?: boolean }
  *
- * Reads the workflow from result's data.json (key "workflow": string or string[]).
+ * Reads the workflow from result's environment.json (key "workflow": string or string[]).
  *   - string → path to a .workflow file (relative to lab scripts), read its lines as steps
  *   - string[] → direct list of script paths (relative to lab scripts)
  *
  * Reads debug.json from the lab folder for breakpoint info.
- * Python scripts that have breakpoints AND debugVisible=true are spawned via debugpy
- * with --wait-for-client. All other scripts run normally.
+ * Python scripts with debugVisible=true are spawned via debugpy --wait-for-client.
  *
+ * Execution is delegated to WorkflowRunner which emits real-time SSE events.
  * Each script receives the result dir as its first argument.
  * stdout → output.log, stderr → output.err, debug comms → debuger.log (all in result dir).
  */
@@ -782,27 +910,32 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
     if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
 
     const debugVisible = req.body?.debugVisible === true;
+    const stopOnFailure = req.body?.stopOnFailure !== false; // default true
 
-    // Read data.json from result to get workflow
+    // Read environment.json from result to get workflow
     let dataJson;
     try {
-      const raw = await fs.readFile(path.join(resultDir, 'data.json'), 'utf-8');
+      const raw = await fs.readFile(path.join(resultDir, 'environment.json'), 'utf-8');
       dataJson = JSON.parse(raw);
     } catch {
-      return res.status(400).json({ error: 'Cannot read data.json in result folder' });
+      return res.status(400).json({ error: 'Cannot read environment.json in result folder' });
     }
 
-    const workflow = dataJson.workflow;
+    const workflow = dataJson.run?.workflow || dataJson.workflow;
     if (!workflow) {
-      return res.status(400).json({ error: 'No "workflow" key in data.json' });
+      return res.status(400).json({ error: 'No workflow found in environment.json (run.workflow or workflow key)' });
     }
 
-    // Resolve steps from workflow
-    const scriptsRoot = getLabScriptsRoot(labId);
+    // Resolve workflowRoot from run metadata (directory of .workflow file relative to scripts)
+    const workflowRoot = dataJson.run?._workflowRoot || '';
+
+    // Resolve scriptsRoot: if run._scriptsRoot is relative, resolve against LABS_ROOT
+    const scriptsRoot = dataJson.run?._scriptsRoot
+      ? path.resolve(LABS_ROOT, dataJson.run._scriptsRoot)
+      : getLabScriptsRoot(labId);
     let activeSteps;
 
     if (typeof workflow === 'string') {
-      // workflow is a path to a .workflow file — read its lines
       const wfPath = getSecurePath(scriptsRoot, workflow);
       if (!wfPath) return res.status(400).json({ error: 'Invalid workflow file path' });
 
@@ -817,7 +950,6 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       const allLines = wfContent.split('\n').map(s => s.trim()).filter(s => s);
       activeSteps = allLines.filter(s => !s.startsWith('#'));
     } else if (Array.isArray(workflow)) {
-      // workflow is a direct array of script paths
       activeSteps = workflow.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim());
     } else {
       return res.status(400).json({ error: '"workflow" must be a string (path to .workflow file) or an array of script paths' });
@@ -825,6 +957,27 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
 
     if (activeSteps.length === 0) {
       return res.status(400).json({ error: 'Workflow has no active steps' });
+    }
+
+    // Resolve <ALIAS>/path references to absolute script paths from other labs
+    const aliases = await readAliases();
+    const resolvedPaths = {}; // stepName → absolute path (only for cross-lab steps)
+    for (let i = 0; i < activeSteps.length; i++) {
+      const step = activeSteps[i];
+      const aliasMatch = step.match(/^<([A-Z0-9_-]+)>\/(.+)$/);
+      if (aliasMatch) {
+        const [, alias, relPath] = aliasMatch;
+        const targetLabId = aliases[alias];
+        if (!targetLabId) {
+          return res.status(400).json({ error: `Unknown alias <${alias}> in step "${step}"` });
+        }
+        const targetScriptsRoot = getLabScriptsRoot(targetLabId);
+        const absPath = getSecurePath(targetScriptsRoot, relPath);
+        if (!absPath) {
+          return res.status(400).json({ error: `Invalid path in aliased step "${step}"` });
+        }
+        resolvedPaths[step] = absPath;
+      }
     }
 
     // Read debug.json from lab for breakpoint info
@@ -835,7 +988,6 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
     } catch { /* no debug.json — no breakpoints */ }
 
     // Determine which scripts have breakpoints
-    // debug.json.breakpoints is { "relPath": [line1, line2, …], … }
     const scriptsWithBreakpoints = new Set();
     if (debugVisible && debugState.breakpoints) {
       for (const [filePath, lines] of Object.entries(debugState.breakpoints)) {
@@ -854,48 +1006,6 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       progress = {};
     }
 
-    // Respond immediately — execution runs in background
-    res.json({
-      ok: true,
-      message: debugVisible && scriptsWithBreakpoints.size > 0
-        ? `Execution started with debugpy for ${scriptsWithBreakpoints.size} script(s)`
-        : 'Execution started (no debug)',
-      steps: activeSteps,
-      debugScripts: [...scriptsWithBreakpoints],
-      resultId,
-    });
-
-    // ── Background execution ──
-    const logFile = path.join(resultDir, 'output.log');
-    const errorFile = path.join(resultDir, 'output.err');
-    const debugLogFile = path.join(resultDir, 'debuger.log');
-    const now = new Date().toISOString();
-    const separator = '='.repeat(80);
-
-    await fs.writeFile(logFile, `Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
-    await fs.writeFile(errorFile, '', 'utf-8');
-    await fs.writeFile(debugLogFile, `[debuger] Session started at ${now}\n${separator}\n`, 'utf-8');
-
-    const debugLog = async (msg) => {
-      const line = `[${new Date().toISOString()}] ${msg}\n`;
-      await fs.appendFile(debugLogFile, line).catch(() => {});
-    };
-
-    // Update progress
-    const writeProgress = async (step, stepName, status) => {
-      const p = {
-        ...progress,
-        status,
-        totalSteps: activeSteps.length,
-        currentStep: step,
-        currentStepName: stepName,
-        analysisStartedAt: progress.analysisStartedAt || now,
-        updatedAt: new Date().toISOString(),
-      };
-      if (status === 'completed' || status === 'failed') p.completedAt = new Date().toISOString();
-      await fs.writeFile(path.join(resultDir, 'progress.json'), JSON.stringify(p, null, 2), 'utf-8');
-    };
-
     // Determine python command from config
     let pythonCmd = 'python';
     try {
@@ -912,113 +1022,36 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       }
     } catch { /* use default */ }
 
-    try {
-      for (let i = 0; i < activeSteps.length; i++) {
-        const step = activeSteps[i];
-        const ext = path.extname(step).toLowerCase();
-        const isPython = ext === '.py';
-        const scriptAbsPath = path.join(scriptsRoot, step);
-        const shouldDebug = isPython && debugVisible;
+    // Start workflow via the workflow runner (runs in background)
+    startWorkflowRun({
+      labId,
+      resultId,
+      steps: activeSteps,
+      resultDir,
+      scriptsRoot,
+      workflowRoot,
+      pythonCmd,
+      debugVisible,
+      debugScripts: scriptsWithBreakpoints,
+      stopOnFailure,
+      resolvedPaths,
+      logFile: path.join(resultDir, 'output.log'),
+      errorFile: path.join(resultDir, 'output.err'),
+      debugLogFile: path.join(resultDir, 'debuger.log'),
+      progressBase: progress,
+    });
 
-        await writeProgress(i + 1, step, 'running');
-        await fs.appendFile(logFile, `\n[${new Date().toISOString()}] Step ${i + 1}/${activeSteps.length}: ${step}\n`);
-
-        if (shouldDebug) {
-          // ── Debug mode: spawn via debugpy with --wait-for-client ──
-          await debugLog(`Starting debugpy for step ${step}`);
-
-          try {
-            const { port, pid } = await startDebugSession({
-              scriptAbsolutePath: scriptAbsPath,
-              scriptPath: step,
-              cwd: resultDir,
-              pythonCommand: pythonCmd,
-              args: [resultDir],
-              labId,
-              resultId,
-              stepIndex: i,
-              stepName: step,
-              logFile,
-              errorFile,
-            });
-
-            await debugLog(`debugpy listening on port ${port}, PID ${pid}, waiting for client...`);
-            await fs.appendFile(logFile, `[debugpy] listening on port ${port}, PID ${pid}\n`);
-
-            // Wait for the debug process to finish
-            const debugEvents = getDebugEvents();
-            await new Promise((resolve) => {
-              const onExit = () => { debugEvents.off('exit', onExit); resolve(); };
-              debugEvents.on('exit', onExit);
-              const st = getDebugStatus();
-              if (!st.active) { debugEvents.off('exit', onExit); resolve(); }
-            });
-
-            await debugLog(`Step ${step} debug process exited`);
-
-          } catch (err) {
-            await debugLog(`Failed to start debug session: ${err.message}`);
-            await fs.appendFile(errorFile, `[debugpy] Failed: ${err.message}\n`);
-            await writeProgress(i + 1, step, 'failed');
-            return;
-          }
-        } else if (isPython) {
-          // ── Python without debug: spawn python directly ──
-          const success = await new Promise((resolve) => {
-            const child = spawn(pythonCmd, [scriptAbsPath, resultDir], {
-              cwd: resultDir,
-              env: { ...process.env, WORK_DIR: resultDir },
-            });
-            child.stdout.on('data', (d) => fs.appendFile(logFile, d.toString()).catch(() => {}));
-            child.stderr.on('data', (d) => fs.appendFile(errorFile, d.toString()).catch(() => {}));
-            child.on('error', () => resolve(false));
-            child.on('close', (code) => resolve(code === 0));
-          });
-
-          if (!success) {
-            await writeProgress(i + 1, step, 'failed');
-            await fs.appendFile(errorFile, `Step ${step} failed\n`);
-            return;
-          }
-        } else {
-          // ── Non-Python: spawn script directly ──
-          const cmdMap = { '.js': 'node', '.cjs': 'node', '.sh': 'bash', '.r': 'Rscript', '.R': 'Rscript' };
-          const command = cmdMap[ext];
-          if (!command) {
-            await fs.appendFile(errorFile, `Unsupported script type: ${ext}\n`);
-            await writeProgress(i + 1, step, 'failed');
-            return;
-          }
-
-          const success = await new Promise((resolve) => {
-            const child = spawn(command, [scriptAbsPath, resultDir], {
-              cwd: resultDir,
-              env: { ...process.env, WORK_DIR: resultDir },
-            });
-            child.stdout.on('data', (d) => fs.appendFile(logFile, d.toString()).catch(() => {}));
-            child.stderr.on('data', (d) => fs.appendFile(errorFile, d.toString()).catch(() => {}));
-            child.on('error', () => resolve(false));
-            child.on('close', (code) => resolve(code === 0));
-          });
-
-          if (!success) {
-            await writeProgress(i + 1, step, 'failed');
-            await fs.appendFile(errorFile, `Step ${step} failed\n`);
-            return;
-          }
-        }
-      }
-
-      // All steps completed
-      await writeProgress(activeSteps.length, activeSteps[activeSteps.length - 1], 'completed');
-      await fs.appendFile(logFile, `\n${separator}\n[${new Date().toISOString()}] WORKFLOW COMPLETED\n${separator}\n`);
-      await debugLog('WORKFLOW COMPLETED');
-
-    } catch (err) {
-      await writeProgress(0, null, 'failed');
-      await fs.appendFile(errorFile, `SYSTEM ERROR: ${err.message}\n${err.stack}\n`);
-      await debugLog(`SYSTEM ERROR: ${err.message}`);
-    }
+    // Respond immediately — execution runs in background
+    res.json({
+      ok: true,
+      message: debugVisible && scriptsWithBreakpoints.size > 0
+        ? `Execution started with debugpy for ${scriptsWithBreakpoints.size} script(s)`
+        : 'Execution started (no debug)',
+      steps: activeSteps,
+      debugScripts: [...scriptsWithBreakpoints],
+      resultId,
+      stopOnFailure,
+    });
   } catch (e) {
     next(e);
   }
@@ -1031,10 +1064,11 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
  * Body: { workflowFile: "path/to/workflow.workflow" }
  *
  * Creates a new sequentially numbered result subfolder inside the lab's results/,
- * copies data.json from the lab's scripts root (if it exists) or creates an empty one,
- * and writes an initial progress.json.
+ * copies environment.json from the same folder as the workflow file (if it exists) or creates {}.
+ * Copies contents of "outputs/" folder from the workflow directory into the result (if it exists).
+ * Adds a "run" key with workflow metadata, user info, and paths.
  *
- * Returns: { resultId, resultPath, dataJsonCopied }
+ * Returns: { resultId, resultPath, environmentJsonCopied }
  */
 router.post('/:id/scripts/debug', async (req, res, next) => {
   try {
@@ -1079,34 +1113,82 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
     const resultDir = path.join(resultsRoot, String(nextId));
     await fs.mkdir(resultDir, { recursive: true });
 
-    // Copy data.json from scripts root (or create empty)
-    let dataJsonCopied = false;
-    const srcDataJson = path.join(scriptsRoot, 'data.json');
-    const dstDataJson = path.join(resultDir, 'data.json');
+    // Copy environment.json from the SAME folder as the workflow file (or create empty {})
+    let environmentJsonCopied = false;
+    const wfDir = path.dirname(wfPath);
+    const srcEnvJson = path.join(wfDir, 'environment.json');
+    const dstEnvJson = path.join(resultDir, 'environment.json');
     let dataJson = {};
     try {
-      await fs.access(srcDataJson);
-      const raw = await fs.readFile(srcDataJson, 'utf-8');
+      await fs.access(srcEnvJson);
+      const raw = await fs.readFile(srcEnvJson, 'utf-8');
       dataJson = JSON.parse(raw);
-      dataJsonCopied = true;
+      environmentJsonCopied = true;
     } catch {
-      // data.json doesn't exist or is invalid — start empty
+      // environment.json doesn't exist — create with defaults
       dataJson = {};
     }
 
-    // Add "workflow" key — read lines from the .workflow file as an array of step strings
+    // Copy "outputs/" folder contents from the workflow directory into the result (if it exists)
+    const outputsSrc = path.join(wfDir, 'outputs');
+    try {
+      const outputsStat = await fs.stat(outputsSrc);
+      if (outputsStat.isDirectory()) {
+        const outputEntries = await fs.readdir(outputsSrc, { withFileTypes: true });
+        for (const entry of outputEntries) {
+          await copyRecursive(
+            path.join(outputsSrc, entry.name),
+            path.join(resultDir, entry.name),
+          );
+        }
+      }
+    } catch { /* outputs/ doesn't exist — skip */ }
+
+    // Read workflow steps from the .workflow file
+    let workflowSteps = [];
     try {
       const wfContent = await fs.readFile(wfPath, 'utf-8');
-      const steps = wfContent.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-      dataJson.workflow = steps;
+      workflowSteps = wfContent.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
     } catch {
-      dataJson.workflow = [workflowFile];
+      workflowSteps = [workflowFile];
     }
 
-    await fs.writeFile(dstDataJson, JSON.stringify(dataJson, null, 2), 'utf-8');
+    // Lookup user info (firstName, lastName) from the database
+    let userName = '';
+    try {
+      const rows = await query('SELECT first_name, last_name FROM usr WHERE id = ?', [req.userId]);
+      if (rows.length > 0) {
+        userName = `${rows[0].first_name} ${rows[0].last_name}`;
+      }
+    } catch { /* ignore */ }
+
+    // Workflow root: the directory of the .workflow file relative to scripts root
+    const workflowRoot = path.dirname(workflowFile);
+
+    // Relative scriptsRoot from LABS_ROOT (e.g. "5/scripts")
+    const relativeScriptsRoot = path.relative(LABS_ROOT, scriptsRoot);
+
+    // Default run name = workflow filename without extension
+    const wfBaseName = path.basename(workflowFile, path.extname(workflowFile));
+
+    // Build the "run" key
+    const now = new Date().toISOString();
+    dataJson.run = {
+      workflowFile,                    // e.g. "new/fullAnalysis.workflow"
+      workflow: workflowSteps,         // array of script paths from .workflow file
+      name: wfBaseName,                // workflow name without extension
+      author: userName,                // "firstName lastName"
+      private: true,
+      _: 'Do not manualy overwrite keys starting with _',
+      _usr_id: req.userId,             // user id
+      _workflowRoot: workflowRoot === '.' ? '' : workflowRoot,
+      _scriptsRoot: relativeScriptsRoot,
+      _created: now,
+    };
+
+    await fs.writeFile(dstEnvJson, JSON.stringify(dataJson, null, 2), 'utf-8');
 
     // Write initial progress.json
-    const now = new Date().toISOString();
     const progress = {
       status: 'ready',
       workflowFile,
@@ -1125,7 +1207,7 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       resultId: String(nextId),
       resultPath: `results/${nextId}`,
       workflowFile,
-      dataJsonCopied,
+      environmentJsonCopied,
       progress,
     });
   } catch (e) {
@@ -1412,6 +1494,155 @@ router.delete('/:id/scripts/folder', async (req, res, next) => {
 
     await fs.rm(dirPath, { recursive: true, force: true });
     res.json({ success: true, message: `Folder "${folderPath}" deleted` });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Folder not found' });
+    next(e);
+  }
+});
+
+// ─── Publish to current_output ────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/labs/:id/results/:resultId/publish
+ * Body: { path: "relative/path/to/file_or_folder" }
+ *
+ * Copies a file or folder from the result directory to the lab's current_output/
+ * directory, preserving the relative path structure.
+ */
+router.post('/:id/results/:resultId/publish', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { path: itemPath } = req.body ?? {};
+    if (!itemPath) return res.status(400).json({ error: 'path is required' });
+
+    const resultsRoot = getLabResultsRoot(req.params.id);
+    const resultDir = path.join(resultsRoot, req.params.resultId);
+    const secureResult = getSecurePath(resultsRoot, req.params.resultId);
+    if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
+
+    const srcPath = getSecurePath(resultDir, itemPath);
+    if (!srcPath) return res.status(400).json({ error: 'Invalid path' });
+
+    const outputRoot = getLabCurrentOutputRoot(req.params.id);
+    await fs.mkdir(outputRoot, { recursive: true });
+
+    const dstPath = path.join(outputRoot, itemPath);
+    await fs.mkdir(path.dirname(dstPath), { recursive: true });
+
+    await copyRecursive(srcPath, dstPath);
+
+    res.json({ success: true, message: `Published "${itemPath}" to current_output` });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'File or folder not found' });
+    next(e);
+  }
+});
+
+// ─── Current Output (read-only file-manager) ─────────────────────────────────
+
+// List current_output folder.
+router.get('/:id/current_output', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabCurrentOutputRoot(req.params.id);
+    await fs.mkdir(root, { recursive: true });
+
+    const { subdir } = req.query;
+    const targetPath = getSecurePath(root, subdir || '');
+    if (!targetPath) return res.status(400).json({ error: 'Invalid path' });
+
+    const stats = await fs.stat(targetPath);
+    if (!stats.isDirectory()) return res.status(400).json({ error: 'Path is not a directory' });
+
+    const files = await listFiles(targetPath, subdir || '', getDefaultDepth());
+    res.json({ root: subdir || '', items: files, count: files.length });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Directory not found' });
+    next(e);
+  }
+});
+
+// Read file content from current_output.
+router.get('/:id/current_output/content', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabCurrentOutputRoot(req.params.id);
+    const filePath = getSecurePath(root, req.query.file);
+    if (!filePath) return res.status(400).json({ error: 'Invalid file path' });
+
+    const content = await fs.readFile(filePath, 'utf-8');
+    res.json({ file: req.query.file, content });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    next(e);
+  }
+});
+
+// Download file from current_output.
+router.get('/:id/current_output/download', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabCurrentOutputRoot(req.params.id);
+    const filePath = getSecurePath(root, req.query.file);
+    if (!filePath) return res.status(400).json({ error: 'Invalid file path' });
+
+    const inline = req.query.inline === '1';
+    if (inline) {
+      res.sendFile(filePath);
+    } else {
+      res.download(filePath);
+    }
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    next(e);
+  }
+});
+
+// Download folder as zip from current_output.
+router.get('/:id/current_output/folder/zip', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabCurrentOutputRoot(req.params.id);
+    const folderPath = req.query.path || '.';
+    const dirPath = folderPath === '.' ? root : getSecurePath(root, folderPath);
+    if (!dirPath) return res.status(400).json({ error: 'Invalid path' });
+
+    const stat = await fs.stat(dirPath);
+    if (!stat.isDirectory()) return res.status(400).json({ error: 'Path is not a directory' });
+
+    const zipName = folderPath === '.' ? 'current_output.zip' : `${path.basename(folderPath)}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.pipe(res);
+    archive.directory(dirPath, false);
+    await archive.finalize();
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Folder not found' });
     next(e);

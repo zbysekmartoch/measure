@@ -47,7 +47,7 @@ export const fileItemButtons = {
   deleteFolder: { icon: '🗑', bg: '#f81717', label: 'Delete folder' },
   renameFile:   { icon: '✎', bg: '#e67e22', label: 'Rename file' },
   renameFolder: { icon: '✎', bg: '#e67e22', label: 'Rename folder' },
-  debugWorkflow:{ icon: '🛠', bg: '#af24c2', label: 'Debug workflow' },
+  debugWorkflow:{ icon: '🛠', bg: '#af24c2', label: 'Prepare to run' },
 };
 
 // ─── File preview toolbar buttons ───────────────────────────────────────────
@@ -235,4 +235,54 @@ export const monacoDefaults = {
 export const monacoReadOnly = {
   ...monacoDefaults,
   readOnly: true,
+};
+
+// ─── File browser icons by extension ────────────────────────────────────────
+
+/**
+ * Map file extension (without dot, lowercase) → icon string (emoji or text).
+ * Used by `fileIcon()` in fileUtils.js to render icons next to file names.
+ *
+ * Special keys:
+ *   _image   — fallback for any image file (png, jpg, gif, webp, svg, bmp, ico)
+ *   _pdf     — PDF files
+ *   _text    — fallback for any recognized text file without a specific entry
+ *   _default — fallback for unknown file types
+ *   _folder  — folder icon
+ */
+export const fileIcons = {
+  // Programming languages
+  py:       '🐍',
+  js:       '📜',
+  jsx:      '⚛️',
+  ts:       '📘',
+  tsx:      '⚛️',
+  // Data & config
+  json:     '📋',
+  xml:      '📰',
+  yaml:     '⚙️',
+  yml:      '⚙️',
+  csv:      '📊',
+  sql:      '🗃️',
+  // Documents
+  md:       '📝',
+  txt:      '📄',
+  log:      '📃',
+  err:      '🚨',
+  // Web
+  html:     '🌐',
+  htm:      '🌐',
+  css:      '🎨',
+  scss:     '🎨',
+  // Shell
+  sh:       '🖥️',
+  bash:     '🖥️',
+  // Workflow
+  workflow: '▶️',
+  // Special fallbacks
+  _image:   '🖼️',
+  _pdf:     '📕',
+  _text:    '📄',
+  _default: '📦',
+  _folder:  '📁',
 };

@@ -29,6 +29,7 @@ export default function FileManagerEditor({
   onDebugWorkflow,
   title,
   refreshTrigger = 0,
+  onPublish,
 }) {
   const [showPreview, setShowPreview] = useState(true);
   const [editorTheme, setEditorTheme] = useState(() => localStorage.getItem('monacoTheme') || 'vs-dark');
@@ -103,6 +104,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
         onDebugWorkflow={onDebugWorkflow}
         onRename={fm.renameItem}
         changedFiles={fm.changedFiles}
+        onPublish={onPublish}
       />
 
       {showPreview && (

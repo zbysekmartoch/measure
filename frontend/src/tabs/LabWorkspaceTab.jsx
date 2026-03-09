@@ -18,13 +18,15 @@ import { createPortal } from 'react-dom';
 import LabScriptsPane from './LabScriptsPane.jsx';
 import LabResultsPane from './LabResultsPane.jsx';
 import LabSettingsPane from './LabSettingsPane.jsx';
+import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { useDebugSession } from '../debug/useDebugSession.js';
 import DebugPanel from '../debug/DebugPanel.jsx';
-import { shadow, debugModes as dmCfg, icons } from '../lib/uiConfig.js';
+import { shadow, debugModes as dmCfg } from '../lib/uiConfig.js';
 
 const TABS = [
   { key: 'scripts',  icon: '📜', label: 'Scripts' },
   { key: 'results',  icon: '📊', label: 'Results' },
+  { key: 'output',   icon: '📤', label: 'Current output' },
 ];
 
 // Debug panel placement: 'hidden' | 'right' | 'bottom' | 'popup'
@@ -325,6 +327,16 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
             <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} />
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: activeTab === 'output' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
+            <FileManagerEditor
+              apiBasePath={`/api/v1/labs/${lab.id}/current_output`}
+              showUpload={false}
+              showDelete={false}
+              readOnly
+              showModificationDate
+              title="Current output"
+            />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'settings' ? 'block' : 'none', overflow: 'auto' }}>
             <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />

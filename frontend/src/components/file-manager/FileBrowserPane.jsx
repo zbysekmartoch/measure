@@ -46,6 +46,7 @@ function FolderNode({
   onDrop, onDragOver, onDragLeave,
   onCopyFile, onCopyFolder, onPasteInto, clipboard, apiBasePath,
   onDebugWorkflow, onRename, changedFiles,
+  onPublish,
   isRoot,
 }) {
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
@@ -133,6 +134,9 @@ function FolderNode({
           {showDelete && !isRoot && (
             <IBtn title={fiBtn.deleteFolder.label} onClick={() => onDeleteFolder(node.path)} bg={fiBtn.deleteFolder.bg} disabled={loading}>{fiBtn.deleteFolder.icon}</IBtn>
           )}
+          {onPublish && !isRoot && (
+            <IBtn title="Publish to current output" onClick={() => onPublish(node.path)} bg="#7c3aed" disabled={loading}>📤</IBtn>
+          )}
         </div>
       </div>
 
@@ -174,6 +178,7 @@ function FolderNode({
             onDebugWorkflow={onDebugWorkflow}
             onRename={onRename}
             changedFiles={changedFiles}
+            onPublish={onPublish}
           />
         ) : (
           <FileRow
@@ -188,6 +193,7 @@ function FolderNode({
             onDebugWorkflow={onDebugWorkflow}
             onRename={onRename}
             isChanged={changedFiles?.has(child.path)}
+            onPublish={onPublish}
           />
         ),
       )}
@@ -196,7 +202,7 @@ function FolderNode({
 }
 
 /* ── file row ───────────────────────────────────────────────────────────────── */
-function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged }) {
+function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged, onPublish }) {
   const indent = depth * 16 + 12;
   const isWorkflow = file.name?.endsWith('.workflow');
   const changedBg = '#fef9c3';  // light yellow for changed files
@@ -240,6 +246,9 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
           }
         }} bg={fiBtn.renameFile.bg}>{fiBtn.renameFile.icon}</IBtn>
         <IBtn title={fiBtn.copyFile.label} onClick={() => onCopy(file.path)} bg={fiBtn.copyFile.bg}>{fiBtn.copyFile.icon}</IBtn>
+        {onPublish && (
+          <IBtn title="Publish to current output" onClick={() => onPublish(file.path)} bg="#7c3aed">📤</IBtn>
+        )}
       </div>
     </div>
   );
@@ -279,6 +288,7 @@ export default function FileBrowserPane({
   changedFiles,
   showModificationDate,
   apiBasePath,
+  onPublish,
 }) {
   const { t } = useLanguage();
   const { clipboard, copyFile, copyFolder } = useFileClipboard();
@@ -372,6 +382,7 @@ export default function FileBrowserPane({
         onDebugWorkflow={onDebugWorkflow}
         onRename={onRename}
         changedFiles={changedFiles}
+        onPublish={onPublish}
         isRoot
       />
 

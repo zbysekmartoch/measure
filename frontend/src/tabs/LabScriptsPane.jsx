@@ -120,9 +120,9 @@ export default function LabScriptsPane({ lab, debug }) {
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
       const data = await res.json();
-      toast.success(`Debug run #${data.resultId} created for ${workflowFile}`);
+      toast.success(`Result #${data.resultId} prepared for ${workflowFile}`);
     } catch (e) {
-      toast.error(`Debug error: ${e.message}`);
+      toast.error(`Prepare to run error: ${e.message}`);
     }
   }, [lab.id, toast, openFiles, saveFile]);
 

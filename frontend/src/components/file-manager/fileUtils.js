@@ -3,6 +3,8 @@
  * No React dependencies. Shared across FileManagerEditor, LabWorkspaceTab, etc.
  */
 
+import { fileIcons } from '../../lib/uiConfig.js';
+
 /** Map file extension → Monaco Editor language id */
 export const getLanguageFromFilename = (filename) => {
   if (!filename) return 'plaintext';
@@ -70,12 +72,17 @@ export const formatModifiedDate = (dateStr) => {
   }
 };
 
-/** Pick emoji icon for a file based on its extension */
+/** Pick icon for a file based on its extension (configurable via uiConfig.fileIcons) */
 export const fileIcon = (filename) => {
-  if (isImageFile(filename)) return '🖼️';
-  if (isPdfFile(filename)) return '📕';
-  if (isTextFile(filename)) return '📄';
-  return '📦';
+  if (!filename) return fileIcons._default || '📦';
+  const ext = filename.split('.').pop()?.toLowerCase();
+  // Check explicit extension mapping first
+  if (ext && fileIcons[ext]) return fileIcons[ext];
+  // Fallback categories
+  if (isImageFile(filename)) return fileIcons._image || '🖼️';
+  if (isPdfFile(filename)) return fileIcons._pdf || '📕';
+  if (isTextFile(filename)) return fileIcons._text || '📄';
+  return fileIcons._default || '📦';
 };
 
 /** Recursively flatten a tree (items with children) into a flat file list */

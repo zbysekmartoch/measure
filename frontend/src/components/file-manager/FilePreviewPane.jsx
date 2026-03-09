@@ -5,6 +5,12 @@
  */
 import React, { useMemo } from 'react';
 import Editor from '@monaco-editor/react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeRaw from 'rehype-raw';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { useLanguage } from '../../context/LanguageContext';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate } from './fileUtils.js';
 import { filePreviewButtons as fpBtn, shadow, monacoDefaults } from '../../lib/uiConfig.js';
@@ -56,6 +62,8 @@ export default function FilePreviewPane({
   const isText = selectedFileInfo.isText || isTextFile(selectedFile);
   const isImg = isImageFile(selectedFile);
   const isPdf = isPdfFile(selectedFile);
+  const isMarkdown = selectedFile && /\.md$/i.test(selectedFile);
+  const showMarkdownPreview = isMarkdown && !isEditing;
 
   return (
     <section style={{ flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, background: '#fff', display: 'flex', flexDirection: 'column' }}>
@@ -146,6 +154,41 @@ export default function FilePreviewPane({
           )}
         </div>
       ) : isText ? (
+        showMarkdownPreview ? (
+          /* Rendered Markdown preview */
+          <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'auto', background: '#fff', padding: '20px 28px', lineHeight: 1.7, fontSize: 14 }}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeRaw, rehypeKatex]}
+              components={{
+                h1: ({ children }) => <h1 style={{ borderBottom: '2px solid #e5e7eb', paddingBottom: 8, marginTop: 24, marginBottom: 12, fontSize: 28, fontWeight: 700 }}>{children}</h1>,
+                h2: ({ children }) => <h2 style={{ borderBottom: '1px solid #e5e7eb', paddingBottom: 6, marginTop: 20, marginBottom: 10, fontSize: 22, fontWeight: 600 }}>{children}</h2>,
+                h3: ({ children }) => <h3 style={{ marginTop: 16, marginBottom: 8, fontSize: 18, fontWeight: 600 }}>{children}</h3>,
+                p: ({ children }) => <p style={{ marginTop: 0, marginBottom: 12 }}>{children}</p>,
+                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>{children}</a>,
+                code: ({ inline, children }) => {
+                  if (inline) return <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: 13, fontFamily: "'Fira Code', monospace" }}>{children}</code>;
+                  return (
+                    <pre style={{ background: '#1e293b', color: '#e2e8f0', padding: 16, borderRadius: 8, overflow: 'auto', fontSize: 13, lineHeight: 1.5, fontFamily: "'Fira Code', monospace" }}>
+                      <code>{children}</code>
+                    </pre>
+                  );
+                },
+                blockquote: ({ children }) => <blockquote style={{ borderLeft: '4px solid #3b82f6', margin: '12px 0', padding: '8px 16px', background: '#eff6ff', color: '#1e40af', borderRadius: '0 6px 6px 0' }}>{children}</blockquote>,
+                table: ({ children }) => <table style={{ borderCollapse: 'collapse', width: '100%', margin: '12px 0', fontSize: 13 }}>{children}</table>,
+                th: ({ children }) => <th style={{ border: '1px solid #d1d5db', padding: '8px 12px', background: '#f3f4f6', fontWeight: 600, textAlign: 'left' }}>{children}</th>,
+                td: ({ children }) => <td style={{ border: '1px solid #d1d5db', padding: '8px 12px' }}>{children}</td>,
+                ul: ({ children }) => <ul style={{ paddingLeft: 24, marginTop: 0, marginBottom: 12 }}>{children}</ul>,
+                ol: ({ children }) => <ol style={{ paddingLeft: 24, marginTop: 0, marginBottom: 12 }}>{children}</ol>,
+                li: ({ children }) => <li style={{ marginBottom: 4 }}>{children}</li>,
+                hr: () => <hr style={{ border: 'none', borderTop: '1px solid #d1d5db', margin: '20px 0' }} />,
+                img: ({ src, alt }) => <img src={src} alt={alt} style={{ maxWidth: '100%', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }} />,
+              }}
+            >
+              {fileContent || ''}
+            </ReactMarkdown>
+          </div>
+        ) : (
         <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
           {/* Editor toolbar */}
           <div style={{
@@ -202,6 +245,7 @@ export default function FilePreviewPane({
             />
           </div>
         </div>
+        )
       ) : (
         /* Binary file */
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6b7280', gap: 16 }}>

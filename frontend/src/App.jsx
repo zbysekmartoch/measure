@@ -221,7 +221,14 @@ function AppContent() {
   };
 
   const currentList = (tab === 'mine' || tab === 'shared')
-    ? [...(tab === 'mine' ? myLabs : sharedLabs)].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+    ? [...(tab === 'mine' ? myLabs : sharedLabs)].sort((a, b) => {
+      const aName = a.name || '';
+      const bName = b.name || '';
+      const aIsHelper = aName.startsWith('🛠️');
+      const bIsHelper = bName.startsWith('🛠️');
+      if (aIsHelper !== bIsHelper) return aIsHelper ? 1 : -1;
+      return aName.localeCompare(bName, undefined, { sensitivity: 'base' });
+    })
     : [];
   const showList = tab === 'mine' || tab === 'shared';
 
@@ -457,6 +464,11 @@ function AppContent() {
                     </div>
                     {lab.description && tab === 'mine' && (
                       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{lab.description}</div>
+                    )}
+                    {lab.shortName && (
+                      <div style={{ fontSize: 11, color: '#6366f1', fontFamily: 'monospace', marginTop: 2, background: '#eef2ff', display: 'inline-block', padding: '1px 6px', borderRadius: 4, border: '1px solid #c7d2fe' }}>
+                        &lt;{lab.shortName}&gt;
+                      </div>
                     )}
                   </div>
                 ))}

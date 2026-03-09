@@ -21,18 +21,22 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
 
   const [name, setName] = useState(lab.name || '');
   const [description, setDescription] = useState(lab.description || '');
+  const [shortName, setShortName] = useState(lab.shortName || '');
   const [backupFrequency, setBackupFrequency] = useState(lab.backupFrequency || null);
   const [saving, setSaving] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const [users, setUsers] = useState([]);
   const [labSize, setLabSize] = useState(null);
+  const [aliases, setAliases] = useState({}); // shortName → labId
+  const [aliasError, setAliasError] = useState('');
 
   // Sync from prop when lab changes externally
   useEffect(() => {
     setName(lab.name || '');
     setDescription(lab.description || '');
+    setShortName(lab.shortName || '');
     setBackupFrequency(lab.backupFrequency || null);
-  }, [lab.name, lab.description, lab.backupFrequency]);
+  }, [lab.name, lab.description, lab.shortName, lab.backupFrequency]);
 
   // Load all users for sharing checkboxes
   useEffect(() => {
@@ -40,6 +44,13 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
       .then((data) => setUsers(data?.items || []))
       .catch(() => setUsers([]));
   }, []);
+
+  // Load aliases for shortName uniqueness validation
+  useEffect(() => {
+    fetchJSON('/api/v1/labs/aliases')
+      .then((data) => setAliases(data || {}))
+      .catch(() => setAliases({}));
+  }, [lab.id]);
 
   // Load lab size
   useEffect(() => {
@@ -49,26 +60,42 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
       .catch(() => setLabSize(null));
   }, [lab.id]);
 
-  const dirty = name !== (lab.name || '') || description !== (lab.description || '') || backupFrequency !== (lab.backupFrequency || null);
+  const dirty = name !== (lab.name || '') || description !== (lab.description || '') || backupFrequency !== (lab.backupFrequency || null) || shortName !== (lab.shortName || '');
+
+  // Validate shortName uniqueness on change
+  useEffect(() => {
+    const normalized = shortName.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!normalized) { setAliasError(''); return; }
+    const existingLabId = aliases[normalized];
+    if (existingLabId && String(existingLabId) !== String(lab.id)) {
+      setAliasError(`Alias "${normalized}" is already used by lab #${existingLabId}`);
+    } else {
+      setAliasError('');
+    }
+  }, [shortName, aliases, lab.id]);
 
   // ---- Save ----
   const handleSave = useCallback(async () => {
     if (!name.trim()) { toast.error('Name must not be empty'); return; }
+    if (aliasError) { toast.error(aliasError); return; }
     try {
       setSaving(true);
+      const trimmedShort = shortName.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
       const updated = await fetchJSON(`/api/v1/labs/${lab.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), description: description.trim(), backupFrequency }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim(), backupFrequency, shortName: trimmedShort || '' }),
       });
       toast.success(t('labSaved') || 'Lab saved');
       onLabUpdate?.(updated);
+      // Refresh aliases after save
+      fetchJSON('/api/v1/labs/aliases').then((data) => setAliases(data || {})).catch(() => {});
     } catch (err) {
       toast.error(`${t('errorSavingLab') || 'Error saving'}: ${err.message || err}`);
     } finally {
       setSaving(false);
     }
-  }, [lab.id, name, description, backupFrequency, t, toast, onLabUpdate]);
+  }, [lab.id, name, description, shortName, backupFrequency, aliasError, t, toast, onLabUpdate]);
 
   // ---- Manual backup ----
   const handleBackup = useCallback(async () => {
@@ -146,12 +173,35 @@ export default function LabSettingsPane({ lab, onLabUpdate }) {
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} style={{ ...fieldStyle, resize: 'vertical' }} />
           </div>
 
+          {/* Short name (alias) */}
+          <div>
+            <label style={{ fontWeight: 500, display: 'block', marginBottom: 4 }}>
+              {t('shortName') || 'Short name (alias)'}
+            </label>
+            <input
+              value={shortName}
+              onChange={(e) => setShortName(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ''))}
+              placeholder="e.g. PLOT-SETTINGS"
+              style={{
+                ...fieldStyle,
+                fontFamily: 'monospace',
+                borderColor: aliasError ? '#f81717' : '#d1d5db',
+              }}
+            />
+            {aliasError && (
+              <div style={{ color: '#f81717', fontSize: 12, marginTop: 4 }}>⚠ {aliasError}</div>
+            )}
+            <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>
+              Optional. Used for cross-lab script references in workflows: &lt;{shortName || 'ALIAS'}&gt;/script.py
+            </div>
+          </div>
+
           {/* Save */}
           <div>
             <button
               className="btn btn-add"
               onClick={handleSave}
-              disabled={!dirty || saving}
+              disabled={!dirty || saving || !!aliasError}
               style={{ padding: '8px 20px', boxShadow: dirty && !saving ? shadow.normal : 'none' }}
             >
               {saving ? '⏳' : '💾'} {t('save') || 'Save'}

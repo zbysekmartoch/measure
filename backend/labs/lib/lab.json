@@ -1,0 +1,10 @@
+{
+  "id": "lib",
+  "name": "🛠️ lib",
+  "description": "NEMAZAT! Tato laboratoř obsahuje importovatelné python funkce pro oficiální užití v kódu v jiných laboratořích",
+  "ownerId": 2,
+  "sharedWith": [
+  ],
+  "createdAt": "2026-03-02T11:42:48.030Z",
+  "updatedAt": "2026-03-04T12:18:13.358Z"
+}
