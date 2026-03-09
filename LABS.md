@@ -13,9 +13,10 @@ backend/labs/<id>/
 ├── results/          # Execution results (numbered subfolders)
 │   └── <resultId>/
 │       ├── progress.json   # Execution status and timing
-│       ├── stdout.log      # Script stdout
-│       ├── stderr.log      # Script stderr
+│       ├── output.log      # Script stdout
+│       ├── output.err      # Script stderr
 │       └── ...             # Output files
+├── current_output/   # Published result files (via publish endpoint)
 └── state/            # Per-user UI state
     └── <userId>.json
 ```
@@ -50,6 +51,12 @@ All endpoints require JWT authentication. Access requires ownership or shared ac
 | DELETE | `/api/v1/labs/:id` | Delete lab (owner only) |
 | POST | `/api/v1/labs/:id/clone` | Clone lab (deep-copy scripts, new owner) |
 
+### Aliases
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/labs/aliases` | Get all lab aliases (shortName → labId) |
+
 ### Sharing
 
 | Method | Endpoint | Description |
@@ -70,6 +77,7 @@ All endpoints require JWT authentication. Access requires ownership or shared ac
 | DELETE | `/api/v1/labs/:id/scripts?file=…` | Delete file |
 | DELETE | `/api/v1/labs/:id/scripts/folder?path=…` | Delete folder |
 | GET | `/api/v1/labs/:id/scripts/folder/zip?path=…` | Download folder as ZIP |
+| POST | `/api/v1/labs/:id/scripts/rename` | Rename file/folder `{oldPath, newPath}` |
 
 ### Script Execution
 
@@ -90,6 +98,18 @@ All endpoints require JWT authentication. Access requires ownership or shared ac
 | POST | `/api/v1/labs/:id/results/:resultId/files/upload` | Upload to result |
 | GET | `/api/v1/labs/:id/results/:resultId/files/download?file=…` | Download result file (`&inline=1` for in-browser) |
 | DELETE | `/api/v1/labs/:id/results/:resultId/files?file=…` | Delete result file |
+| POST | `/api/v1/labs/:id/results/:resultId/files/rename` | Rename result file/folder |
+| DELETE | `/api/v1/labs/:id/results/:resultId` | Delete entire result |
+
+### Publish & Current Output
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/labs/:id/results/:resultId/publish` | Publish file/folder to `current_output` |
+| GET | `/api/v1/labs/:id/current_output` | List current_output files |
+| GET | `/api/v1/labs/:id/current_output/content?file=…` | Read current_output file |
+| GET | `/api/v1/labs/:id/current_output/download?file=…` | Download current_output file |
+| GET | `/api/v1/labs/:id/current_output/folder/zip?path=…` | Download current_output as ZIP |
 
 ### Per-User State
 
@@ -133,13 +153,13 @@ Commands determined by file extension via `config.json`:
 
 ```json
 {
-  "scripts": {
-    "commands": {
-      ".py": "labs/.venv/bin/python",
-      ".js": "node",
-      ".sh": "bash",
-      ".r": "Rscript"
-    }
+  "scriptCommands": {
+    ".py":  { "command": "./labs/.venv/bin/python", "description": "Python scripts" },
+    ".js":  { "command": "node", "description": "Node.js scripts" },
+    ".cjs": { "command": "node", "description": "Node.js scripts" },
+    ".sh":  { "command": "bash", "description": "Shell scripts" },
+    ".r":   { "command": "Rscript", "description": "R scripts" },
+    ".R":   { "command": "Rscript", "description": "R scripts" }
   }
 }
 ```

@@ -44,7 +44,13 @@ measure/
 │       ├── App.jsx              # Root component (auth gate + tab layout)
 │       ├── components/
 │       │   ├── AuthPage.jsx             # Login / register / reset password
+│       │   ├── ConfirmResetPasswordForm.jsx  # Password reset confirmation
+│       │   ├── LanguageSelector.jsx     # Language switcher UI
+│       │   ├── LoginForm.jsx            # Login form
+│       │   ├── RegisterForm.jsx         # Registration form
+│       │   ├── ResetPasswordForm.jsx    # Password reset request form
 │       │   ├── Toast.jsx                # Notification system
+│       │   ├── WorkflowProgressPane.jsx # Workflow step-by-step progress
 │       │   ├── ZoomableImage.jsx        # Zoom/pan image viewer
 │       │   ├── FileManagerEditor.jsx    # File manager barrel export
 │       │   └── file-manager/
@@ -62,11 +68,12 @@ measure/
 │       │   ├── DebugEditor.jsx       # Debug code viewer with breakpoints
 │       │   ├── DebugPanel.jsx        # Debug controls + variable inspection
 │       │   └── useDebugSession.js    # Debug session hook
+│       ├── hooks/
+│       │   └── useWorkflowEvents.js  # SSE workflow progress hook
 │       ├── i18n/translations.js      # Translation strings (cs/sk/en)
 │       ├── lib/
 │       │   ├── appConfig.js          # App-level constants
 │       │   ├── fetchJSON.js          # Authenticated fetch wrapper
-│       │   ├── gridConfig.js         # AG Grid configuration
 │       │   ├── uiConfig.js           # Centralized UI styles, icons, Monaco options
 │       │   └── dirtyRegistry.js      # Global dirty-file tracking
 │       └── tabs/
@@ -87,7 +94,9 @@ measure/
 - **Labs stored on disk** — each lab is a folder with `lab.json`, `scripts/`, `results/`, `state/`.
 - **Script execution** — spawns child processes using configurable commands from `config.json`.
 - **DAP debugging** — WebSocket proxy between browser and debugpy.
-- **JWT authentication** — stateless, 7-day expiry, bcrypt password hashing.
+- **JWT authentication** — stateless, 7-day expiry, bcryptjs password hashing.
+- **Backup scheduler** — periodic automated lab backups based on configurable frequency.
+- **Logging** — pino + pino-http structured JSON logging.
 - **Security** — Helmet, CORS, rate limiting (300 req/min), path traversal protection.
 
 ### Frontend
@@ -97,30 +106,26 @@ measure/
 - **Monaco Editor** — for script editing, SQL queries, and file preview.
 - **AG Grid** — for SQL query results.
 - **Context providers** — Auth, Language, Settings, Toast, FileClipboard.
+- **Markdown rendering** — React Markdown with KaTeX math formula support.
 - **State preservation** — tab content persists via CSS `display:none` toggle.
 - **Dirty tracking** — global registry warns before browser close if unsaved work exists.
 - **User-select disabled** on UI chrome; enabled in editors and grids.
+- **Standalone mode** — `?lab=<id>&standalone=1` opens a lab in popup-window mode.
 
 ## Database Schema
 
 ```sql
-CREATE TABLE usr (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password VARCHAR(255) NOT NULL,
-  first_name VARCHAR(100),
-  last_name VARCHAR(100)
-);
-
-CREATE TABLE password_resets (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  user_id INT NOT NULL,
-  token VARCHAR(255) NOT NULL,
-  expires_at DATETIME NOT NULL,
-  used BOOLEAN DEFAULT FALSE,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES usr(id)
-);
+CREATE TABLE `usr` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `first_name` varchar(100) NOT NULL,
+  `last_name` varchar(100) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `password_hash` varchar(255) NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 ```
 
 Lab data is stored on disk — see [LABS.md](LABS.md).
@@ -135,23 +140,28 @@ Lab data is stored on disk — see [LABS.md](LABS.md).
 | `DB_HOST` | `localhost` |
 | `DB_USER` / `DB_PASSWORD` / `DB_NAME` | MySQL credentials |
 | `JWT_SECRET` | signing secret |
-| `CORS_ORIGIN` | `http://localhost:50101` |
-| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_USER` / `EMAIL_PASS` | SMTP config |
+| `CORS_ORIGINS` | `http://localhost:50101` (comma-separated) |
+| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_USER` / `EMAIL_PASSWORD` | SMTP config |
+| `EMAIL_SECURE` | `true` or `false` |
+| `EMAIL_FROM` | Sender address |
 | `FRONTEND_URL` | `http://localhost:50101` |
 
 ### `config.json`
 
 ```json
 {
-  "scripts": {
-    "commands": {
-      ".py": "labs/.venv/bin/python",
-      ".js": "node",
-      ".sh": "bash",
-      ".r": "Rscript"
-    }
+  "paths": { "scripts": "scripts", "results": "results" },
+  "scriptCommands": {
+    ".py":  { "command": "./labs/.venv/bin/python", "description": "Python scripts" },
+    ".js":  { "command": "node", "description": "Node.js scripts" },
+    ".cjs": { "command": "node", "description": "Node.js scripts" },
+    ".sh":  { "command": "bash", "description": "Shell scripts" },
+    ".r":   { "command": "Rscript", "description": "R scripts" },
+    ".R":   { "command": "Rscript", "description": "R scripts" }
   },
-  "fileManager": { "defaultDepth": 0, "hiddenFilePrefixes": [".", "__"] }
+  "logging": { "logFileName": "analysis.log", "errorFileName": "analysis.err" },
+  "analysis": { "defaultTimeout": 300000, "maxConcurrentAnalyses": 5 },
+  "fileManager": { "defaultDepth": 0, "hiddenFilePrefixes": [".", "_", "node_modules"] }
 }
 ```
 

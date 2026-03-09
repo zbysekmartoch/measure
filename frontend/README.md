@@ -6,7 +6,7 @@ React SPA for the Measure analytical workbench.
 
 ```bash
 npm install
-npm run dev       # starts on :5173, proxies API to :3000
+npm run dev       # starts on :50101, proxies API to :50100
 npm run build     # production build → dist/
 npm run preview   # preview production build
 ```
@@ -17,6 +17,9 @@ npm run preview   # preview production build
 - **Vite 7** — dev server with HMR, production builder
 - **Monaco Editor** — code editing (Python, SQL, JS, JSON, etc.)
 - **AG Grid** — SQL query results with sorting, filtering
+- **React Markdown** — Markdown rendering with GFM support
+- **KaTeX** — math formula rendering in Markdown
+- **@tanstack/react-table** — table component
 - **Context API** — Auth, Language, Settings, Toast, FileClipboard
 
 ## Architecture
@@ -40,6 +43,7 @@ Sub-panes: Scripts, Results, Settings. Debug panel can be right/bottom/popup.
 - **Browser close warning** — warns if any lab has unsaved changes
 - **Tab close** — only warns when the lab has unsaved changes
 - **Clone Lab** — available in both My Labs and Shared Labs
+- **Standalone mode** — `?lab=<id>&standalone=1` opens lab in a popup window
 - **Text selection** — disabled on UI chrome (tabs, buttons), enabled in editors/grids
 
 ### State Preservation
@@ -56,16 +60,24 @@ src/
 ├── App.jsx                   # Root: auth gate + tab bar + lab browser
 ├── components/
 │   ├── AuthPage.jsx          # Login / register / reset password
+│   ├── ConfirmResetPasswordForm.jsx  # Password reset confirmation
+│   ├── LanguageSelector.jsx  # Language switcher UI
+│   ├── LoginForm.jsx         # Login form
+│   ├── RegisterForm.jsx      # Registration form
+│   ├── ResetPasswordForm.jsx # Password reset request form
 │   ├── Toast.jsx             # Notification system
+│   ├── WorkflowProgressPane.jsx  # Workflow step-by-step progress
 │   ├── ZoomableImage.jsx     # Scroll-zoom + pan image viewer
 │   ├── FileManagerEditor.jsx # File manager barrel export
 │   └── file-manager/         # Tree browser, preview, clipboard, utils
 ├── context/                  # Auth, Language, Settings providers
 ├── debug/                    # DAP client, debug editor, debug panel, session hook
+├── hooks/
+│   └── useWorkflowEvents.js  # SSE workflow progress hook
 ├── i18n/translations.js      # cs/sk/en translations
 ├── lib/
+│   ├── appConfig.js          # App-level constants
 │   ├── fetchJSON.js          # Authenticated fetch wrapper
-│   ├── gridConfig.js         # AG Grid configuration
 │   ├── uiConfig.js           # Centralized UI styles, icons, Monaco options
 │   └── dirtyRegistry.js      # Global dirty-file tracking
 └── tabs/
@@ -79,10 +91,10 @@ src/
 
 ## Configuration
 
-`vite.config.js` proxies `/api` to `http://localhost:3000`.
+`vite.config.js` proxies `/api` to `http://localhost:50100`.
 
 ```bash
-npm run dev      # Development with HMR
+npm run dev      # Development with HMR (:50101)
 npm run build    # Production build
 npm run lint     # ESLint
 ```

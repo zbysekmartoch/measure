@@ -29,10 +29,8 @@ python script.py
 
 ```json
 {
-  "scripts": {
-    "commands": {
-      ".py": "labs/.venv/bin/python"
-    }
+  "scriptCommands": {
+    ".py": { "command": "./labs/.venv/bin/python", "description": "Python scripts" }
   }
 }
 ```

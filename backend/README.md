@@ -34,10 +34,13 @@ See [PYTHON_SETUP.md](PYTHON_SETUP.md) for details.
 | Variable | Description |
 |----------|-------------|
 | `PORT` | Server port (default 3000) |
-| `DB_HOST` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | MySQL connection |
+| `NODE_ENV` | Environment (`development`, `production`) |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | MySQL connection |
 | `JWT_SECRET` | JWT signing secret |
-| `CORS_ORIGIN` | Allowed CORS origins |
-| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_USER` / `EMAIL_PASS` | SMTP for password reset |
+| `CORS_ORIGINS` | Allowed CORS origins (comma-separated) |
+| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_USER` / `EMAIL_PASSWORD` | SMTP for password reset |
+| `EMAIL_SECURE` | `true` or `false` for TLS |
+| `EMAIL_FROM` | Sender address |
 | `FRONTEND_URL` | Frontend URL for reset links |
 
 ### `config.json`
@@ -51,7 +54,9 @@ Script execution commands, file manager settings, logging. See [API.md](API.md) 
 - **SQLite** (better-sqlite3) for read-only datasource queries
 - **Labs on disk** — `labs/<id>/` folders with scripts, results, state
 - **DAP proxy** — WebSocket bridge to debugpy for Python debugging
-- **JWT auth** — stateless, 7-day expiry, bcrypt hashing
+- **JWT auth** — stateless, 7-day expiry, bcryptjs hashing
+- **Backup scheduler** — periodic automated lab backups
+- **Logging** — pino + pino-http structured JSON logging
 - **Security** — Helmet, CORS, rate limiting, path traversal protection
 
 ## API Overview
@@ -62,10 +67,12 @@ See [API.md](API.md) for the complete reference.
 |-------|--------|-------------|
 | Health | `/api/health` | System status (public) |
 | Auth | `/api/v1/auth` | Login, register, password reset |
-| Labs | `/api/v1/labs` | CRUD, sharing, clone, files, execution, debug |
+| Labs | `/api/v1/labs` | CRUD, sharing, clone, files, execution, workflow, publish |
 | SQL | `/api/v1/sql` | Execute queries, datasources, schema |
 | Users | `/api/v1/users` | List users (for sharing) |
 | Paste | `/api/v1/paste` | Cross-root file copy |
+| Debug | `/api/v1/debug` | Debug session status, events, stop |
+| Workflow | `/api/v1/labs/:id/results/:rid/workflow` | SSE progress, state |
 | DAP | `ws://…/dap` | Debug Adapter Protocol WebSocket |
 
 ## Project Structure
@@ -76,17 +83,25 @@ See [API.md](API.md) for the complete reference.
 │   ├── config.js           # Environment config loader
 │   ├── db.js              # MySQL connection pool
 │   ├── debug/             # DAP debug proxy
+│   │   ├── dap-proxy.js   # WebSocket ↔ debugpy bridge
+│   │   ├── debug-engine.js # Debug session lifecycle
+│   │   └── debug-routes.js # REST + SSE debug endpoints
 │   ├── middleware/
 │   │   ├── auth.js        # JWT auth (header + query param)
 │   │   └── error.js       # Global error handler
 │   ├── routes/
+│   │   ├── index.js       # Main router (health, paste, mounts)
 │   │   ├── auth.js        # Authentication
-│   │   ├── labs.js        # Labs (1300+ lines)
+│   │   ├── labs.js        # Labs (1600+ lines)
 │   │   ├── sql.js         # SQL execution
 │   │   └── users.js       # User listing
-│   └── utils/
-│       ├── email.js       # Nodemailer
-│       └── file-manager.js # File utilities
+│   ├── utils/
+│   │   ├── backup-scheduler.js  # Periodic automated lab backups
+│   │   ├── email.js       # Nodemailer
+│   │   └── file-manager.js # File utilities
+│   └── workflow/
+│       ├── workflow-routes.js  # SSE + REST workflow endpoints
+│       └── workflow-runner.js  # Workflow execution engine
 ├── labs/                  # Lab data (gitignored)
 ├── backups/               # Backups (gitignored)
 ├── datasources/           # SQL connection configs

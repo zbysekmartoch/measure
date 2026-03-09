@@ -15,7 +15,7 @@ EMAIL_SECURE=false
 EMAIL_USER=your-email@gmail.com
 EMAIL_PASSWORD=your-16-char-app-password
 EMAIL_FROM=your-email@gmail.com
-FRONTEND_URL=http://localhost:5173
+FRONTEND_URL=http://localhost:50101
 ```
 
 ### Other providers
@@ -30,14 +30,14 @@ FRONTEND_URL=http://localhost:5173
 
 ```bash
 # 1. Request reset
-curl -X POST http://localhost:3000/api/v1/auth/reset-password \
+curl -X POST http://localhost:50100/api/v1/auth/reset-password \
   -H "Content-Type: application/json" \
   -d '{"email": "test@example.com"}'
 
 # 2. Copy token from email (or server console if SMTP not configured)
 
 # 3. Set new password
-curl -X POST http://localhost:3000/api/v1/auth/confirm-reset-password \
+curl -X POST http://localhost:50100/api/v1/auth/reset-password/confirm \
   -H "Content-Type: application/json" \
   -d '{"token": "...", "newPassword": "NewPassword123"}'
 ```

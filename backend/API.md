@@ -18,7 +18,7 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 | POST | `/auth/register` | No | `{firstName, lastName, email, password}` | Create user |
 | GET | `/auth/me` | Yes | — | Current user profile |
 | POST | `/auth/reset-password` | No | `{email}` | Send reset email |
-| POST | `/auth/confirm-reset-password` | No | `{token, newPassword}` | Set new password |
+| POST | `/auth/reset-password/confirm` | No | `{token, newPassword}` | Set new password |
 
 ## Users (`/api/v1/users`)
 
@@ -41,6 +41,12 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 | DELETE | `/labs/:id` | Yes | Delete lab (owner) |
 | POST | `/labs/:id/clone` | Yes | Clone lab `{name?}` → new lab |
 
+### Aliases
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/labs/aliases` | Yes | Get all lab aliases (shortName → labId) |
+
 ### Sharing
 
 | Method | Endpoint | Auth | Description |
@@ -61,6 +67,7 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 | DELETE | `/labs/:id/scripts/folder?path=…` | Yes | Delete folder |
 | GET | `/labs/:id/scripts/download?file=…` | Yes | Download (`&inline=1` for in-browser) |
 | GET | `/labs/:id/scripts/folder/zip?path=…` | Yes | Download folder as ZIP |
+| POST | `/labs/:id/scripts/rename` | Yes | Rename file/folder `{oldPath, newPath}` |
 | POST | `/labs/:id/scripts/debug` | Yes | Create result run `{workflowFile}` |
 
 ### Results
@@ -76,6 +83,18 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 | POST | `/labs/:id/results/:rid/files/upload` | Yes | Upload |
 | GET | `/labs/:id/results/:rid/files/download?file=…` | Yes | Download (`&inline=1`) |
 | DELETE | `/labs/:id/results/:rid/files?file=…` | Yes | Delete file |
+| POST | `/labs/:id/results/:rid/files/rename` | Yes | Rename file/folder `{oldPath, newPath}` |
+| DELETE | `/labs/:id/results/:rid` | Yes | Delete entire result |
+
+### Publish & Current Output
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/labs/:id/results/:rid/publish` | Yes | Publish file/folder to `current_output` `{path}` |
+| GET | `/labs/:id/current_output` | Yes | List current_output files |
+| GET | `/labs/:id/current_output/content?file=…` | Yes | Read current_output file |
+| GET | `/labs/:id/current_output/download?file=…` | Yes | Download current_output file |
+| GET | `/labs/:id/current_output/folder/zip?path=…` | Yes | Download current_output as ZIP |
 
 ### State & Debug
 
@@ -96,7 +115,7 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 |--------|----------|------|-------------|
 | POST | `/sql` | Yes | Execute query `{query, datasource?}` |
 | GET | `/sql/datasources` | Yes | List datasources |
-| GET | `/sql/datasources/:name/schema` | Yes | Get tables + columns |
+| GET | `/sql/schema?datasource=…` | Yes | Get tables + columns |
 
 ## Paste (`/api/v1/paste`)
 
@@ -108,10 +127,17 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/debug/status?sessionId=…` | Yes | Debug session status |
-| GET | `/debug/events?sessionId=…` | Yes | SSE debug events |
-| POST | `/debug/end` | Yes | End debug session |
-| WS | `ws://…/dap?sessionId=…` | Token | DAP WebSocket |
+| GET | `/debug/status` | Yes | Debug session status |
+| GET | `/debug/events` | Yes | SSE debug events (status, stdout, stderr, exit) |
+| POST | `/debug/stop` | Yes | Kill active debug session |
+| WS | `ws://…/dap` | Token | DAP WebSocket |
+
+## Workflow
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/labs/:id/results/:rid/workflow/events` | Yes | SSE workflow progress stream |
+| GET | `/labs/:id/results/:rid/workflow/state` | Yes | Current workflow state snapshot |
 
 ## Error Format
 

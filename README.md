@@ -15,9 +15,10 @@ Browser (:50101)
               │
         Vite proxy ──► Express API (:50100)
                          ├── /api/v1/auth    (JWT)
-                         ├── /api/v1/labs    (CRUD, files, execution, debug)
+                         ├── /api/v1/labs    (CRUD, files, execution, workflow)
                          ├── /api/v1/sql     (multi-datasource SQL)
                          ├── /api/v1/users
+                         ├── /api/v1/debug   (DAP session management)
                          ├── /api/v1/paste   (cross-root file copy)
                          └── ws://…/dap      (Debug Adapter Protocol)
                                │
@@ -29,8 +30,8 @@ Browser (:50101)
 | Layer | Technology |
 |-------|------------|
 | Runtime | Node.js (ES Modules) |
-| Backend | Express 4, MySQL (mysql2), SQLite (better-sqlite3), JWT, bcrypt |
-| Frontend | React 19, Vite 7, Monaco Editor, AG Grid |
+| Backend | Express 4, MySQL (mysql2), SQLite (better-sqlite3), JWT, bcryptjs, pino |
+| Frontend | React 19, Vite 7, Monaco Editor, AG Grid, React Markdown, KaTeX |
 | Debug | WebSocket DAP proxy, debugpy |
 | Email | Nodemailer (password reset) |
 
@@ -75,6 +76,8 @@ mysql -u root -p < backend/sql/create.sql
 - **Clone Lab** — deep-copy any lab (own or shared) as a starting point
 - **Auth** — JWT with registration, login, email password reset
 - **Sharing** — labs can be shared with other users
+- **Publish** — publish result files to lab's `current_output` for external access
+- **Markdown & KaTeX** — render Markdown files with math formula support
 
 ## License
 
