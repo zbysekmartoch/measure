@@ -44,6 +44,7 @@ Sub-panes: Scripts, Results, Settings. Debug panel can be right/bottom/popup.
 - **Tab close** — only warns when the lab has unsaved changes
 - **Clone Lab** — available in both My Labs and Shared Labs
 - **Standalone mode** — `?lab=<id>&standalone=1` opens lab in a popup window
+- **File clipboard** — server-backed copy/paste of files and folders shared across all browser windows/tabs of the same user (including standalone lab windows)
 - **Text selection** — disabled on UI chrome (tabs, buttons), enabled in editors/grids
 
 ### State Preservation

@@ -298,7 +298,7 @@ export default function FileBrowserPane({
   overrideWidth,
 }) {
   const { t } = useLanguage();
-  const { clipboard, copyFile, copyFolder } = useFileClipboard();
+  const { clipboard, copyFile, copyFolder, refreshFromServer } = useFileClipboard();
 
   const handleCopyFile = useCallback((filePath) => {
     copyFile(filePath, apiBasePath);
@@ -308,10 +308,25 @@ export default function FileBrowserPane({
     copyFolder(folderPath, apiBasePath);
   }, [copyFolder, apiBasePath]);
 
-  const handlePaste = useCallback((targetFolder) => {
-    if (!clipboard) return;
-    onPasteInto(targetFolder, clipboard);
-  }, [clipboard, onPasteInto]);
+  const handlePaste = useCallback(async (targetFolder) => {
+    // Always fetch the latest clipboard from server before pasting
+    // (covers the case where copy happened in another window)
+    await refreshFromServer();
+    // Use a fresh read – we can't rely on the state updated by refreshFromServer
+    // synchronously, so we fetch once more directly:
+    let item = clipboard;
+    try {
+      const r = await fetch('/api/v1/clipboard', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.clipboard) item = data.clipboard;
+      }
+    } catch { /* use local */ }
+    if (!item) return;
+    onPasteInto(targetFolder, item);
+  }, [clipboard, onPasteInto, refreshFromServer]);
 
   // Build a virtual root node that wraps all top-level items
   const rootNode = {

@@ -90,6 +90,29 @@ router.use('/v1/users', authenticateToken, users);
 router.use('/v1/debug', authenticateToken, debugRoutes);
 router.use('/v1/labs/:labId/results/:resultId/workflow', authenticateToken, workflowRoutes);
 
+// ─── Per-user clipboard (in-memory, shared across all sessions/windows) ───────
+const userClipboards = new Map(); // userId → { type, path, apiBasePath, ts }
+
+router.get('/v1/clipboard', authenticateToken, (req, res) => {
+  const data = userClipboards.get(req.userId) || null;
+  res.json({ clipboard: data });
+});
+
+router.put('/v1/clipboard', authenticateToken, (req, res) => {
+  const { type, path: filePath, apiBasePath } = req.body ?? {};
+  if (!type || !filePath || !apiBasePath) {
+    return res.status(400).json({ error: 'Missing type, path, or apiBasePath' });
+  }
+  const entry = { type, path: filePath, apiBasePath, ts: Date.now() };
+  userClipboards.set(req.userId, entry);
+  res.json({ clipboard: entry });
+});
+
+router.delete('/v1/clipboard', authenticateToken, (req, res) => {
+  userClipboards.delete(req.userId);
+  res.json({ clipboard: null });
+});
+
 // ─── Generic paste (copy file/folder across any file-manager root) ────────────
 // Body: { sourceApi, sourcePath, targetApi, targetFolder }
 // sourceApi / targetApi examples:

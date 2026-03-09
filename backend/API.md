@@ -117,6 +117,17 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 | GET | `/sql/datasources` | Yes | List datasources |
 | GET | `/sql/schema?datasource=…` | Yes | Get tables + columns |
 
+## Clipboard (`/api/v1/clipboard`)
+
+Per-user file clipboard stored on the server. Enables copy/paste of files and folders
+across all browser windows/tabs of the same authenticated user.
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/clipboard` | Yes | Get current clipboard contents |
+| PUT | `/clipboard` | Yes | Set clipboard (`{ type, path, apiBasePath }`) |
+| DELETE | `/clipboard` | Yes | Clear clipboard |
+
 ## Paste (`/api/v1/paste`)
 
 | Method | Endpoint | Auth | Description |

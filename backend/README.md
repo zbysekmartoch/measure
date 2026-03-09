@@ -70,6 +70,7 @@ See [API.md](API.md) for the complete reference.
 | Labs | `/api/v1/labs` | CRUD, sharing, clone, files, execution, workflow, publish |
 | SQL | `/api/v1/sql` | Execute queries, datasources, schema |
 | Users | `/api/v1/users` | List users (for sharing) |
+| Clipboard | `/api/v1/clipboard` | Per-user file clipboard (GET/PUT/DELETE) |
 | Paste | `/api/v1/paste` | Cross-root file copy |
 | Debug | `/api/v1/debug` | Debug session status, events, stop |
 | Workflow | `/api/v1/labs/:id/results/:rid/workflow` | SSE progress, state |

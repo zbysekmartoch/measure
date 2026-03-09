@@ -57,7 +57,7 @@ measure/
 │       │       ├── FileBrowserPane.jsx   # Tree-based file browser
 │       │       ├── FilePreviewPane.jsx   # File preview / editor
 │       │       ├── useFileManager.js     # File manager state hook
-│       │       ├── ClipboardContext.jsx  # Cross-pane copy/paste
+│       │       ├── ClipboardContext.jsx  # Server-backed cross-window copy/paste
 │       │       └── fileUtils.js          # File type detection, formatting
 │       ├── context/
 │       │   ├── AuthContext.jsx       # JWT auth state
@@ -111,6 +111,7 @@ measure/
 - **Dirty tracking** — global registry warns before browser close if unsaved work exists.
 - **User-select disabled** on UI chrome; enabled in editors and grids.
 - **Standalone mode** — `?lab=<id>&standalone=1` opens a lab in popup-window mode.
+- **File clipboard** — server-backed copy/paste of files and folders works across all browser windows and tabs of the same user (including standalone lab windows). Clipboard state is stored per-user on the server and synchronized via focus events + BroadcastChannel.
 
 ## Database Schema
 
