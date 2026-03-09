@@ -37,7 +37,7 @@ const DEBUG_MODES = [
   { key: 'popup',  label: dmCfg.popup.label,  icon: dmCfg.popup.icon },
 ];
 
-export default function LabWorkspaceTab({ lab, onLabUpdate }) {
+export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
   const [activeTab, setActiveTab] = useState('scripts');
   const [debugMode, setDebugMode] = useState('hidden');
   const popupRef = useRef(null);
@@ -323,7 +323,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate }) {
           position: 'relative',
         }}>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'scripts' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
-            <LabScriptsPane lab={lab} debug={debug} />
+            <LabScriptsPane lab={lab} debug={debug} appConfig={appConfig} />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
             <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} />

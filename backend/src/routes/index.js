@@ -40,6 +40,14 @@ router.get('/health', async (req, res) => {
     const hostname = os.hostname();
     const port = config.port || process.env.PORT || 3000;
 
+    // Read outputsFolderName from config.json
+    let outputsFolderName = 'Outputs';
+    try {
+      const configJsonPath = path.join(__dirname, '../../config.json');
+      const configData = JSON.parse(await fs.readFile(configJsonPath, 'utf8'));
+      if (configData.outputsFolderName) outputsFolderName = configData.outputsFolderName;
+    } catch { /* use default */ }
+
     res.json({ 
       ok: true,
       service: appName,
@@ -57,6 +65,9 @@ router.get('/health', async (req, res) => {
  //       port: config.db.port,
         name: config.db.database,
  //       user: config.db.user
+      },
+      config: {
+        outputsFolderName,
       },
       timestamp: new Date().toISOString()
     });

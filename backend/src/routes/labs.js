@@ -1129,8 +1129,15 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       dataJson = {};
     }
 
-    // Copy "outputs/" folder contents from the workflow directory into the result (if it exists)
-    const outputsSrc = path.join(wfDir, 'outputs');
+    // Copy outputs folder contents from the workflow directory into the result (if it exists)
+    // Folder name is configurable via config.json "outputsFolderName" (default: "Outputs")
+    let outputsFolderName = 'Outputs';
+    try {
+      const cfgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config.json');
+      const cfgData = JSON.parse(await fs.readFile(cfgPath, 'utf-8'));
+      if (cfgData.outputsFolderName) outputsFolderName = cfgData.outputsFolderName;
+    } catch { /* use default */ }
+    const outputsSrc = path.join(wfDir, outputsFolderName);
     try {
       const outputsStat = await fs.stat(outputsSrc);
       if (outputsStat.isDirectory()) {

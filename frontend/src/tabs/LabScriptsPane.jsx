@@ -21,7 +21,7 @@ import ZoomableImage from '../components/ZoomableImage.jsx';
 import { monacoDefaults } from '../lib/uiConfig.js';
 import { setDirtyCount, removeDirtyCount } from '../lib/dirtyRegistry.js';
 
-export default function LabScriptsPane({ lab, debug }) {
+export default function LabScriptsPane({ lab, debug, appConfig }) {
   const toast = useToast();
   const apiBasePath = `/api/v1/labs/${lab.id}/scripts`;
 
@@ -258,6 +258,7 @@ export default function LabScriptsPane({ lab, debug }) {
             refreshTrigger={0}
             onFileDoubleClick={handleFileOpen}
             onDebugWorkflow={handleDebugWorkflow}
+            specialFolders={appConfig?.outputsFolderName ? [appConfig.outputsFolderName] : ['Outputs']}
           />
         </div>
 

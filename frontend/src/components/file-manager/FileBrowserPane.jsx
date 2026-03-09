@@ -48,9 +48,11 @@ function FolderNode({
   onDebugWorkflow, onRename, changedFiles,
   onPublish,
   isRoot,
+  specialFolders,
 }) {
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
   const indent = depth * 16;
+  const isSpecial = !isRoot && specialFolders?.some(sf => sf.toLowerCase() === node.name.toLowerCase());
 
   // Count all files recursively in this folder
   const countFiles = (n) => {
@@ -73,20 +75,22 @@ function FolderNode({
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '4px 6px', paddingLeft: indent + 6,
-          background: dragOverFolder === node.path ? '#dbeafe' : (depth === 0 ? '#f9fafb' : 'transparent'),
+          background: dragOverFolder === node.path ? '#dbeafe' : isSpecial ? '#f5f3ff' : (depth === 0 ? '#f9fafb' : 'transparent'),
           borderRadius: 4, cursor: 'pointer', userSelect: 'none',
           borderBottom: depth === 0 ? '1px solid #e5e7eb' : 'none',
+          borderLeft: isSpecial ? '3px solid #8b5cf6' : '3px solid transparent',
           marginTop: depth === 0 ? 4 : 0,
           transition: 'background 0.1s',
         }}
         onClick={() => onToggleFolder(node.path)}
-        onMouseEnter={(e) => { if (dragOverFolder !== node.path) e.currentTarget.style.background = '#f0f4ff'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = dragOverFolder === node.path ? '#dbeafe' : (depth === 0 ? '#f9fafb' : 'transparent'); }}
+        onMouseEnter={(e) => { if (dragOverFolder !== node.path) e.currentTarget.style.background = isSpecial ? '#ede9fe' : '#f0f4ff'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = dragOverFolder === node.path ? '#dbeafe' : isSpecial ? '#f5f3ff' : (depth === 0 ? '#f9fafb' : 'transparent'); }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: '#374151', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: isSpecial ? '#7c3aed' : '#374151', minWidth: 0 }}>
           <span style={{ display: 'inline-block', transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>▶</span>
-          <span>📁</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+          <span>{isSpecial ? '📦' : '📁'}</span>
+          <span title={node.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: isSpecial ? 'italic' : 'normal' }}>{node.name}</span>
+          {isSpecial && <span style={{ fontSize: 8, color: '#7c3aed', background: '#ede9fe', padding: '0 4px', borderRadius: 4, flexShrink: 0 }}>TEMPLATE</span>}
           <span style={{ fontSize: 9, color: '#9ca3af', background: '#e5e7eb', padding: '0 4px', borderRadius: 6, flexShrink: 0 }}>
             {countFiles(node)}
           </span>
@@ -179,6 +183,7 @@ function FolderNode({
             onRename={onRename}
             changedFiles={changedFiles}
             onPublish={onPublish}
+            specialFolders={specialFolders}
           />
         ) : (
           <FileRow
@@ -225,7 +230,7 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
     >
       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span>{fileIcon(file.name)}</span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+        <span title={file.path || file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
         {showModificationDate && file.size !== undefined && (
           <span style={{ fontSize: 9, color: '#9ca3af', flexShrink: 0 }}>{formatFileSize(file.size)}</span>
         )}
@@ -289,6 +294,8 @@ export default function FileBrowserPane({
   showModificationDate,
   apiBasePath,
   onPublish,
+  specialFolders,
+  overrideWidth,
 }) {
   const { t } = useLanguage();
   const { clipboard, copyFile, copyFolder } = useFileClipboard();
@@ -317,15 +324,16 @@ export default function FileBrowserPane({
   return (
     <section
       style={{
-        width: showPreview ? 380 : '100%',
-        minWidth: 280,
+        width: overrideWidth || (showPreview ? 380 : '100%'),
+        minWidth: 200,
         height: '100%',
         border: '1px solid #e5e7eb',
         borderRadius: 12,
         padding: 10,
         overflow: 'auto',
         background: '#fff',
-        flex: showPreview ? 'none' : 1,
+        flex: overrideWidth ? 'none' : (showPreview ? 'none' : 1),
+        flexShrink: 0,
       }}
     >
       {/* Compact title bar — only title + refresh + preview toggle */}
@@ -383,6 +391,7 @@ export default function FileBrowserPane({
         onRename={onRename}
         changedFiles={changedFiles}
         onPublish={onPublish}
+        specialFolders={specialFolders}
         isRoot
       />
 

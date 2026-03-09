@@ -43,5 +43,6 @@
   "fileManager": {
     "defaultDepth": 0,
     "hiddenFilePrefixes": [".","_","node_modules"]
-  }
+  },
+  "outputsFolderName": "Outputs"
 }

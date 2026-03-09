@@ -30,6 +30,7 @@ import { hasDirtyFiles, hasDirtyFilesForLab } from './lib/dirtyRegistry.js';
 function StandaloneLabView({ labId }) {
   const [lab, setLab] = useState(null);
   const [error, setError] = useState('');
+  const [appConfig, setAppConfig] = useState(null);
 
   useEffect(() => {
     fetchJSON(`/api/v1/labs/${labId}`)
@@ -38,6 +39,7 @@ function StandaloneLabView({ labId }) {
         document.title = `🔬 ${data.name} — Measure`;
       })
       .catch(() => setError('Lab not found or access denied.'));
+    fetch('/api/health').then(r => r.json()).then(d => setAppConfig(d?.config)).catch(() => {});
   }, [labId]);
 
   if (error) return <div style={{ padding: 40, color: '#dc2626' }}>{error}</div>;
@@ -45,7 +47,7 @@ function StandaloneLabView({ labId }) {
 
   return (
     <div style={{ height: '100vh', width: '100vw', boxSizing: 'border-box', padding: 8, background: '#fff' }}>
-      <LabWorkspaceTab lab={lab} />
+      <LabWorkspaceTab lab={lab} appConfig={appConfig} />
     </div>
   );
 }
@@ -533,7 +535,7 @@ function AppContent() {
               padding: 4,
             }}
           >
-            <LabWorkspaceTab lab={lab} onLabUpdate={handleLabUpdate} />
+            <LabWorkspaceTab lab={lab} onLabUpdate={handleLabUpdate} appConfig={healthInfo?.config} />
           </div>
         ))}
 

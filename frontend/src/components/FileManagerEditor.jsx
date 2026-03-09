@@ -12,7 +12,7 @@ export { useFileClipboard, FileClipboardProvider } from './file-manager/Clipboar
  * Default export — drop-in replacement for the old 1254-line monolith.
  * Composes FileBrowserPane + FilePreviewPane + useFileManager hook.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import useFileManager from './file-manager/useFileManager.js';
 import FileBrowserPane from './file-manager/FileBrowserPane.jsx';
 import FilePreviewPane from './file-manager/FilePreviewPane.jsx';
@@ -30,9 +30,12 @@ export default function FileManagerEditor({
   title,
   refreshTrigger = 0,
   onPublish,
+  specialFolders,
 }) {
   const [showPreview, setShowPreview] = useState(true);
   const [editorTheme, setEditorTheme] = useState(() => localStorage.getItem('monacoTheme') || 'vs-dark');
+  const [splitterWidth, setSplitterWidth] = useState(380);
+  const containerRef = useRef(null);
 
   const fm = useFileManager({ apiBasePath, showUpload, showDelete, readOnly, onFileSelect, refreshTrigger });
 
@@ -69,8 +72,34 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
     w.document.close();
   }, [fm.selectedFile, fm.selectedFileInfo, fm.fileContent, apiBasePath, readOnly]);
 
+  // ---- Splitter drag handling ----
+  const onSplitterMouseDown = useCallback((e) => {
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+    const startX = e.clientX;
+    const startWidth = splitterWidth;
+
+    const onMove = (ev) => {
+      const delta = ev.clientX - startX;
+      setSplitterWidth(Math.max(200, Math.min(container.offsetWidth - 200, startWidth + delta)));
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [splitterWidth]);
+
   return (
-    <div style={{ height: '100%', display: 'flex', gap: 12 }}>
+    <div ref={containerRef} style={{ height: '100%', display: 'flex' }}>
       <FileBrowserPane
         title={title}
         loading={fm.loading}
@@ -105,7 +134,22 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
         onRename={fm.renameItem}
         changedFiles={fm.changedFiles}
         onPublish={onPublish}
+        specialFolders={specialFolders}
+        overrideWidth={showPreview ? splitterWidth : undefined}
       />
+
+      {showPreview && (
+        <div
+          onMouseDown={onSplitterMouseDown}
+          style={{
+            width: 6, cursor: 'col-resize', flexShrink: 0,
+            background: '#e5e7eb', borderRadius: 3,
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#93c5fd'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#e5e7eb'; }}
+        />
+      )}
 
       {showPreview && (
         <FilePreviewPane
