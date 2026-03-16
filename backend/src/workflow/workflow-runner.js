@@ -110,6 +110,9 @@ export class WorkflowRun extends EventEmitter {
     this.debugLogFile = opts.debugLogFile;
     this.progressBase = opts.progressBase || {};
 
+    // Path to shared lib scripts (labs/lib/scripts) — available as PYTHONPATH
+    this.libScriptsPath = path.resolve(opts.scriptsRoot, '../../lib/scripts');
+
     this.key = `${opts.labId}:${opts.resultId}`;
     this.status = 'idle'; // idle | running | completed | failed | aborted
     this.currentStepIndex = -1;
@@ -257,6 +260,7 @@ export class WorkflowRun extends EventEmitter {
               resultId: this.resultId,
               stepIndex: i,
               stepName: stepName,
+              extraEnv: { PYTHONPATH: this.libScriptsPath + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : '') },
               logFile: this.logFile,
               errorFile: this.errorFile,
             });
@@ -438,9 +442,14 @@ export class WorkflowRun extends EventEmitter {
    */
   _spawnScript(command, scriptAbsPath) {
     return new Promise((resolve) => {
+      const env = { ...process.env, WORK_DIR: this.resultDir };
+      // Add shared lib scripts to PYTHONPATH so labs can import from labs/lib/scripts
+      if (command === this.pythonCmd) {
+        env.PYTHONPATH = this.libScriptsPath + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : '');
+      }
       const child = spawn(command, [scriptAbsPath, this.resultDir, this.workflowRoot, this.scriptsRoot], {
         cwd: this.resultDir,
-        env: { ...process.env, WORK_DIR: this.resultDir },
+        env,
       });
 
       this._currentProcess = child;

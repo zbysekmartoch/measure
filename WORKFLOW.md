@@ -268,3 +268,43 @@ Each workflow run creates these files in the result directory:
 - `output.err` — stderr from all scripts
 - `debuger.log` — debug session lifecycle log
 - `progress.json` — current progress state (for polling fallback)
+
+## Shared Library Lab (`labs/lib`)
+
+The `labs/lib` lab is a special lab that serves as a **shared Python library**.
+Its `scripts/` directory (`labs/lib/scripts/`) contains Python modules that can be
+imported by scripts in any other lab.
+
+### How It Works
+
+When the workflow runner spawns a Python script (both in normal and debug mode),
+it automatically sets the `PYTHONPATH` environment variable to include
+`labs/lib/scripts/`. This means any `.py` file or package placed in that directory
+is directly importable from workflow scripts in all labs.
+
+### Example
+
+1. Create a shared module in `labs/lib/scripts/helpers.py`:
+
+```python
+def compute_average(values):
+    return sum(values) / len(values) if values else 0
+```
+
+2. Import it from any lab's workflow script (e.g., `labs/5/scripts/analyze.py`):
+
+```python
+from helpers import compute_average
+
+result = compute_average([10, 20, 30])
+print(result)  # 20.0
+```
+
+### Notes
+
+- `PYTHONPATH` is set for **all** Python scripts in every lab, not just specific ones.
+- If `PYTHONPATH` was already set in the system environment, the lib path is **prepended**
+  (so shared modules take precedence).
+- This works in both **Run** and **Debug** modes.
+- You can organize code into packages (subdirectories with `__init__.py`) inside
+  `labs/lib/scripts/` for better structure.

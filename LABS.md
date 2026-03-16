@@ -21,6 +21,8 @@ backend/labs/<id>/
     └── <userId>.json
 ```
 
+**Outputs folder:** The outputs/template folder name is configurable via `config.json` `outputsFolderName` (default: `Outputs`). This folder is visually highlighted with purple styling and a TEMPLATE badge in the file browser UI.
+
 ### `lab.json`
 
 ```json
@@ -126,6 +128,22 @@ All endpoints require JWT authentication. Access requires ownership or shared ac
 |--------|----------|-------------|
 | POST | `/api/v1/labs/:id/backup` | Trigger backup |
 
+### Clipboard (File Copy/Paste)
+
+Per-user file clipboard stored on the server. Works across all browser windows/tabs.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/clipboard` | Get current clipboard contents |
+| PUT | `/api/v1/clipboard` | Set clipboard `{ type, path, apiBasePath }` |
+| DELETE | `/api/v1/clipboard` | Clear clipboard |
+
+### Paste (Cross-Root Copy)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/paste` | Copy file/folder between different roots `{ sourceApi, sourcePath, targetApi, targetFolder }` |
+
 ## Frontend UI
 
 ### Lab Browser (App.jsx)
@@ -165,6 +183,17 @@ Commands determined by file extension via `config.json`:
 ```
 
 Results are stored in numbered subfolders. Progress is tracked via `progress.json`.
+
+### Shared Libraries (PYTHONPATH)
+
+The `labs/lib/scripts/` directory is automatically added to Python's `PYTHONPATH` during workflow execution. This allows Python scripts in any lab to import shared modules:
+
+```python
+# In any lab's script:
+from shared_utils import load_data, process_data
+```
+
+See [WORKFLOW.md](WORKFLOW.md#shared-library-lab-labslib) for details.
 
 ## Security
 

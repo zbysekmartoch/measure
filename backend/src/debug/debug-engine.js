@@ -123,6 +123,7 @@ function emitStatus() {
  * @param {string} opts.resultId
  * @param {number} [opts.stepIndex]
  * @param {string} [opts.stepName]
+ * @param {object} [opts.extraEnv]          — additional environment variables to set
  * @param {string} opts.logFile            — path to stdout log
  * @param {string} opts.errorFile          — path to stderr log
  * @returns {Promise<{ port: number, pid: number }>}
@@ -177,6 +178,7 @@ export async function startDebugSession(opts) {
       ...process.env,
       WORK_DIR: opts.cwd,
       PYDEVD_DISABLE_FILE_VALIDATION: '1',
+      ...(opts.extraEnv || {}),
     },
   });
 

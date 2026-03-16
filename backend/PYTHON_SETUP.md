@@ -43,6 +43,23 @@ pip install package-name
 pip freeze > labs/requirements.txt
 ```
 
+## Shared Libraries (`labs/lib/scripts`)
+
+The `labs/lib/scripts/` directory is automatically added to Python's `PYTHONPATH`
+during workflow execution. Scripts in any lab can import shared modules placed there:
+
+```python
+# In any lab's script:
+from shared_helpers import validate_data
+```
+
+To add shared modules:
+1. Create Python files in `backend/labs/lib/scripts/`
+2. Scripts in any lab can import them without path manipulation
+3. Add dependencies to `labs/requirements.txt`
+
+See [WORKFLOW.md](../WORKFLOW.md#shared-library-lab-labslib) for details.
+
 ## Troubleshooting
 
 - **`python3` not found**: `sudo apt install python3 python3-pip python3-venv`

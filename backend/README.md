@@ -45,7 +45,16 @@ See [PYTHON_SETUP.md](PYTHON_SETUP.md) for details.
 
 ### `config.json`
 
-Script execution commands, file manager settings, logging. See [API.md](API.md) for details.
+Script execution commands, file manager settings, logging, outputs folder name. See [API.md](API.md) for details.
+
+| Key | Default | Purpose |
+|-----|---------|--------|
+| `paths` | `{scripts, results}` | Folder naming |
+| `scriptCommands` | See config | File extension → execution command |
+| `logging` | See config | Log file names and format |
+| `analysis` | See config | Timeouts and concurrency |
+| `fileManager` | See config | File browser defaults |
+| `outputsFolderName` | `"Outputs"` | Name of special outputs/template folder |
 
 ## Architecture
 

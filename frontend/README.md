@@ -45,6 +45,8 @@ Sub-panes: Scripts, Results, Settings. Debug panel can be right/bottom/popup.
 - **Clone Lab** — available in both My Labs and Shared Labs
 - **Standalone mode** — `?lab=<id>&standalone=1` opens lab in a popup window
 - **File clipboard** — server-backed copy/paste of files and folders shared across all browser windows/tabs of the same user (including standalone lab windows)
+- **Draggable splitter** — file manager preview pane width is adjustable via draggable separator
+- **Outputs folder styling** — the outputs folder (`outputsFolderName` from config) is highlighted with purple background, 📦 icon, and TEMPLATE badge
 - **Text selection** — disabled on UI chrome (tabs, buttons), enabled in editors/grids
 
 ### State Preservation

@@ -20,6 +20,7 @@ Browser (:50101)
                          ├── /api/v1/users
                          ├── /api/v1/debug   (DAP session management)
                          ├── /api/v1/paste   (cross-root file copy)
+                         ├── /api/v1/clipboard (per-user file clipboard)
                          └── ws://…/dap      (Debug Adapter Protocol)
                                │
                          MySQL + SQLite + filesystem (labs/)
@@ -69,7 +70,8 @@ mysql -u root -p < backend/sql/create.sql
 ## Key Features
 
 - **Labs** — multi-user analysis projects with file management, script execution, result tracking
-- **File Manager** — dual-pane browser with Monaco editor, image/PDF preview, drag & drop
+- **File Manager** — dual-pane browser with Monaco editor, image/PDF preview, drag & drop, draggable splitter
+- **File Clipboard** — server-backed copy/paste of files and folders works across all browser windows/tabs of the same user
 - **Script Execution** — Python, R, Node.js, Shell with real-time SSE progress
 - **SQL Editor** — Monaco editor + AG Grid results against MySQL/SQLite datasources
 - **DAP Debugging** — step-through debugging with breakpoints, variables, call stack
@@ -77,6 +79,8 @@ mysql -u root -p < backend/sql/create.sql
 - **Auth** — JWT with registration, login, email password reset
 - **Sharing** — labs can be shared with other users
 - **Publish** — publish result files to lab's `current_output` for external access
+- **Shared Libraries** — `labs/lib/scripts/` is automatically added to PYTHONPATH for all Python scripts across labs
+- **Configurable Outputs** — special outputs/template folder with custom name and visual styling via `config.json`
 - **Markdown & KaTeX** — render Markdown files with math formula support
 
 ## License

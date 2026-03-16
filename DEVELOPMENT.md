@@ -112,6 +112,8 @@ measure/
 - **User-select disabled** on UI chrome; enabled in editors and grids.
 - **Standalone mode** — `?lab=<id>&standalone=1` opens a lab in popup-window mode.
 - **File clipboard** — server-backed copy/paste of files and folders works across all browser windows and tabs of the same user (including standalone lab windows). Clipboard state is stored per-user on the server and synchronized via focus events + BroadcastChannel.
+- **Draggable splitter** — file manager preview pane width is adjustable via draggable separator.
+- **Outputs folder styling** — the configurable outputs folder (`outputsFolderName` in `config.json`, default `Outputs`) is highlighted with purple styling and a TEMPLATE badge in the file browser.
 
 ## Database Schema
 
@@ -162,7 +164,8 @@ Lab data is stored on disk — see [LABS.md](LABS.md).
   },
   "logging": { "logFileName": "analysis.log", "errorFileName": "analysis.err" },
   "analysis": { "defaultTimeout": 300000, "maxConcurrentAnalyses": 5 },
-  "fileManager": { "defaultDepth": 0, "hiddenFilePrefixes": [".", "_", "node_modules"] }
+  "fileManager": { "defaultDepth": 0, "hiddenFilePrefixes": [".", "_", "node_modules"] },
+  "outputsFolderName": "Outputs"
 }
 ```
 

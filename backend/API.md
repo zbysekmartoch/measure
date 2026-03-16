@@ -8,7 +8,7 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/health` | No | System status, version, DB info |
+| GET | `/api/health` | No | System status, version, DB info, config (includes `outputsFolderName`) |
 
 ## Authentication (`/api/v1/auth`)
 
@@ -121,6 +121,7 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 
 Per-user file clipboard stored on the server. Enables copy/paste of files and folders
 across all browser windows/tabs of the same authenticated user.
+Synchronized via server persistence (in-memory, per-user), BroadcastChannel API, and window focus events.
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|

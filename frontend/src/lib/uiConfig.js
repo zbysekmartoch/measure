@@ -45,9 +45,9 @@ export const fileItemButtons = {
   uploadHere:   { icon: '⬆', bg: '#005ae2', label: 'Upload here' },
   downloadZip:  { icon: '⬇',  bg: '#2f9722', label: 'Download ZIP' },
   deleteFolder: { icon: '🗑', bg: '#f81717', label: 'Delete folder' },
-  renameFile:   { icon: '✎', bg: '#e67e22', label: 'Rename file' },
-  renameFolder: { icon: '✎', bg: '#e67e22', label: 'Rename folder' },
-  debugWorkflow:{ icon: '🛠', bg: '#af24c2', label: 'Prepare to run' },
+  renameFile:   { icon: 'R', bg: '#075500', label: 'Rename file' },
+  renameFolder: { icon: 'R', bg: '#075500', label: 'Rename folder' },
+  debugWorkflow:{ icon: '🛠', bg: '#bb51c9', label: 'Prepare to run' },
 };
 
 // ─── File preview toolbar buttons ───────────────────────────────────────────
