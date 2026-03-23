@@ -3,7 +3,7 @@
  * Shows: filename, size, mtime, Edit / Save / Cancel + Download / Delete buttons,
  * then the actual preview (Monaco editor, image, PDF, or binary placeholder).
  */
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -26,6 +26,7 @@ export default function FilePreviewPane({
   readOnly,
   editorTheme,
   showDelete,
+  previewRefreshKey = 0,
   // actions
   onEdit,
   onSave,
@@ -37,6 +38,15 @@ export default function FilePreviewPane({
   onDeleteFile,
 }) {
   const { t } = useLanguage();
+
+  // Flash effect: set to true when previewRefreshKey changes, auto-clears after animation
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (previewRefreshKey === 0) return;
+    setFlash(true);
+    const timer = setTimeout(() => setFlash(false), 1200);
+    return () => clearTimeout(timer);
+  }, [previewRefreshKey]);
 
   const editorLanguage = useMemo(() => getLanguageFromFilename(selectedFile), [selectedFile]);
 
@@ -66,13 +76,22 @@ export default function FilePreviewPane({
   const showMarkdownPreview = isMarkdown && !isEditing;
 
   return (
-    <section style={{ flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, background: '#fff', display: 'flex', flexDirection: 'column' }}>
+    <section style={{
+      flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, background: '#fff', display: 'flex', flexDirection: 'column',
+      boxShadow: flash ? '0 0 0 3px #3b82f6, inset 0 0 12px rgba(59,130,246,0.15)' : 'none',
+      transition: 'box-shadow 0.3s ease-out',
+    }}>
       {/* Toolbar: file name, meta, action buttons */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>{selectedFile}</div>
           {(selectedFileInfo.size !== undefined || selectedFileInfo.mtime) && (
-            <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', gap: 8 }}>
+            <div style={{
+              fontSize: 12, color: '#6b7280', display: 'flex', gap: 8,
+              background: flash ? '#dbeafe' : 'transparent',
+              padding: '2px 6px', borderRadius: 4,
+              transition: 'background 0.3s ease-out',
+            }}>
               {selectedFileInfo.size !== undefined && <span>📊 {formatFileSize(selectedFileInfo.size)}</span>}
               {selectedFileInfo.mtime && <span>🕒 {formatModifiedDate(selectedFileInfo.mtime)}</span>}
             </div>

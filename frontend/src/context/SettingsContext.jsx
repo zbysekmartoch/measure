@@ -14,12 +14,21 @@ export function SettingsProvider({ children }) {
     return saved ? JSON.parse(saved) : false;
   });
 
+  const [compactButtons, setCompactButtons] = useState(() => {
+    const saved = localStorage.getItem('compactButtons');
+    return saved ? JSON.parse(saved) : false;
+  });
+
   useEffect(() => {
     localStorage.setItem('showAdvancedUI', JSON.stringify(showAdvancedUI));
   }, [showAdvancedUI]);
 
+  useEffect(() => {
+    localStorage.setItem('compactButtons', JSON.stringify(compactButtons));
+  }, [compactButtons]);
+
   return (
-    <SettingsContext.Provider value={{ showAdvancedUI, setShowAdvancedUI }}>
+    <SettingsContext.Provider value={{ showAdvancedUI, setShowAdvancedUI, compactButtons, setCompactButtons }}>
       {children}
     </SettingsContext.Provider>
   );

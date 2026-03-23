@@ -48,6 +48,7 @@ export const fileItemButtons = {
   renameFile:   { icon: 'R', bg: '#075500', label: 'Rename file' },
   renameFolder: { icon: 'R', bg: '#075500', label: 'Rename folder' },
   debugWorkflow:{ icon: '🛠', bg: '#bb51c9', label: 'Prepare to run' },
+  createSync:   { icon: '🔄', bg: '#0ea5e9', label: 'Create sync config' },
 };
 
 // ─── File preview toolbar buttons ───────────────────────────────────────────
@@ -279,6 +280,8 @@ export const fileIcons = {
   bash:     '🖥️',
   // Workflow
   workflow: '▶️',
+  // Sync
+  sync:     '🔄',
   // Special fallbacks
   _image:   '🖼️',
   _pdf:     '📕',

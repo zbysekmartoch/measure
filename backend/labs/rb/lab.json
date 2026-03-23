@@ -1,0 +1,11 @@
+{
+  "id": "rb",
+  "name": "report builder",
+  "description": "laboratoř obsahující skripty a dokumentací pro generátor reportů",
+  "ownerId": 2,
+  "sharedWith": [],
+  "createdAt": "2026-03-22T17:07:05.458Z",
+  "updatedAt": "2026-03-22T17:07:55.376Z",
+  "backupFrequency": null,
+  "shortName": "RB"
+}

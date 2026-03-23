@@ -74,6 +74,7 @@ function AppContent() {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [newName, setNewName] = useState('');
+  const [labVisits, setLabVisits] = useState([]);
 
   // Check for standalone lab mode
   const params = new URLSearchParams(window.location.search);
@@ -107,7 +108,16 @@ function AppContent() {
 
   useEffect(() => { if (!standaloneLabId) loadLabs(); }, [loadLabs, standaloneLabId]);
   useEffect(() => {
-    if (selectedLab) { setEditName(selectedLab.name || ''); setEditDescription(selectedLab.description || ''); }
+    if (selectedLab) {
+      setEditName(selectedLab.name || '');
+      setEditDescription(selectedLab.description || '');
+      // Load visits for selected lab
+      fetchJSON(`/api/v1/labs/${selectedLab.id}/visits`)
+        .then((data) => setLabVisits(data?.items || []))
+        .catch(() => setLabVisits([]));
+    } else {
+      setLabVisits([]);
+    }
   }, [selectedLab]);
   useEffect(() => {
     if (!standaloneLabId) fetchJSON('/api/v1/users').then((data) => setUsers(data?.items || [])).catch(() => setUsers([]));
@@ -428,7 +438,9 @@ function AppContent() {
                     {tab === 'mine' ? 'No labs yet. Create one above.' : 'No shared labs.'}
                   </div>
                 )}
-                {currentList.map((lab) => (
+                {currentList.map((lab) => {
+                  const isRecent = lab.stats?.lastModified && (Date.now() - new Date(lab.stats.lastModified).getTime()) < 24 * 60 * 60 * 1000;
+                  return (
                   <div
                     key={lab.id}
                     onClick={() => tab === 'mine' && setSelectedLab(lab)}
@@ -442,7 +454,10 @@ function AppContent() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{lab.name}</span>
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>
+                        {isRecent && <span title="Modified in last 24h" style={{ marginRight: 4 }}>🔥</span>}
+                        {lab.name}
+                      </span>
                       {lab.description && tab === 'shared' && (
                         <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lab.description}</span>
                       )}
@@ -472,8 +487,28 @@ function AppContent() {
                         &lt;{lab.shortName}&gt;
                       </div>
                     )}
+                    {lab.stats && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                        {lab.stats.lastModified && (
+                          <span style={{ fontSize: 11, color: '#6b7280' }} title="Last script update">
+                            📝 {new Date(lab.stats.lastModified).toLocaleDateString()} {new Date(lab.stats.lastModified).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: '#6b7280' }} title="Script files">
+                          📁 {lab.stats.fileCount}
+                        </span>
+                        {lab.stats.loc && (lab.stats.loc.python > 0 || lab.stats.loc.js > 0 || lab.stats.loc.r > 0) && (
+                          <span style={{ fontSize: 11, color: '#6b7280' }} title="Lines of code">
+                            {lab.stats.loc.python > 0 && <span style={{ color: '#3572A5', marginRight: 4 }}>🐍 {lab.stats.loc.python}</span>}
+                            {lab.stats.loc.js > 0 && <span style={{ color: '#f1e05a', background: '#1e1e1e', borderRadius: 3, padding: '0 3px', marginRight: 4 }}>JS {lab.stats.loc.js}</span>}
+                            {lab.stats.loc.r > 0 && <span style={{ color: '#198CE7', marginRight: 4 }}>R {lab.stats.loc.r}</span>}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -513,6 +548,44 @@ function AppContent() {
                           })}
                           {users.filter((u) => String(u.id) !== String(user?.id)).length === 0 && (
                             <div style={{ padding: 12, color: '#9ca3af', fontSize: 13 }}>No other users.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Script Statistics */}
+                      {selectedLab.stats && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>Script Statistics</div>
+                        <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 10, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div>📁 Files: <strong>{selectedLab.stats.fileCount}</strong></div>
+                          {selectedLab.stats.lastModified && (
+                            <div>📝 Last updated: <strong>{new Date(selectedLab.stats.lastModified).toLocaleString()}</strong></div>
+                          )}
+                          {selectedLab.stats.loc && (selectedLab.stats.loc.python > 0 || selectedLab.stats.loc.js > 0 || selectedLab.stats.loc.r > 0) && (
+                            <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
+                              <span>Lines of code:</span>
+                              {selectedLab.stats.loc.python > 0 && <span style={{ color: '#3572A5' }}>🐍 Python: <strong>{selectedLab.stats.loc.python}</strong></span>}
+                              {selectedLab.stats.loc.js > 0 && <span style={{ color: '#b08800' }}>JS: <strong>{selectedLab.stats.loc.js}</strong></span>}
+                              {selectedLab.stats.loc.r > 0 && <span style={{ color: '#198CE7' }}>R: <strong>{selectedLab.stats.loc.r}</strong></span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      )}
+
+                      {/* Recent Visits */}
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>Recent Visits</div>
+                        <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto', maxHeight: 180 }}>
+                          {labVisits.length === 0 ? (
+                            <div style={{ padding: 12, color: '#9ca3af', fontSize: 13 }}>No visits recorded yet.</div>
+                          ) : (
+                            labVisits.slice(0, 20).map((v, i) => (
+                              <div key={i} style={{ padding: '5px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ color: '#374151' }}>{v.firstName} {v.lastName}</span>
+                                <span style={{ color: '#9ca3af' }}>{new Date(v.at).toLocaleString()}</span>
+                              </div>
+                            ))
                           )}
                         </div>
                       </div>

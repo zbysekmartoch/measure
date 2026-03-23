@@ -1,3 +1,5 @@
 backend/backups/
 .venv/
 node_modules/
+*.kate-swp
+co dal.txt

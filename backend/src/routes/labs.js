@@ -97,6 +97,89 @@ function hasAccess(lab, userId) {
   return isOwner(lab, userId) || isShared(lab, userId);
 }
 
+// ─── Script Stats Helpers ─────────────────────────────────────────────────────
+
+const LOC_EXTENSIONS = { '.py': 'python', '.js': 'js', '.cjs': 'js', '.r': 'r' };
+
+/** Walk a directory recursively and collect file stats. */
+async function walkDir(dirPath) {
+  const files = [];
+  let entries;
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules') continue;
+      files.push(...await walkDir(fullPath));
+    } else if (entry.isFile()) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+/** Compute script statistics for a lab. */
+async function computeScriptStats(labId) {
+  const scriptsDir = path.join(getLabPath(labId), 'scripts');
+  const files = await walkDir(scriptsDir);
+  let lastModified = null;
+  const loc = { python: 0, js: 0, r: 0 };
+
+  await Promise.all(files.map(async (filePath) => {
+    try {
+      const stat = await fs.stat(filePath);
+      if (!lastModified || stat.mtimeMs > lastModified) {
+        lastModified = stat.mtimeMs;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const lang = LOC_EXTENSIONS[ext];
+      if (lang) {
+        const content = await fs.readFile(filePath, 'utf-8');
+        loc[lang] += content.split('\n').filter(line => line.trim().length > 0).length;
+      }
+    } catch { /* skip unreadable files */ }
+  }));
+
+  return {
+    fileCount: files.length,
+    lastModified: lastModified ? new Date(lastModified).toISOString() : null,
+    loc,
+  };
+}
+
+// ─── Visit Logging Helpers ────────────────────────────────────────────────────
+
+const MAX_VISITS = 100; // keep last N visits per lab
+
+async function readVisits(labId) {
+  const visitsPath = path.join(getLabPath(labId), 'visits.json');
+  try {
+    const raw = await fs.readFile(visitsPath, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+async function recordVisit(labId, userInfo) {
+  const visits = await readVisits(labId);
+  visits.unshift({
+    userId: userInfo.id,
+    email: userInfo.email,
+    firstName: userInfo.firstName,
+    lastName: userInfo.lastName,
+    at: new Date().toISOString(),
+  });
+  // Keep only the last MAX_VISITS entries
+  if (visits.length > MAX_VISITS) visits.length = MAX_VISITS;
+  const visitsPath = path.join(getLabPath(labId), 'visits.json');
+  await fs.writeFile(visitsPath, JSON.stringify(visits, null, 2), 'utf-8');
+}
+
 // Load all labs from disk (invalid folders are ignored).
 async function loadAllLabs() {
   await ensureLabsRoot();
@@ -128,22 +211,38 @@ async function getNextId() {
   return String(max + 1);
 }
 
-// List labs owned by the current user.
+// List labs owned by the current user (includes script stats).
 router.get('/', async (req, res, next) => {
   try {
     const labs = await loadAllLabs();
-    const items = labs.filter(lab => isOwner(lab, req.userId));
+    const owned = labs.filter(lab => isOwner(lab, req.userId));
+    const items = await Promise.all(owned.map(async (lab) => {
+      try {
+        const stats = await computeScriptStats(lab.id);
+        return { ...lab, stats };
+      } catch {
+        return { ...lab, stats: null };
+      }
+    }));
     res.json({ items });
   } catch (e) {
     next(e);
   }
 });
 
-// List labs shared with the current user.
+// List labs shared with the current user (includes script stats).
 router.get('/shared', async (req, res, next) => {
   try {
     const labs = await loadAllLabs();
-    const items = labs.filter(lab => isShared(lab, req.userId));
+    const shared = labs.filter(lab => isShared(lab, req.userId));
+    const items = await Promise.all(shared.map(async (lab) => {
+      try {
+        const stats = await computeScriptStats(lab.id);
+        return { ...lab, stats };
+      } catch {
+        return { ...lab, stats: null };
+      }
+    }));
     res.json({ items });
   } catch (e) {
     next(e);
@@ -243,7 +342,7 @@ router.post('/:id/clone', async (req, res, next) => {
   }
 });
 
-// Fetch lab metadata (owner/shared access).
+// Fetch lab metadata (owner/shared access). Also records a visit.
 router.get('/:id', async (req, res, next) => {
   try {
     const labPath = getLabPath(req.params.id);
@@ -253,7 +352,47 @@ router.get('/:id', async (req, res, next) => {
     }
     // Ensure current_output directory exists
     await fs.mkdir(getLabCurrentOutputRoot(req.params.id), { recursive: true });
+    // Record visit (best-effort, non-blocking)
+    try {
+      const userRows = await query('SELECT id, first_name, last_name, email FROM usr WHERE id = ?', [req.userId]);
+      if (userRows.length > 0) {
+        const u = userRows[0];
+        await recordVisit(req.params.id, { id: u.id, email: u.email, firstName: u.first_name, lastName: u.last_name });
+      }
+    } catch { /* visit logging is best-effort */ }
     res.json(lab);
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
+    next(e);
+  }
+});
+
+// Get visit log for a lab (owner only).
+router.get('/:id/visits', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!isOwner(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const visits = await readVisits(req.params.id);
+    res.json({ items: visits });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
+    next(e);
+  }
+});
+
+// Get script stats for a single lab.
+router.get('/:id/stats', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const stats = await computeScriptStats(req.params.id);
+    res.json(stats);
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
     next(e);

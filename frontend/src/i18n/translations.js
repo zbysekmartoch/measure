@@ -115,6 +115,8 @@ const en = {
   refresh: 'Refresh',
   hidePreview: 'Hide',
   showPreview: 'Preview',
+  compactButtonsOn: 'Buttons on hover only',
+  compactButtonsOff: 'Always show buttons',
   errorLoadingFiles: 'Error loading files',
   errorLoadingFileContent: 'Error loading file content',
   fileSaved: 'File saved',
@@ -192,6 +194,12 @@ const en = {
 
   // Login form
   loggingIn: 'Logging in...',
+
+  // Sync
+  createSyncConfig: 'Create sync config',
+  syncConfigCreated: 'Sync config created. Download sync.json to your PC.',
+  errorCreatingSyncConfig: 'Error creating sync config',
+  filesChanged: 'Files changed',
 
   // Labs
   unsavedChangesConfirm: 'has unsaved changes. Do you want to save them?',

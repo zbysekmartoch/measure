@@ -10,6 +10,7 @@ import auth from './auth.js';
 import sql from './sql.js';
 import labs from './labs.js';
 import users from './users.js';
+import sync from './sync.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { getSecurePath, copyRecursive } from '../utils/file-manager.js';
 import debugRoutes from '../debug/debug-routes.js';
@@ -84,6 +85,7 @@ router.get('/health', async (req, res) => {
 router.use('/v1/auth', auth);
 
 // All other v1 routes require authentication
+router.use('/v1/labs/:id/sync', authenticateToken, sync);
 router.use('/v1/sql', authenticateToken, sql);
 router.use('/v1/labs', authenticateToken, labs);
 router.use('/v1/users', authenticateToken, users);

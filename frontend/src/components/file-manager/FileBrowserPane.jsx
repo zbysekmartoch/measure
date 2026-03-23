@@ -9,8 +9,9 @@
  *   - Copy / Paste buttons on files and folders (cross-instance via ClipboardContext)
  *   - Drag-and-drop upload into any folder
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useLanguage } from '../../context/LanguageContext';
+import { useSettings } from '../../context/SettingsContext';
 import { formatFileSize, fileIcon } from './fileUtils.js';
 import { useFileClipboard } from './ClipboardContext.jsx';
 import { shadow, fileBrowserButtons as fbBtn, fileItemButtons as fiBtn } from '../../lib/uiConfig.js';
@@ -46,10 +47,12 @@ function FolderNode({
   onDrop, onDragOver, onDragLeave,
   onCopyFile, onCopyFolder, onPasteInto, clipboard, apiBasePath,
   onDebugWorkflow, onRename, changedFiles,
-  onPublish,
+  onPublish, onCreateSync,
   isRoot,
   specialFolders,
+  compactButtons,
 }) {
+  const [hovered, setHovered] = useState(false);
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
   const indent = depth * 16;
   const isSpecial = !isRoot && specialFolders?.some(sf => sf.toLowerCase() === node.name.toLowerCase());
@@ -83,8 +86,8 @@ function FolderNode({
           transition: 'background 0.1s',
         }}
         onClick={() => onToggleFolder(node.path)}
-        onMouseEnter={(e) => { if (dragOverFolder !== node.path) e.currentTarget.style.background = isSpecial ? '#ede9fe' : '#f0f4ff'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = dragOverFolder === node.path ? '#dbeafe' : isSpecial ? '#f5f3ff' : (depth === 0 ? '#f9fafb' : 'transparent'); }}
+        onMouseEnter={(e) => { setHovered(true); if (dragOverFolder !== node.path) e.currentTarget.style.background = isSpecial ? '#ede9fe' : '#f0f4ff'; }}
+        onMouseLeave={(e) => { setHovered(false); e.currentTarget.style.background = dragOverFolder === node.path ? '#dbeafe' : isSpecial ? '#f5f3ff' : (depth === 0 ? '#f9fafb' : 'transparent'); }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: isSpecial ? '#7c3aed' : '#374151', minWidth: 0 }}>
           <span style={{ display: 'inline-block', transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>▶</span>
@@ -95,7 +98,7 @@ function FolderNode({
             {countFiles(node)}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        <div style={{ alignItems: 'center', gap: 2, flexShrink: 0, display: compactButtons && !hovered ? 'none' : 'flex' }}>
           {dragOverFolder === node.path && showUpload && (
             <span style={{ color: '#3b82f6', fontSize: 10 }}>⬆</span>
           )}
@@ -141,6 +144,9 @@ function FolderNode({
           {onPublish && !isRoot && (
             <IBtn title="Publish to current output" onClick={() => onPublish(node.path)} bg="#7c3aed" disabled={loading}>📤</IBtn>
           )}
+          {onCreateSync && !isRoot && (
+            <IBtn title={fiBtn.createSync.label} onClick={() => onCreateSync(node.path)} bg={fiBtn.createSync.bg} disabled={loading}>{fiBtn.createSync.icon}</IBtn>
+          )}
         </div>
       </div>
 
@@ -183,7 +189,9 @@ function FolderNode({
             onRename={onRename}
             changedFiles={changedFiles}
             onPublish={onPublish}
+            onCreateSync={onCreateSync}
             specialFolders={specialFolders}
+            compactButtons={compactButtons}
           />
         ) : (
           <FileRow
@@ -199,6 +207,7 @@ function FolderNode({
             onRename={onRename}
             isChanged={changedFiles?.has(child.path)}
             onPublish={onPublish}
+            compactButtons={compactButtons}
           />
         ),
       )}
@@ -207,7 +216,8 @@ function FolderNode({
 }
 
 /* ── file row ───────────────────────────────────────────────────────────────── */
-function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged, onPublish }) {
+function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged, onPublish, compactButtons }) {
+  const [hovered, setHovered] = useState(false);
   const indent = depth * 16 + 12;
   const isWorkflow = file.name?.endsWith('.workflow');
   const changedBg = '#fef9c3';  // light yellow for changed files
@@ -225,8 +235,8 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
       }}
       onClick={() => onClick(file)}
       onDoubleClick={() => onDoubleClick?.(file)}
-      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = isChanged ? '#fef08a' : '#f5f7fa'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = baseBg; }}
+      onMouseEnter={(e) => { setHovered(true); if (!isSelected) e.currentTarget.style.background = isChanged ? '#fef08a' : '#f5f7fa'; }}
+      onMouseLeave={(e) => { setHovered(false); e.currentTarget.style.background = baseBg; }}
     >
       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span>{fileIcon(file.name)}</span>
@@ -235,7 +245,7 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
           <span style={{ fontSize: 9, color: '#9ca3af', flexShrink: 0 }}>{formatFileSize(file.size)}</span>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+      <div style={{  gap: 2, flexShrink: 0, display: compactButtons && !hovered ? 'none' : 'flex' }}>
         {onDoubleClick && (
           <IBtn title={fiBtn.openInTab.label} onClick={(e) => { e.stopPropagation(); onDoubleClick(file); }} bg={fiBtn.openInTab.bg}>{fiBtn.openInTab.icon}</IBtn>
         )}
@@ -298,7 +308,31 @@ export default function FileBrowserPane({
   overrideWidth,
 }) {
   const { t } = useLanguage();
+  const { compactButtons, setCompactButtons } = useSettings();
   const { clipboard, copyFile, copyFolder, refreshFromServer } = useFileClipboard();
+
+  // Create sync config for a folder (only for scripts-based file managers)
+  const handleCreateSync = useCallback(async (folderPath) => {
+    const labMatch = apiBasePath.match(/\/labs\/([^/]+)\/scripts/);
+    if (!labMatch) return;
+    const labId = labMatch[1];
+    const serverUrl = window.location.origin;
+    try {
+      const r = await fetch(`/api/v1/labs/${encodeURIComponent(labId)}/sync/create-config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`,
+        },
+        body: JSON.stringify({ folder: folderPath, serverUrl }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (typeof onRefresh === 'function') onRefresh();
+      alert(t('syncConfigCreated') || 'Sync config created. Download sync.json to your PC.');
+    } catch {
+      alert(t('errorCreatingSyncConfig') || 'Error creating sync config');
+    }
+  }, [apiBasePath, t, onRefresh]);
 
   const handleCopyFile = useCallback((filePath) => {
     copyFile(filePath, apiBasePath);
@@ -357,6 +391,15 @@ export default function FileBrowserPane({
           {title || t('files') || 'Files'}
         </h3>
         <div style={{ display: 'flex', gap: 3 }}>
+          <IBtn
+            title={compactButtons ? (t('compactButtonsOn') || 'Buttons on hover only') : (t('compactButtonsOff') || 'Always show buttons')}
+            onClick={() => setCompactButtons(v => !v)}
+            bg={'transparent'}
+            style={{
+                color: compactButtons ?  '#000000':'#5f5f5f'
+            }}
+                
+          >👁</IBtn>
           <IBtn title={t('refresh') || fbBtn.refresh.label} onClick={onRefresh} bg={fbBtn.refresh.bg} disabled={loading}>{fbBtn.refresh.icon}</IBtn>
           <IBtn
             title={showPreview ? (t('hidePreview') || fbBtn.previewHide.label) : (t('showPreview') || fbBtn.preview.label)}
@@ -406,8 +449,10 @@ export default function FileBrowserPane({
         onRename={onRename}
         changedFiles={changedFiles}
         onPublish={onPublish}
+        onCreateSync={apiBasePath.includes('/scripts') ? handleCreateSync : undefined}
         specialFolders={specialFolders}
         isRoot
+        compactButtons={compactButtons}
       />
 
       {files.length === 0 && !loading && (

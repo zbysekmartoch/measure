@@ -75,6 +75,8 @@ export const formatModifiedDate = (dateStr) => {
 /** Pick icon for a file based on its extension (configurable via uiConfig.fileIcons) */
 export const fileIcon = (filename) => {
   if (!filename) return fileIcons._default || '📦';
+  // Special named files
+  if (filename === 'sync.json') return fileIcons.sync || '🔄';
   const ext = filename.split('.').pop()?.toLowerCase();
   // Check explicit extension mapping first
   if (ext && fileIcons[ext]) return fileIcons[ext];

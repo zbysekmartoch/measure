@@ -48,14 +48,16 @@ export default function useFileManager({
   // Track file modification times for change detection
   const prevMtimesRef = useRef(new Map());
   const [changedFiles, setChangedFiles] = useState(new Set());
+  // Counter incremented each time the preview is auto-refreshed (drives flash animation)
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
 
   // flat file list (derived from tree)
   const files = useMemo(() => extractFiles(tree), [tree]);
 
   // ---- load files (keeps tree) ----
-  const loadFiles = useCallback(async () => {
+  const loadFiles = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await fetchJSON(apiBasePath);
       const newItems = data.items || [];
       setTree(newItems);
@@ -93,11 +95,17 @@ export default function useFileManager({
     } catch {
       setTree([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [apiBasePath]);
 
   useEffect(() => { loadFiles(); }, [loadFiles, refreshTrigger]);
+
+  // Auto-poll file list every 5 seconds to detect external changes (sync agent, scripts, etc.)
+  useEffect(() => {
+    const id = setInterval(() => { loadFiles(true); }, 5000);
+    return () => clearInterval(id);
+  }, [loadFiles]);
 
   // Cleanup PDF/image blob on unmount
   useEffect(() => () => {
@@ -180,18 +188,43 @@ export default function useFileManager({
     } finally { setLoading(false); }
   }, [apiBasePath, t, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
 
-  // Auto-reload selected file content when it was modified externally (e.g. after workflow)
+  // Auto-reload selected file content when it was modified externally (e.g. after workflow, sync agent)
   useEffect(() => {
-    if (!selectedFile || !selectedFileInfo) return;
     if (changedFiles.size === 0) return;
+
+    // Show toast for all changed files
+    const names = [...changedFiles].map(p => p.split('/').pop());
+    const label = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
+    toast.success(`${t('filesChanged') || 'Files changed'}: ${label}`);
+
+    // Update selectedFileInfo (mtime, size) from the fresh tree
+    if (selectedFile && selectedFileInfo && changedFiles.has(selectedFile)) {
+      const findInTree = (nodes, target) => {
+        for (const n of (nodes || [])) {
+          if (n.type === 'file' && n.path === target) return n;
+          if (n.type === 'directory' && n.children) {
+            const found = findInTree(n.children, target);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      const updated = findInTree(tree, selectedFile);
+      if (updated) setSelectedFileInfo(updated);
+    }
+
+    if (!selectedFile || !selectedFileInfo) return;
     if (!changedFiles.has(selectedFile)) return;
     if (isEditing) return; // don't overwrite user edits
 
-    // Re-fetch the file content
+    // Trigger preview flash animation
+    setPreviewRefreshKey(k => k + 1);
+
+    // Re-fetch the file content based on file type
+    const authHeaders = { Authorization: `Bearer ${localStorage.getItem('authToken')}` };
+
     if (isTextFile(selectedFile) || selectedFileInfo.isText) {
-      fetch(`${apiBasePath}/content?file=${encodeURIComponent(selectedFile)}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
-      })
+      fetch(`${apiBasePath}/content?file=${encodeURIComponent(selectedFile)}`, { headers: authHeaders })
         .then(r => { if (!r.ok) throw new Error(); return r.json(); })
         .then(data => {
           setFileContent(data.content || '');
@@ -199,13 +232,19 @@ export default function useFileManager({
         })
         .catch(() => { /* ignore */ });
     } else if (isImageFile(selectedFile)) {
-      fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
-      })
+      fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, { headers: authHeaders })
         .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
         .then(blob => {
           if (imageBlobUrl) URL.revokeObjectURL(imageBlobUrl);
           setImageBlobUrl(URL.createObjectURL(blob));
+        })
+        .catch(() => { /* ignore */ });
+    } else if (isPdfFile(selectedFile)) {
+      fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, { headers: authHeaders })
+        .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
+        .then(blob => {
+          if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+          setPdfBlobUrl(URL.createObjectURL(blob));
         })
         .catch(() => { /* ignore */ });
     }
@@ -508,7 +547,7 @@ export default function useFileManager({
 
   return {
     tree, files, loading, selectedFile, selectedFileInfo, fileContent, originalContent,
-    pdfBlobUrl, imageBlobUrl, isEditing, expandedFolders, changedFiles,
+    pdfBlobUrl, imageBlobUrl, isEditing, expandedFolders, changedFiles, previewRefreshKey,
     dragOverFolder, folderUploadRef, apiBasePath,
     loadFiles, loadFileContent, saveFileContent, deleteFile, downloadFile,
     createNewFile, createNewFolder, renameItem, deleteFolderRecursive, downloadFolderZip,

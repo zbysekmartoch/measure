@@ -163,6 +163,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
           readOnly={readOnly}
           editorTheme={editorTheme}
           showDelete={showDelete}
+          previewRefreshKey={fm.previewRefreshKey}
           onEdit={() => fm.setIsEditing(true)}
           onSave={fm.saveFileContent}
           onCancel={() => { fm.setIsEditing(false); fm.loadFileContent(fm.selectedFileInfo); }}
