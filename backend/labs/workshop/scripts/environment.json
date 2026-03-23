@@ -1,0 +1,12 @@
+{
+  "report": {
+    "doc": [
+      {
+        "template": "templates/templateA.docx",
+        "renderTo": "reports/zaverecna zprava.docx",
+        "data":"full_statistics.json",
+        "exportPDF":true
+      }
+    ]
+  }
+}

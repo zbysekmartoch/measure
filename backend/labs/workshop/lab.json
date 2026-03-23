@@ -1,0 +1,9 @@
+{
+  "id": "workshop",
+  "name": "workshop OHE 25.3.2026",
+  "description": "Cílem je zpracovat denní meteorologická data pro dvě města, provést jejich vyčištění, výpočet základních statistik, identifikaci extrémních dnů a export grafických i tabulkových výstupů pomocí sekvence navazujících Python skriptů.",
+  "ownerId": 2,
+  "sharedWith": [],
+  "createdAt": "2026-03-23T08:22:09.457Z",
+  "updatedAt": "2026-03-23T08:23:19.401Z"
+}
