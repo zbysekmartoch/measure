@@ -10,6 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@finos/perspective": "^3.8.0",
+    "@finos/perspective-viewer": "^3.8.0",
+    "@finos/perspective-viewer-d3fc": "^3.8.0",
+    "@finos/perspective-viewer-datagrid": "^3.8.0",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-table": "^8.21.3",
     "ag-grid-community": "^34.1.1",

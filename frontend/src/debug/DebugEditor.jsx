@@ -15,10 +15,10 @@
  *   onChange         — (newContent: string) => void
  *   onToggleBreakpoint — (filePath: string, line: number) => void
  *   onEditorMount   — (editor, monaco) => void (optional)
+ *   onSave          — () => void (optional, Ctrl+S handler forwarded to CodeEditor)
  */
 import React, { useRef, useCallback, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
-import { monacoDefaults } from '../lib/uiConfig.js';
+import CodeEditor from '../components/CodeEditor.jsx';
 
 export default function DebugEditor({
   file,
@@ -27,6 +27,7 @@ export default function DebugEditor({
   stoppedLine = null,
   readOnly = false,
   onChange,
+  onSave,
   onToggleBreakpoint,
   onBreakpointsMoved,
   onEditorMount,
@@ -152,16 +153,15 @@ export default function DebugEditor({
   }, [file?.path, onToggleBreakpoint, updateDecorations, onEditorMount]);
 
   return (
-    <Editor
-      height="100%"
-      language={file?.language || 'plaintext'}
+    <CodeEditor
       value={file?.content || ''}
-      onChange={(val) => onChange?.(val || '')}
+      language={file?.language || 'plaintext'}
       theme={editorTheme}
+      readOnly={readOnly}
+      onChange={readOnly ? undefined : (val) => onChange?.(val || '')}
+      onSave={readOnly ? undefined : onSave}
       onMount={handleMount}
       options={{
-        ...monacoDefaults,
-        readOnly,
         glyphMargin: true,
         lineNumbersMinChars: 3,
       }}

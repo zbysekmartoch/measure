@@ -289,3 +289,35 @@ export const fileIcons = {
   _default: '📦',
   _folder:  '📁',
 };
+
+// ─── File locking UI ────────────────────────────────────────────────────────
+
+export const fileLocking = {
+  /** Icon shown next to file name when YOU hold the lock (exclusive editing) */
+  crownIcon: '👑',
+  /** Icon shown in file browser when someone ELSE holds the lock */
+  lockIcon: '🔒',
+  /** Icon for readonly files (path/name contains "readonly") */
+  readonlyIcon: '🚫',
+  /** Background color for the lock owner banner in preview pane */
+  ownerBannerBg: '#fef3c7',
+  ownerBannerBorder: '#f59e0b',
+  ownerBannerColor: '#92400e',
+  /** Background color for other-user-locked banner in preview pane */
+  lockedBannerBg: '#fee2e2',
+  lockedBannerBorder: '#ef4444',
+  lockedBannerColor: '#991b1b',
+  /** Release / unlock button */
+  releaseBtn: { bg: '#f59e0b', hoverBg: '#d97706', color: '#fff', icon: '🔓' },
+  /** Request lock button */
+  requestBtn: { bg: '#3b82f6', hoverBg: '#2563eb', color: '#fff', icon: '🙋' },
+  /** Lock request notification badge */
+  requestBadgeBg: '#ef4444',
+  requestBadgeColor: '#fff',
+  /** Readonly file row tint */
+  readonlyBg: '#f3f4f6',
+  readonlyColor: '#9ca3af',
+  /** Locked-by-other file row tint in browser */
+  lockedRowBg: '#fef2f2',
+  lockedRowBorder: '#fca5a5',
+};

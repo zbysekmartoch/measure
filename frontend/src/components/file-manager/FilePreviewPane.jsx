@@ -4,16 +4,15 @@
  * then the actual preview (Monaco editor, image, PDF, or binary placeholder).
  */
 import React, { useMemo, useState, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeRaw from 'rehype-raw';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { useLanguage } from '../../context/LanguageContext';
+import CodeEditor from '../CodeEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate } from './fileUtils.js';
-import { filePreviewButtons as fpBtn, shadow, monacoDefaults } from '../../lib/uiConfig.js';
+import { filePreviewButtons as fpBtn, shadow, fileLocking as lockCfg } from '../../lib/uiConfig.js';
 
 export default function FilePreviewPane({
   selectedFile,
@@ -36,8 +35,14 @@ export default function FilePreviewPane({
   onOpenInNewWindow,
   onDownloadFile,
   onDeleteFile,
+  onAnalyze,
+  csvPreviewMaxRows,
+  // File locking
+  fileLocks,
+  isReadonlyFile,
+  onReleaseLock,
+  onRequestLock,
 }) {
-  const { t } = useLanguage();
 
   // Flash effect: set to true when previewRefreshKey changes, auto-clears after animation
   const [flash, setFlash] = useState(false);
@@ -50,10 +55,37 @@ export default function FilePreviewPane({
 
   const editorLanguage = useMemo(() => getLanguageFromFilename(selectedFile), [selectedFile]);
 
-  const editorOptions = useMemo(() => ({
-    ...monacoDefaults,
-    readOnly: readOnly || !isEditing,
-  }), [isEditing, readOnly]);
+  // Lock state for the current file
+  const lockInfo = fileLocks?.[selectedFile];
+  const isLockedByMe = lockInfo && lockInfo.isMe;
+  const isLockedByOther = lockInfo && !lockInfo.isMe;
+  const fileIsReadonly = isReadonlyFile?.(selectedFile);
+
+  const editorReadOnly = readOnly || !isEditing || fileIsReadonly || isLockedByOther;
+
+  // CSV/TSV preview truncation — only in read-only / non-editing mode
+  const isCsvLike = selectedFile && /\.(csv|tsv)$/i.test(selectedFile);
+  const { displayContent, totalRows, truncated } = useMemo(() => {
+    const maxRows = csvPreviewMaxRows;
+    if (!isCsvLike || !maxRows || isEditing || !fileContent) {
+      return { displayContent: fileContent, totalRows: 0, truncated: false };
+    }
+    const lines = fileContent.split('\n');
+    // Remove trailing empty line caused by trailing newline
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+      lines.pop();
+    }
+    const dataRows = lines.length - 1; // subtract header
+    const limit = maxRows + 1; // header + maxRows data lines
+    if (lines.length <= limit) {
+      return { displayContent: fileContent, totalRows: dataRows, truncated: false };
+    }
+    return {
+      displayContent: lines.slice(0, limit).join('\n'),
+      totalRows: dataRows,
+      truncated: true,
+    };
+  }, [fileContent, isCsvLike, csvPreviewMaxRows, isEditing]);
 
   const availableThemes = [
     { value: 'vs', label: 'Light' },
@@ -64,7 +96,7 @@ export default function FilePreviewPane({
   if (!selectedFile || !selectedFileInfo) {
     return (
       <section style={{ flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
-        {t('selectFileToView') || 'Select a file to view'}
+        {'Select a file to view'}
       </section>
     );
   }
@@ -75,12 +107,65 @@ export default function FilePreviewPane({
   const isMarkdown = selectedFile && /\.md$/i.test(selectedFile);
   const showMarkdownPreview = isMarkdown && !isEditing;
 
+  const canEdit = isText && !readOnly && !fileIsReadonly && !isLockedByOther;
+
   return (
     <section style={{
       flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, background: '#fff', display: 'flex', flexDirection: 'column',
       boxShadow: flash ? '0 0 0 3px #3b82f6, inset 0 0 12px rgba(59,130,246,0.15)' : 'none',
       transition: 'box-shadow 0.3s ease-out',
     }}>
+      {/* Lock status banners */}
+      {fileIsReadonly && (
+        <div style={{
+          padding: '6px 12px', marginBottom: 8, borderRadius: 6, fontSize: 12, fontWeight: 500,
+          background: lockCfg.readonlyBg, border: `1px solid ${lockCfg.readonlyColor}`, color: lockCfg.readonlyColor,
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          {lockCfg.readonlyIcon} This file is read-only and cannot be edited
+        </div>
+      )}
+      {isLockedByMe && isEditing && (
+        <div style={{
+          padding: '6px 12px', marginBottom: 8, borderRadius: 6, fontSize: 12, fontWeight: 500,
+          background: lockCfg.ownerBannerBg, border: `1px solid ${lockCfg.ownerBannerBorder}`, color: lockCfg.ownerBannerColor,
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span>{lockCfg.crownIcon}</span>
+          <span>You have exclusive editing access</span>
+          <button
+            onClick={() => { onReleaseLock?.(selectedFile); onCancel?.(); }}
+            style={{
+              marginLeft: 'auto', padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 11,
+              background: lockCfg.releaseBtn.bg, color: lockCfg.releaseBtn.color, boxShadow: shadow.small,
+            }}
+            title={'Release exclusive access'}
+          >
+            {lockCfg.releaseBtn.icon} Unlock
+          </button>
+        </div>
+      )}
+      {isLockedByOther && (
+        <div style={{
+          padding: '6px 12px', marginBottom: 8, borderRadius: 6, fontSize: 12, fontWeight: 500,
+          background: lockCfg.lockedBannerBg, border: `1px solid ${lockCfg.lockedBannerBorder}`, color: lockCfg.lockedBannerColor,
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span>{lockCfg.lockIcon}</span>
+          <span>Locked by {lockInfo.userName || lockInfo.userEmail || 'another user'}</span>
+          <button
+            onClick={() => onRequestLock?.(selectedFile)}
+            style={{
+              marginLeft: 'auto', padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 11,
+              background: lockCfg.requestBtn.bg, color: lockCfg.requestBtn.color, boxShadow: shadow.small,
+            }}
+            title={'Request exclusive access'}
+          >
+            {lockCfg.requestBtn.icon} Request access
+          </button>
+        </div>
+      )}
+
       {/* Toolbar: file name, meta, action buttons */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -99,7 +184,7 @@ export default function FilePreviewPane({
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {/* Edit / Save / Cancel */}
-          {isText && !readOnly && isEditing ? (
+          {canEdit && isEditing ? (
             <>
               <button
                 className="btn"
@@ -107,7 +192,7 @@ export default function FilePreviewPane({
                 disabled={loading}
                 style={{ padding: '4px 10px', background: fpBtn.save.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
               >
-                {fpBtn.save.icon} {t('save') || fpBtn.save.label}
+                {fpBtn.save.icon} {fpBtn.save.label}
               </button>
               <button
                 className="btn"
@@ -115,35 +200,45 @@ export default function FilePreviewPane({
                 disabled={loading}
                 style={{ padding: '4px 10px', background: fpBtn.cancel.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
               >
-                {fpBtn.cancel.icon} {t('cancel') || fpBtn.cancel.label}
+                {fpBtn.cancel.icon} {fpBtn.cancel.label}
               </button>
             </>
-          ) : isText && !readOnly ? (
+          ) : canEdit && !isEditing ? (
             <button
               className="btn"
               onClick={onEdit}
               disabled={loading}
               style={{ padding: '4px 10px', background: fpBtn.edit.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
             >
-              {fpBtn.edit.icon} {t('edit') || fpBtn.edit.label}
+              {fpBtn.edit.icon} {fpBtn.edit.label}
             </button>
           ) : null}
           {/* Download */}
           <button
             onClick={() => onDownloadFile(selectedFile)}
             style={{ padding: '4px 10px', background: fpBtn.download.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
-            title={t('download') || fpBtn.download.label}
+            title={fpBtn.download.label}
           >
-            {fpBtn.download.icon} {t('download') || fpBtn.download.label}
+            {fpBtn.download.icon} {fpBtn.download.label}
           </button>
+          {/* Analyze — CSV, JSON, TSV files only */}
+          {onAnalyze && /\.(csv|json|tsv)$/i.test(selectedFile) && (
+            <button
+              onClick={() => onAnalyze(selectedFile)}
+              style={{ padding: '4px 10px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+              title="Open in Data Explorer"
+            >
+              � Analyze
+            </button>
+          )}
           {/* Delete */}
           {showDelete && (
             <button
               onClick={() => onDeleteFile(selectedFile)}
               style={{ padding: '4px 10px', background: fpBtn.delete.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
-              title={t('delete') || fpBtn.delete.label}
+              title={fpBtn.delete.label}
             >
-              {fpBtn.delete.icon} {t('delete') || fpBtn.delete.label}
+              {fpBtn.delete.icon} {fpBtn.delete.label}
             </button>
           )}
         </div>
@@ -159,7 +254,7 @@ export default function FilePreviewPane({
               style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
             />
           ) : (
-            <div style={{ color: '#6b7280' }}>{t('loading') || 'Loading...'}</div>
+            <div style={{ color: '#6b7280' }}>Loading...</div>
           )}
         </div>
       ) : isPdf ? (
@@ -168,7 +263,7 @@ export default function FilePreviewPane({
             <embed src={pdfBlobUrl} type="application/pdf" style={{ flex: 1, width: '100%', minHeight: 400 }} />
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280' }}>
-              {t('loading') || 'Loading...'}
+              Loading...
             </div>
           )}
         </div>
@@ -220,9 +315,19 @@ export default function FilePreviewPane({
               <span style={{ background: 'rgba(59,130,246,0.2)', color: editorTheme === 'vs' ? '#1d4ed8' : '#60a5fa', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
                 {editorLanguage}
               </span>
-              {readOnly && (
+              {(readOnly || fileIsReadonly) && (
                 <span style={{ background: 'rgba(239,68,68,0.2)', color: '#dc2626', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
-                  {t('readOnly') || 'Read only'}
+                  Read only
+                </span>
+              )}
+              {isLockedByMe && isEditing && (
+                <span style={{ background: 'rgba(245,158,11,0.2)', color: '#92400e', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
+                  {lockCfg.crownIcon} Exclusive
+                </span>
+              )}
+              {isLockedByOther && (
+                <span style={{ background: 'rgba(239,68,68,0.2)', color: '#991b1b', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
+                  {lockCfg.lockIcon} {lockInfo.userName || lockInfo.userEmail || ''}
                 </span>
               )}
               <select
@@ -249,18 +354,26 @@ export default function FilePreviewPane({
               }}
               title="Open in new window"
             >
-              ↗ {t('newWindow') || 'New window'}
+              ↗ New window
             </button>
           </div>
+          {truncated && (
+            <div style={{
+              padding: '4px 10px', background: '#fef3c7', color: '#92400e', fontSize: 12,
+              borderBottom: `1px solid ${editorTheme === 'vs' ? '#e5e7eb' : '#333'}`,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              ⚠️ Showing {csvPreviewMaxRows} of {totalRows} rows. Use <strong>🔍 Analyze</strong> for full data.
+            </div>
+          )}
           <div style={{ flex: 1 }}>
-            <Editor
-              height="100%"
+            <CodeEditor
+              value={truncated ? displayContent : fileContent}
               language={editorLanguage}
-              value={fileContent}
-              onChange={(value) => onContentChange(value || '')}
-              options={editorOptions}
               theme={editorTheme}
-              loading={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>{t('loading') || 'Loading editor...'}</div>}
+              readOnly={editorReadOnly}
+              onChange={editorReadOnly ? undefined : (value) => onContentChange(value || '')}
+              onSave={isEditing ? onSave : undefined}
             />
           </div>
         </div>
@@ -269,9 +382,9 @@ export default function FilePreviewPane({
         /* Binary file */
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6b7280', gap: 16 }}>
           <div style={{ fontSize: 64 }}>📦</div>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>{t('binaryFile') || 'Binary file'}</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>Binary file</div>
           <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 400 }}>
-            {t('binaryFileDescription') || 'This file is binary and cannot be displayed. You can download or delete it.'}
+            This file is binary and cannot be displayed. You can download or delete it.
           </div>
         </div>
       )}

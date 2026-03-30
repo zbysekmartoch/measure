@@ -10,13 +10,14 @@
  * Lab workspace tabs are promoted to the top-level tab bar.
  * Standalone mode (?lab=<id>&standalone=1) renders only the lab workspace.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { SettingsProvider } from './context/SettingsContext';
 import AuthPage from './components/AuthPage';
 import { ToastProvider, useToast } from './components/Toast';
 import { FileClipboardProvider } from './components/file-manager/ClipboardContext.jsx';
+import LockRequestNotifications from './components/file-manager/LockRequestNotifications.jsx';
 import SettingsTab from './tabs/SettingsTab';
 import LabWorkspaceTab from './tabs/LabWorkspaceTab.jsx';
 import { fetchJSON } from './lib/fetchJSON.js';
@@ -75,6 +76,50 @@ function AppContent() {
   const [editDescription, setEditDescription] = useState('');
   const [newName, setNewName] = useState('');
   const [labVisits, setLabVisits] = useState([]);
+
+  // ── Global lock request notifications ─────────────────────────────────────
+  const [globalLockRequests, setGlobalLockRequests] = useState([]);
+  const lockPollRef = useRef(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const poll = async () => {
+      try {
+        const data = await fetchJSON('/api/v1/locks/requests');
+        setGlobalLockRequests(data?.requests || []);
+      } catch { /* ignore */ }
+    };
+    poll();
+    lockPollRef.current = setInterval(poll, 3000);
+    return () => { if (lockPollRef.current) clearInterval(lockPollRef.current); };
+  }, [user?.id]);
+
+  const handleLockRelease = useCallback(async (req) => {
+    try {
+      await fetch('/api/v1/locks/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath: req.apiBasePath, file: req.filePath }),
+      });
+    } catch { /* ignore */ }
+    try {
+      await fetch(`/api/v1/locks/requests/${req.id}/dismiss`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+    } catch { /* ignore */ }
+    setGlobalLockRequests((prev) => prev.filter((r) => r.id !== req.id));
+  }, []);
+
+  const handleLockDismiss = useCallback(async (req) => {
+    try {
+      await fetch(`/api/v1/locks/requests/${req.id}/dismiss`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+    } catch { /* ignore */ }
+    setGlobalLockRequests((prev) => prev.filter((r) => r.id !== req.id));
+  }, []);
 
   // Check for standalone lab mode
   const params = new URLSearchParams(window.location.search);
@@ -272,6 +317,12 @@ function AppContent() {
 
   return (
     <div style={{ height: '100vh', width: '100vw', boxSizing: 'border-box', padding: 12, background: '#fff' }}>
+      {/* Global lock request notifications */}
+      <LockRequestNotifications
+        lockRequests={globalLockRequests}
+        onRelease={handleLockRelease}
+        onDismiss={handleLockDismiss}
+      />
       {/* Header with app title, health info, and user controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <img
@@ -294,8 +345,38 @@ function AppContent() {
           )}        
         
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>{t('loggedInAs')} {user.firstName} {user.lastName}</span>
+            {openLabs.length > 0 && (
+              <button
+                className="btn"
+                title="Save all open files and release all file locks"
+                style={{background: '#059669', color: '#fff', cursor: 'pointer' }}
+                onClick={async () => {
+                  // Release all my locks for each open lab
+                  const token = localStorage.getItem('authToken');
+                  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+                  const released = [];
+                  for (const lab of openLabs) {
+                    for (const sub of ['scripts', 'results']) {
+                      try {
+                        const r = await fetch('/api/v1/locks/release-all-mine', {
+                          method: 'POST', headers,
+                          body: JSON.stringify({ apiBasePath: `/api/v1/labs/${lab.id}/${sub}` }),
+                        });
+                        const data = await r.json();
+                        if (data.released?.length) released.push(...data.released);
+                      } catch { /* ignore */ }
+                    }
+                  }
+                  toast.success(released.length > 0
+                    ? `Unlocked ${released.length} file${released.length > 1 ? 's' : ''}`
+                    : 'No locks to release');
+                }}
+              >
+                Save All &amp; Unlock
+              </button>
+            )}
             <button
               className="btn btn-logout"
               onClick={logout}

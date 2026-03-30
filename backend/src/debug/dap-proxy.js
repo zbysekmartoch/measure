@@ -12,7 +12,22 @@
 
 import { WebSocketServer } from 'ws';
 import net from 'net';
-import { getDebugStatus } from './debug-engine.js';
+import { getDebugStatus, setDebugRunning } from './debug-engine.js';
+
+/** Track active WS connections so we can close them on new debug session */
+const activeConnections = new Set();
+
+/**
+ * Close all active DAP proxy connections.
+ * Called before starting a new debug session to prevent stale connections.
+ */
+export function closeAllDapConnections() {
+  for (const ws of activeConnections) {
+    try { ws.close(4002, 'New debug session starting'); } catch { /* ignore */ }
+  }
+  activeConnections.clear();
+  console.log('[dap-proxy] All existing DAP connections closed');
+}
 
 /**
  * Attach the DAP proxy WebSocket server to an existing HTTP server.
@@ -47,8 +62,13 @@ export function attachDapProxy(server) {
 
     const tcp = net.createConnection({ host: '127.0.0.1', port: targetPort });
 
+    // Track this connection
+    activeConnections.add(ws);
+
     tcp.on('connect', () => {
       console.log(`[dap-proxy] TCP connected to debugpy on port ${targetPort}`);
+      // Transition debug state to 'running' now that a DAP client has connected
+      setDebugRunning();
     });
 
     // WS → TCP
@@ -69,6 +89,7 @@ export function attachDapProxy(server) {
     // Clean shutdown
     ws.on('close', (code, reason) => {
       console.log(`[dap-proxy] WS closed code=${code} reason=${reason}`);
+      activeConnections.delete(ws);
       tcp.destroy();
     });
 

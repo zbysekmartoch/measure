@@ -30,7 +30,7 @@ const router = Router({ mergeParams: true });
  *   event: workflow-failed  — { failedStep, error, totalDurationMs }
  *   event: workflow-aborted — {}
  */
-router.get('/events', (req, res) => {
+router.get('/events', async (req, res) => {
   const { labId, resultId } = req.params;
 
   res.writeHead(200, {
@@ -40,10 +40,18 @@ router.get('/events', (req, res) => {
   });
   res.flushHeaders();
 
-  const run = getWorkflowRun(labId, resultId);
+  // The workflow run may still be registering (race between SSE connect and
+  // the HTTP POST that starts the workflow). Wait briefly if no run yet.
+  let run = getWorkflowRun(labId, resultId);
+  if (!run) {
+    for (let i = 0; i < 20 && !run; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      run = getWorkflowRun(labId, resultId);
+    }
+  }
 
   if (!run) {
-    // No active run — send an empty state and close
+    // Still no run after waiting — send an empty state and close
     res.write(`event: state\ndata: ${JSON.stringify({ status: 'idle', steps: [] })}\n\n`);
     res.end();
     return;

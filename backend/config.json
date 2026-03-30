@@ -44,5 +44,6 @@
     "defaultDepth": 0,
     "hiddenFilePrefixes": [".","_","node_modules"]
   },
-  "outputsFolderName": "Outputs"
+  "outputsFolderName": "Outputs",
+  "csvPreviewMaxRows": 100
 }

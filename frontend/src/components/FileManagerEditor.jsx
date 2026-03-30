@@ -13,10 +13,12 @@ export { useFileClipboard, FileClipboardProvider } from './file-manager/Clipboar
  * Composes FileBrowserPane + FilePreviewPane + useFileManager hook.
  */
 import React, { useCallback, useState, useRef } from 'react';
+import { useAuth } from '../context/AuthContext';
 import useFileManager from './file-manager/useFileManager.js';
 import FileBrowserPane from './file-manager/FileBrowserPane.jsx';
 import FilePreviewPane from './file-manager/FilePreviewPane.jsx';
 import { getLanguageFromFilename } from './file-manager/fileUtils.js';
+
 
 export default function FileManagerEditor({
   apiBasePath = '/api/v1/scripts',
@@ -31,7 +33,11 @@ export default function FileManagerEditor({
   refreshTrigger = 0,
   onPublish,
   specialFolders,
+  onAnalyze,
+  csvPreviewMaxRows,
+  labOwnerId,
 }) {
+  const { user } = useAuth();
   const [showPreview, setShowPreview] = useState(true);
   const [editorTheme, setEditorTheme] = useState(() => localStorage.getItem('monacoTheme') || 'vs-dark');
   const [splitterWidth, setSplitterWidth] = useState(380);
@@ -98,8 +104,49 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
     document.addEventListener('mouseup', onUp);
   }, [splitterWidth]);
 
+  // Handle edit with lock acquisition
+  const handleEdit = useCallback(async () => {
+    if (!fm.selectedFile) return;
+    if (fm.isReadonlyFile(fm.selectedFile)) return;
+    const locked = await fm.acquireFileLock(fm.selectedFile);
+    if (locked) {
+      fm.setIsEditing(true);
+    }
+  }, [fm]);
+
+  // Handle cancel — release lock and reload
+  const handleCancelEdit = useCallback(async () => {
+    if (fm.selectedFile) {
+      await fm.releaseFileLock(fm.selectedFile);
+    }
+    fm.setIsEditing(false);
+    fm.loadFileContent(fm.selectedFileInfo);
+  }, [fm]);
+
+  // Unlock a single file (own lock or lab-owner force)
+  const handleUnlockFile = useCallback(async (filePath) => {
+    await fm.releaseFileLock(filePath);
+    // If it was the currently-editing file, exit editing mode
+    if (fm.selectedFile === filePath && fm.isEditing) {
+      fm.setIsEditing(false);
+      fm.loadFileContent(fm.selectedFileInfo);
+    }
+  }, [fm]);
+
+  // Unlock all locked files in a folder (prefix match)
+  const handleUnlockFolder = useCallback(async (folderPath) => {
+    try {
+      await fetch('/api/v1/locks/release-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath, folder: folderPath }),
+      });
+      await fm.loadLocks();
+    } catch { /* ignore */ }
+  }, [apiBasePath, fm]);
+
   return (
-    <div ref={containerRef} style={{ height: '100%', display: 'flex' }}>
+    <div ref={containerRef} style={{ height: '100%', display: 'flex', position: 'relative' }}>
       <FileBrowserPane
         title={title}
         loading={fm.loading}
@@ -136,6 +183,13 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
         onPublish={onPublish}
         specialFolders={specialFolders}
         overrideWidth={showPreview ? splitterWidth : undefined}
+        fileLocks={fm.fileLocks}
+        isReadonlyFile={fm.isReadonlyFile}
+        onRequestLock={fm.requestFileLock}
+        onUnlockFile={handleUnlockFile}
+        onUnlockFolder={handleUnlockFolder}
+        labOwnerId={labOwnerId}
+        currentUserId={user?.id}
       />
 
       {showPreview && (
@@ -164,14 +218,20 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
           editorTheme={editorTheme}
           showDelete={showDelete}
           previewRefreshKey={fm.previewRefreshKey}
-          onEdit={() => fm.setIsEditing(true)}
+          onEdit={handleEdit}
           onSave={fm.saveFileContent}
-          onCancel={() => { fm.setIsEditing(false); fm.loadFileContent(fm.selectedFileInfo); }}
+          onCancel={handleCancelEdit}
           onContentChange={fm.setFileContent}
           onThemeChange={handleThemeChange}
           onOpenInNewWindow={openInNewWindow}
           onDownloadFile={fm.downloadFile}
           onDeleteFile={fm.deleteFile}
+          onAnalyze={onAnalyze}
+          csvPreviewMaxRows={csvPreviewMaxRows}
+          fileLocks={fm.fileLocks}
+          isReadonlyFile={fm.isReadonlyFile}
+          onReleaseLock={fm.releaseFileLock}
+          onRequestLock={fm.requestFileLock}
         />
       )}
     </div>

@@ -22,9 +22,9 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
-import Editor from '@monaco-editor/react';
+import CodeEditor from '../components/CodeEditor.jsx';
 import { appConfig } from '../lib/appConfig.js';
-import { shadow, resultButtons as rbtn, monacoReadOnly } from '../lib/uiConfig.js';
+import { shadow, resultButtons as rbtn } from '../lib/uiConfig.js';
 import ZoomableImage from '../components/ZoomableImage.jsx';
 import WorkflowProgressPane from '../components/WorkflowProgressPane.jsx';
 import { useWorkflowEvents } from '../hooks/useWorkflowEvents.js';
@@ -35,7 +35,7 @@ function getResultLabel(r) {
   return `#${r.id}`;
 }
 
-export default function LabResultsPane({ lab, debug, debugVisible = false, runDebugRef }) {
+export default function LabResultsPane({ lab, debug, debugVisible = false, runDebugRef, onAnalyze, appConfig, saveAllRef, onShowDebugPanel }) {
   const { t } = useLanguage();
   const { user } = useAuth();
   const toast = useToast();
@@ -49,6 +49,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
   const [showProgress, setShowProgress] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [sseKey, setSseKey] = useState(0); // bump to force SSE reconnection
+  const [preRunMessages, setPreRunMessages] = useState([]); // messages shown above workflow steps ("saved ...", "skipped ...")
 
   // ---- Open file tabs (sub-tabs within Results) ----
   const [activeSubTab, setActiveSubTab] = useState('browser');
@@ -57,8 +58,29 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
 
   const pollIntervalRef = useRef(null);
 
+  // Ref to access latest debug callbacks without causing effect re-runs
+  const debugActionsRef = useRef(null);
+  debugActionsRef.current = { attach: debug.attach, pollStatus: debug.pollStatus };
+
   // ---- Workflow SSE events (real-time progress) ----
-  const { workflowState } = useWorkflowEvents(lab.id, selectedResultId, showProgress || workflowRunning, sseKey);
+  const { workflowState: rawWorkflowState } = useWorkflowEvents(lab.id, selectedResultId, showProgress || workflowRunning, sseKey);
+
+  // Merge workflow state with frontend debug status for accurate step statuses
+  const workflowState = useMemo(() => {
+    if (!rawWorkflowState) return null;
+    if (!debugVisible && !rawWorkflowState.debugVisible) return rawWorkflowState;
+
+    // If the frontend debug session is stopped at a breakpoint, patch the current
+    // running/debug-waiting step to show debug-stopped
+    const debugStatus = debug.status;
+    const steps = rawWorkflowState.steps?.map(s => {
+      if ((s.status === 'running' || s.status === 'debug-waiting') && debugStatus === 'stopped') {
+        return { ...s, status: 'debug-stopped' };
+      }
+      return s;
+    });
+    return { ...rawWorkflowState, steps };
+  }, [rawWorkflowState, debug.status, debugVisible]);
 
   // Auto-show progress when workflow begins, auto-hide when done
   useEffect(() => {
@@ -77,33 +99,58 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     }
   }, [workflowState]);
 
-  // Auto-attach debugger when workflow enters debug-waiting state
+  // Auto-attach debugger when workflow enters debug-waiting state.
+  // Uses AbortController for cancellation and debugActionsRef to avoid
+  // depending on the whole `debug` object (which changes identity every render).
+  const attachAbortRef = useRef(null);
+
   useEffect(() => {
-    if (!workflowState || !debug || !debugVisible) return;
+    // Use workflowState.debugVisible (from backend) — NOT the prop debugVisible —
+    // so auto-attach works even when the debug panel hasn't been opened yet.
+    if (!workflowState || !workflowState.debugVisible) return;
     const waitingStep = workflowState.steps?.find(s => s.status === 'debug-waiting');
-    if (waitingStep && debug.status === 'idle') {
-      // Poll and attach
-      const doAttach = async () => {
-        const maxAttempts = 20;
-        const interval = 500;
-        let attached = false;
-        for (let attempt = 0; attempt < maxAttempts && !attached; attempt++) {
-          await new Promise(r => setTimeout(r, interval));
-          try {
-            const info = await debug.pollStatus();
-            if (info?.active && info?.status === 'waiting_for_client') {
-              await debug.attach();
-              attached = true;
-            }
-          } catch { /* retry */ }
+    if (!waitingStep) return;
+    // Allow re-attach from idle and ended states (ended = previous step finished)
+    if (debug.status !== 'idle' && debug.status !== 'ended') return;
+
+    // Cancel any previous in-flight auto-attach loop
+    if (attachAbortRef.current) attachAbortRef.current.abort();
+    const controller = new AbortController();
+    attachAbortRef.current = controller;
+
+    const doAttach = async () => {
+      console.log(`[LabResultsPane] Auto-attach: waiting step "${waitingStep.name}", debug.status="${debug.status}"`);
+      // Auto-show debug panel if it's hidden
+      if (onShowDebugPanel) onShowDebugPanel();
+
+      const maxAttempts = 30;
+      const interval = 500;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (controller.signal.aborted) return;
+        await new Promise(r => setTimeout(r, interval));
+        if (controller.signal.aborted) return;
+        try {
+          const info = await debugActionsRef.current.pollStatus();
+          console.log(`[LabResultsPane] Auto-attach attempt ${attempt + 1}: backend=${info?.status}`);
+          if (controller.signal.aborted) return;
+          if (info?.active && info?.status === 'waiting_for_client') {
+            await debugActionsRef.current.attach();
+            console.log('[LabResultsPane] Auto-attach successful');
+            return; // done
+          }
+        } catch (e) {
+          if (controller.signal.aborted) return;
+          console.warn(`[LabResultsPane] Auto-attach attempt ${attempt + 1} error:`, e.message);
         }
-        if (!attached) {
-          console.warn('[LabResultsPane] Could not auto-attach debugger');
-        }
-      };
-      doAttach();
-    }
-  }, [workflowState, debug, debugVisible]);
+      }
+      console.warn('[LabResultsPane] Auto-attach failed after all attempts');
+    };
+
+    doAttach();
+
+    // Cleanup: cancel the loop when deps change or component unmounts
+    return () => controller.abort();
+  }, [workflowState, debug.status, onShowDebugPanel]);
 
   // ---- Load result list ----
   const loadResults = useCallback(async () => {
@@ -240,19 +287,35 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     try {
       setWorkflowRunning(true);
       setShowProgress(true);
-      setSseKey(k => k + 1); // force SSE reconnection for fresh stream
+      setPreRunMessages([]);
+
+      // Auto-save all dirty script files before running
+      if (saveAllRef?.current) {
+        try {
+          const saved = await saveAllRef.current();
+          if (saved.length > 0) {
+            setPreRunMessages(saved.map(f => ({ type: 'saved', text: `${f} saved` })));
+          }
+        } catch (e) {
+          console.warn('[LabResultsPane] auto-save error:', e);
+        }
+      }
+
+      // Start the workflow FIRST so the run is registered in activeRuns
       await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResult.id}/debug`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ debugVisible: false, stopOnFailure }),
       });
+      // THEN reconnect SSE — the run is guaranteed to exist now
+      setSseKey(k => k + 1);
       toast.success(t('workflowStarted') || 'Workflow started');
       loadResults();
     } catch (err) {
       toast.error(`${t('errorStartingWorkflow') || 'Error'}: ${err.message || err}`);
       setWorkflowRunning(false);
     }
-  }, [selectedResult, lab.id, t, toast, loadResults, stopOnFailure]);
+  }, [selectedResult, lab.id, t, toast, loadResults, stopOnFailure, saveAllRef]);
 
   // ---- Debug workflow ----
   const handleDebug = useCallback(async () => {
@@ -260,19 +323,40 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     try {
       setWorkflowRunning(true);
       setShowProgress(true);
-      setSseKey(k => k + 1); // force SSE reconnection for fresh stream
+      setPreRunMessages([]);
+
+      // Auto-save all dirty script files before debugging
+      if (saveAllRef?.current) {
+        try {
+          const saved = await saveAllRef.current();
+          if (saved.length > 0) {
+            setPreRunMessages(saved.map(f => ({ type: 'saved', text: `${f} saved` })));
+          }
+        } catch (e) {
+          console.warn('[LabResultsPane] auto-save error:', e);
+        }
+      }
+
+      // Force-stop any existing debug session before starting a new one
+      if (debug) {
+        try { await debug.detach(); } catch { /* ignore */ }
+      }
+
+      // Start the workflow FIRST so the run is registered in activeRuns
       await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResult.id}/debug`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ debugVisible: true, stopOnFailure }),
       });
+      // THEN reconnect SSE — the run is guaranteed to exist now
+      setSseKey(k => k + 1);
       toast.success(t('debugWorkflowStarted') || 'Debug workflow started');
       loadResults();
     } catch (err) {
       toast.error(`${t('errorStartingDebugAnalysis') || 'Error'}: ${err.message || err}`);
       setWorkflowRunning(false);
     }
-  }, [selectedResult, lab.id, t, toast, loadResults, stopOnFailure]);
+  }, [selectedResult, lab.id, t, toast, loadResults, stopOnFailure, debug, saveAllRef]);
 
   // ---- Reset (abort) a running/pending result ----
   const handleReset = useCallback(async () => {
@@ -546,6 +630,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
           <WorkflowProgressPane
             workflowState={workflowState}
             onClose={() => setShowProgress(false)}
+            preRunMessages={preRunMessages}
           />
         )}
 
@@ -614,6 +699,9 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
                 refreshTrigger={refreshTrigger}
                 onFileDoubleClick={handleFileOpen}
                 onPublish={handlePublish}
+                csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+                onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: fileManagerApiPath, fileName }) : undefined}
+                labOwnerId={lab.ownerId}
               />
             ) : (
               <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }}>
@@ -646,12 +734,11 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
                 </div>
               ) : (
                 <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden' }}>
-                  <Editor
-                    height="100%"
-                    language={file.language}
+                  <CodeEditor
                     value={file.content}
+                    language={file.language}
                     theme={editorTheme}
-                    options={monacoReadOnly}
+                    readOnly
                   />
                 </div>
               )}

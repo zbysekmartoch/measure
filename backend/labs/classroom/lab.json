@@ -3,7 +3,9 @@
   "name": "classroom",
   "description": "",
   "ownerId": 2,
-  "sharedWith": [],
+  "sharedWith": [
+    "1"
+  ],
   "createdAt": "2026-03-06T16:56:56.944Z",
-  "updatedAt": "2026-03-06T16:56:56.944Z"
+  "updatedAt": "2026-03-30T12:45:42.883Z"
 }

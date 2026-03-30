@@ -34,6 +34,7 @@ import {
   getDebugStatus,
   endDebugSession,
 } from '../debug/debug-engine.js';
+import { closeAllDapConnections } from '../debug/dap-proxy.js';
 
 // ── Active workflow runs: Map<"labId:resultId", WorkflowRun> ────────────────
 
@@ -97,6 +98,7 @@ export class WorkflowRun extends EventEmitter {
     this.labId = opts.labId;
     this.resultId = opts.resultId;
     this.steps = opts.steps;
+    this.commentedSteps = opts.commentedSteps || []; // scripts starting with # (skipped)
     this.resultDir = opts.resultDir;
     this.scriptsRoot = opts.scriptsRoot;
     this.workflowRoot = opts.workflowRoot || '';
@@ -140,6 +142,7 @@ export class WorkflowRun extends EventEmitter {
       resultId: this.resultId,
       status: this.status,
       steps: this.stepStatuses.map((s) => ({ ...s })),
+      commentedSteps: this.commentedSteps,
       currentStepIndex: this.currentStepIndex,
       startedAt: this.startedAt,
       completedAt: this.completedAt,
@@ -249,6 +252,9 @@ export class WorkflowRun extends EventEmitter {
           // ── Debug mode: spawn via debugpy ──
           await this._debugLog(`Starting debugpy for step ${stepName}`);
 
+          // Close any stale DAP proxy WebSocket connections from previous steps
+          closeAllDapConnections();
+
           try {
             const { port, pid } = await startDebugSession({
               scriptAbsolutePath: scriptAbsPath,
@@ -284,10 +290,16 @@ export class WorkflowRun extends EventEmitter {
             success = await new Promise((resolve) => {
               const onStatus = (s) => {
                 if (s.status !== lastDebugStatus) {
+                  this._debugLog(`[step ${i}] Debug status change: ${lastDebugStatus} → ${s.status}`).catch(() => {});
                   lastDebugStatus = s.status;
                   if (s.status === 'running' && this.stepStatuses[i].status === StepStatus.DEBUG_WAITING) {
                     this.stepStatuses[i].status = StepStatus.RUNNING;
                     this._emit('debug-attached', { index: i, name: stepName, status: 'running' });
+                    this._debugLog(`[step ${i}] DAP client attached, script running`).catch(() => {});
+                  } else if (s.status === 'stopped') {
+                    this.stepStatuses[i].status = StepStatus.DEBUG_STOPPED;
+                    this._emit('debug-stopped', { index: i, name: stepName, status: 'stopped' });
+                    this._debugLog(`[step ${i}] Debugger stopped (breakpoint hit)`).catch(() => {});
                   } else if (s.status === 'waiting_for_client') {
                     this.stepStatuses[i].status = StepStatus.DEBUG_WAITING;
                     this._emit('debug-waiting', { index: i, name: stepName, port: s.port, status: 'waiting_for_client' });
@@ -296,6 +308,7 @@ export class WorkflowRun extends EventEmitter {
               };
 
               const onExit = (info) => {
+                this._debugLog(`[step ${i}] Debug process exited: code=${info.code}, signal=${info.signal}`).catch(() => {});
                 debugEvents.off('exit', onExit);
                 debugEvents.off('status', onStatus);
                 resolve(info.code === 0 || info.code === null);
@@ -307,6 +320,7 @@ export class WorkflowRun extends EventEmitter {
               // Check if already ended
               const st = getDebugStatus();
               if (!st.active) {
+                this._debugLog(`[step ${i}] Debug session already ended before listeners were set`).catch(() => {});
                 debugEvents.off('exit', onExit);
                 debugEvents.off('status', onStatus);
                 resolve(false);

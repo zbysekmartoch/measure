@@ -104,10 +104,25 @@ export function resetState() {
   debugState.stderr = '';
   debugState.stepIndex = null;
   debugState.stepName = null;
+  // Remove all listeners from the old emitter to prevent leaks,
+  // then create a fresh emitter so stale SSE/event listeners don't fire.
+  debugState.events.removeAllListeners();
+  debugState.events = new EventEmitter();
 }
 
 function emitStatus() {
   debugState.events.emit('status', getDebugStatus());
+}
+
+/**
+ * Transition the debug state to 'running' (called when DAP client connects).
+ */
+export function setDebugRunning() {
+  if (debugState.status === 'waiting_for_client') {
+    console.log('[debug-engine] DAP client connected — transitioning to running');
+    debugState.status = 'running';
+    emitStatus();
+  }
 }
 
 /**
@@ -131,12 +146,21 @@ function emitStatus() {
 export async function startDebugSession(opts) {
   // Force-kill any leftover session before starting a new one
   if (debugState.status !== 'idle' && debugState.status !== 'ended') {
-    console.log(`[debug-engine] Cleaning up previous session (status=${debugState.status})`);
+    console.log(`[debug-engine] Cleaning up previous session (status=${debugState.status}, pid=${debugState.pid}, port=${debugState.port})`);
     endDebugSession();
-    // Give process a moment to die
-    await new Promise(r => setTimeout(r, 300));
-    resetState();
+    // Wait for the process to actually die
+    if (debugState.process) {
+      await new Promise(r => {
+        const timeout = setTimeout(r, 2000);
+        debugState.process.once('close', () => { clearTimeout(timeout); r(); });
+      });
+    } else {
+      await new Promise(r => setTimeout(r, 300));
+    }
+    console.log('[debug-engine] Previous session cleaned up');
   }
+  // Always do a full reset even if we think we're idle — prevents ghost state
+  resetState();
 
   const port = await getFreePort();
 
@@ -170,7 +194,8 @@ export async function startDebugSession(opts) {
   ];
 
   console.log(`[debug-engine] Spawning: ${pythonCmd} ${spawnArgs.join(' ')}`);
-  console.log(`[debug-engine] CWD: ${opts.cwd}, DAP port: ${port}`);
+  console.log(`[debug-engine] CWD: ${opts.cwd}, DAP port: ${port}, step: ${opts.stepName || '?'} (index=${opts.stepIndex ?? '?'})`);
+  console.log(`[debug-engine] Lab: ${opts.labId}, Result: ${opts.resultId}`);
 
   const child = spawn(pythonCmd, spawnArgs, {
     cwd: opts.cwd,
@@ -185,6 +210,7 @@ export async function startDebugSession(opts) {
   debugState.process = child;
   debugState.pid = child.pid;
   // Don't set waiting_for_client yet — wait until debugpy is actually ready
+  console.log(`[debug-engine] Process spawned, PID=${child.pid}`);
   emitStatus();
 
   child.stdout.on('data', async (data) => {
@@ -244,8 +270,25 @@ export async function startDebugSession(opts) {
  * End the active debug session (kill the process).
  */
 export function endDebugSession() {
+  console.log(`[debug-engine] endDebugSession called (status=${debugState.status}, pid=${debugState.pid})`);
   if (debugState.process) {
-    try { debugState.process.kill('SIGTERM'); } catch { /* ignore */ }
+    try {
+      debugState.process.kill('SIGTERM');
+      console.log(`[debug-engine] Sent SIGTERM to pid=${debugState.pid}`);
+    } catch (e) {
+      console.log(`[debug-engine] SIGTERM failed: ${e.message}`);
+    }
+    // Force kill after 1s if still alive
+    const proc = debugState.process;
+    const pid = debugState.pid;
+    setTimeout(() => {
+      try {
+        if (!proc.killed) {
+          proc.kill('SIGKILL');
+          console.log(`[debug-engine] Sent SIGKILL to pid=${pid}`);
+        }
+      } catch { /* ignore */ }
+    }, 1000);
   }
   debugState.status = 'ended';
   emitStatus();

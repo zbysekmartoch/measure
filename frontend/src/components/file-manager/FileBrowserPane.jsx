@@ -10,11 +10,10 @@
  *   - Drag-and-drop upload into any folder
  */
 import React, { useCallback, useState } from 'react';
-import { useLanguage } from '../../context/LanguageContext';
 import { useSettings } from '../../context/SettingsContext';
 import { formatFileSize, fileIcon } from './fileUtils.js';
 import { useFileClipboard } from './ClipboardContext.jsx';
-import { shadow, fileBrowserButtons as fbBtn, fileItemButtons as fiBtn } from '../../lib/uiConfig.js';
+import { shadow, fileBrowserButtons as fbBtn, fileItemButtons as fiBtn, fileLocking as lockCfg } from '../../lib/uiConfig.js';
 
 /* ── tiny icon-button helper ────────────────────────────────────────────────── */
 const IBtn = ({ title, onClick, bg = '#6b7280', children, disabled, style: extra }) => (
@@ -51,6 +50,8 @@ function FolderNode({
   isRoot,
   specialFolders,
   compactButtons,
+  fileLocks, isReadonlyFile, onRequestLock,
+  onUnlockFile, onUnlockFolder, labOwnerId, currentUserId,
 }) {
   const [hovered, setHovered] = useState(false);
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
@@ -147,6 +148,22 @@ function FolderNode({
           {onCreateSync && !isRoot && (
             <IBtn title={fiBtn.createSync.label} onClick={() => onCreateSync(node.path)} bg={fiBtn.createSync.bg} disabled={loading}>{fiBtn.createSync.icon}</IBtn>
           )}
+          {/* Unlock all locked files in this folder */}
+          {onUnlockFolder && (() => {
+            const hasLocks = Object.entries(fileLocks || {}).some(([fp, lk]) =>
+              (node.path === '' || fp.startsWith(node.path + '/')) && (lk.isMe || String(labOwnerId) === String(currentUserId))
+            );
+            if (!hasLocks) return null;
+            const isOwner = String(labOwnerId) === String(currentUserId);
+            return (
+              <IBtn
+                title={isOwner ? 'Unlock all in folder' : 'Unlock my files in folder'}
+                onClick={() => onUnlockFolder(node.path)}
+                bg="#dc2626"
+                disabled={loading}
+              >U</IBtn>
+            );
+          })()}
         </div>
       </div>
 
@@ -192,6 +209,13 @@ function FolderNode({
             onCreateSync={onCreateSync}
             specialFolders={specialFolders}
             compactButtons={compactButtons}
+            fileLocks={fileLocks}
+            isReadonlyFile={isReadonlyFile}
+            onRequestLock={onRequestLock}
+            onUnlockFile={onUnlockFile}
+            onUnlockFolder={onUnlockFolder}
+            labOwnerId={labOwnerId}
+            currentUserId={currentUserId}
           />
         ) : (
           <FileRow
@@ -208,6 +232,12 @@ function FolderNode({
             isChanged={changedFiles?.has(child.path)}
             onPublish={onPublish}
             compactButtons={compactButtons}
+            lockInfo={fileLocks?.[child.path]}
+            isReadonly={isReadonlyFile?.(child.path)}
+            onRequestLock={onRequestLock}
+            onUnlockFile={onUnlockFile}
+            labOwnerId={labOwnerId}
+            currentUserId={currentUserId}
           />
         ),
       )}
@@ -216,12 +246,18 @@ function FolderNode({
 }
 
 /* ── file row ───────────────────────────────────────────────────────────────── */
-function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged, onPublish, compactButtons }) {
+function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged, onPublish, compactButtons, lockInfo, isReadonly, onRequestLock, onUnlockFile, labOwnerId, currentUserId }) {
   const [hovered, setHovered] = useState(false);
   const indent = depth * 16 + 12;
   const isWorkflow = file.name?.endsWith('.workflow');
+  const isLockedByOther = lockInfo && !lockInfo.isMe;
+  const isLockedByMe = lockInfo && lockInfo.isMe;
   const changedBg = '#fef9c3';  // light yellow for changed files
-  const baseBg = isSelected ? '#dbeafe' : isChanged ? changedBg : 'transparent';
+  const baseBg = isSelected ? '#dbeafe'
+    : isReadonly ? lockCfg.readonlyBg
+    : isLockedByOther ? lockCfg.lockedRowBg
+    : isChanged ? changedBg
+    : 'transparent';
   return (
     <div
       style={{
@@ -229,7 +265,11 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         padding: '3px 6px', paddingLeft: indent,
         borderRadius: 4,
         background: baseBg,
-        borderLeft: isChanged ? '3px solid #eab308' : '3px solid transparent',
+        borderLeft: isReadonly ? `3px solid ${lockCfg.readonlyColor}`
+          : isLockedByOther ? `3px solid ${lockCfg.lockedRowBorder}`
+          : isLockedByMe ? '3px solid #f59e0b'
+          : isChanged ? '3px solid #eab308'
+          : '3px solid transparent',
         cursor: 'pointer', fontSize: 12,
         transition: 'background 0.3s, border-color 0.3s',
       }}
@@ -240,7 +280,19 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
     >
       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span>{fileIcon(file.name)}</span>
-        <span title={file.path || file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+        <span title={file.path || file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isReadonly ? lockCfg.readonlyColor : undefined }}>{file.name}</span>
+        {isReadonly && (
+          <span title="Read-only" style={{ fontSize: 10, flexShrink: 0, cursor: 'default' }}>{lockCfg.readonlyIcon}</span>
+        )}
+        {isLockedByMe && (
+          <span title="Locked by you (exclusive)" style={{ fontSize: 10, flexShrink: 0, cursor: 'default' }}>{lockCfg.crownIcon}</span>
+        )}
+        {isLockedByOther && (
+          <span
+            title={`Locked by ${lockInfo.userName || lockInfo.userEmail || 'another user'}`}
+            style={{ fontSize: 10, flexShrink: 0, cursor: 'default' }}
+          >{lockCfg.lockIcon}</span>
+        )}
         {showModificationDate && file.size !== undefined && (
           <span style={{ fontSize: 9, color: '#9ca3af', flexShrink: 0 }}>{formatFileSize(file.size)}</span>
         )}
@@ -261,8 +313,30 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
           }
         }} bg={fiBtn.renameFile.bg}>{fiBtn.renameFile.icon}</IBtn>
         <IBtn title={fiBtn.copyFile.label} onClick={() => onCopy(file.path)} bg={fiBtn.copyFile.bg}>{fiBtn.copyFile.icon}</IBtn>
+        <IBtn title="Copy link" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(file.path); }} bg="#6b7280">L</IBtn>
         {onPublish && (
           <IBtn title="Publish to current output" onClick={() => onPublish(file.path)} bg="#7c3aed">📤</IBtn>
+        )}
+        {/* Unlock button for locked files */}
+        {lockInfo && (lockInfo.isMe || String(labOwnerId) === String(currentUserId)) && onUnlockFile && (
+          <IBtn
+            title={lockInfo.isMe ? 'Release lock' : `Request Lock release (${lockInfo.userName || lockInfo.userEmail || 'other'})`}
+            onClick={() => {
+              if (lockInfo.isMe || String(labOwnerId) === String(currentUserId)) {
+                onUnlockFile(file.path);
+              } else {
+                onRequestLock?.(file.path);
+              }
+            }}
+            bg="#dc2626"
+          >U</IBtn>
+        )}
+        {lockInfo && !lockInfo.isMe && String(labOwnerId) !== String(currentUserId) && onRequestLock && (
+          <IBtn
+            title={`Request Lock release (${lockInfo.userName || lockInfo.userEmail || 'other'})`}
+            onClick={() => onRequestLock(file.path)}
+            bg="#f59e0b"
+          >U</IBtn>
         )}
       </div>
     </div>
@@ -306,8 +380,15 @@ export default function FileBrowserPane({
   onPublish,
   specialFolders,
   overrideWidth,
+  // File locking
+  fileLocks,
+  isReadonlyFile,
+  onRequestLock,
+  onUnlockFile,
+  onUnlockFolder,
+  labOwnerId,
+  currentUserId,
 }) {
-  const { t } = useLanguage();
   const { compactButtons, setCompactButtons } = useSettings();
   const { clipboard, copyFile, copyFolder, refreshFromServer } = useFileClipboard();
 
@@ -328,11 +409,11 @@ export default function FileBrowserPane({
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       if (typeof onRefresh === 'function') onRefresh();
-      alert(t('syncConfigCreated') || 'Sync config created. Download sync.json to your PC.');
+      alert('Sync config created. Download sync.json to your PC.');
     } catch {
-      alert(t('errorCreatingSyncConfig') || 'Error creating sync config');
+      alert('Error creating sync config');
     }
-  }, [apiBasePath, t, onRefresh]);
+  }, [apiBasePath, onRefresh]);
 
   const handleCopyFile = useCallback((filePath) => {
     copyFile(filePath, apiBasePath);
@@ -364,7 +445,7 @@ export default function FileBrowserPane({
 
   // Build a virtual root node that wraps all top-level items
   const rootNode = {
-    name: title || t('files') || 'Files',
+    name: title || 'Files',
     path: '',
     type: 'directory',
     children: tree || [],
@@ -388,11 +469,11 @@ export default function FileBrowserPane({
       {/* Compact title bar — only title + refresh + preview toggle */}
       <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
-          {title || t('files') || 'Files'}
+          {title || 'Files'}
         </h3>
         <div style={{ display: 'flex', gap: 3 }}>
           <IBtn
-            title={compactButtons ? (t('compactButtonsOn') || 'Buttons on hover only') : (t('compactButtonsOff') || 'Always show buttons')}
+            title={compactButtons ? 'Buttons on hover only' : 'Always show buttons'}
             onClick={() => setCompactButtons(v => !v)}
             bg={'transparent'}
             style={{
@@ -400,9 +481,9 @@ export default function FileBrowserPane({
             }}
                 
           >👁</IBtn>
-          <IBtn title={t('refresh') || fbBtn.refresh.label} onClick={onRefresh} bg={fbBtn.refresh.bg} disabled={loading}>{fbBtn.refresh.icon}</IBtn>
+          <IBtn title={fbBtn.refresh.label} onClick={onRefresh} bg={fbBtn.refresh.bg} disabled={loading}>{fbBtn.refresh.icon}</IBtn>
           <IBtn
-            title={showPreview ? (t('hidePreview') || fbBtn.previewHide.label) : (t('showPreview') || fbBtn.preview.label)}
+            title={showPreview ? fbBtn.previewHide.label : fbBtn.preview.label}
             onClick={onTogglePreview}
             bg={showPreview ? fbBtn.previewHide.bg : fbBtn.preview.bg}
           >
@@ -411,7 +492,7 @@ export default function FileBrowserPane({
         </div>
       </div>
 
-      {loading && <div style={{ color: '#6b7280', fontSize: 12 }}>{t('loading')}</div>}
+      {loading && <div style={{ color: '#6b7280', fontSize: 12 }}>{'Loading...'}</div>}
 
       {/* Hidden input for folder-specific upload */}
       {showUpload && (
@@ -453,11 +534,18 @@ export default function FileBrowserPane({
         specialFolders={specialFolders}
         isRoot
         compactButtons={compactButtons}
+        fileLocks={fileLocks}
+        isReadonlyFile={isReadonlyFile}
+        onRequestLock={onRequestLock}
+        onUnlockFile={onUnlockFile}
+        onUnlockFolder={onUnlockFolder}
+        labOwnerId={labOwnerId}
+        currentUserId={currentUserId}
       />
 
       {files.length === 0 && !loading && (
         <div style={{ color: '#6b7280', fontSize: 13, textAlign: 'center', marginTop: 20 }}>
-          {t('noFiles') || 'No files'}
+          {'No files'}
         </div>
       )}
     </section>

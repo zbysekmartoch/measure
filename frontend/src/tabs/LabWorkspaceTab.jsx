@@ -13,7 +13,7 @@
  *   lab         – lab metadata object { id, name, description, … }
  *   onLabUpdate – callback(updatedLab) when settings change
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import LabScriptsPane from './LabScriptsPane.jsx';
 import LabResultsPane from './LabResultsPane.jsx';
@@ -22,6 +22,10 @@ import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { useDebugSession } from '../debug/useDebugSession.js';
 import DebugPanel from '../debug/DebugPanel.jsx';
 import { shadow, debugModes as dmCfg } from '../lib/uiConfig.js';
+
+const DataExplorerTab = React.lazy(
+  () => import('./DataExplorerTab.jsx')
+);
 
 const TABS = [
   { key: 'scripts',  icon: '📜', label: 'Scripts' },
@@ -42,6 +46,20 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
   const [debugMode, setDebugMode] = useState('hidden');
   const popupRef = useRef(null);
 
+  // ---- Data Explorer sub-tabs ----
+  const [openExplorers, setOpenExplorers] = useState([]);
+
+  const openAnalyze = useCallback((source) => {
+    const id = `explorer:${source.fileName}:${Date.now()}`;
+    setOpenExplorers((prev) => [...prev, { id, source, label: source.fileName }]);
+    setActiveTab(id);
+  }, []);
+
+  const closeAnalyze = useCallback((explorerId) => {
+    setOpenExplorers((prev) => prev.filter((e) => e.id !== explorerId));
+    setActiveTab((prev) => (prev === explorerId ? 'scripts' : prev));
+  }, []);
+
   // ---- Splitter state (fraction 0–1, from left/top) ----
   const [splitFraction, setSplitFraction] = useState(0.65);
   const containerRef = useRef(null);
@@ -51,6 +69,14 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
 
   // ---- F9 handler ref (set by LabResultsPane) ----
   const runDebugRef = useRef(null);
+
+  // ---- Save-all ref (set by LabScriptsPane, called by LabResultsPane before Run/Debug) ----
+  const saveAllRef = useRef(null);
+
+  // ---- Auto-show debug panel when debug workflow starts ----
+  const showDebugPanel = useCallback(() => {
+    if (debugMode === 'hidden') setDebugMode('right');
+  }, [debugMode]);
 
   // ---- Keep fresh refs for keyboard handler ----
   const debugRef = useRef(debug);
@@ -246,6 +272,43 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
           </button>
         ))}
 
+        {/* Data Explorer sub-tabs */}
+        {openExplorers.map((explorer) => {
+          const isActive = activeTab === explorer.id;
+          return (
+            <span key={explorer.id} style={{
+              display: 'inline-flex', alignItems: 'stretch',
+              marginBottom: isActive ? -1 : 0, zIndex: isActive ? 1 : 0,
+            }}>
+              <button
+                onClick={() => setActiveTab(explorer.id)}
+                title={`Data Explorer: ${explorer.label}`}
+                style={{
+                  padding: '6px 10px', border: '1px solid #012345', borderBottom: 'none', borderRight: 'none',
+                  borderRadius: '6px 0 0 0', background: isActive ? '#fff' : '#f3f4f6',
+                  fontWeight: isActive ? 600 : 400, color: '#111827', cursor: 'pointer', fontSize: 13,
+                  maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}
+              >
+                🔍 {explorer.label}
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); closeAnalyze(explorer.id); }}
+                title="Close"
+                style={{
+                  padding: '4px 6px', border: '1px solid #012345', borderBottom: 'none', borderLeft: 'none',
+                  borderRadius: '0 6px 0 0', background: isActive ? '#fff' : '#f3f4f6',
+                  cursor: 'pointer', color: '#9ca3af', fontSize: 12, display: 'flex', alignItems: 'center',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#9ca3af'; }}
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
+
         {/* Debugger placement controls — enclosed panel with toggle buttons */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 0,
@@ -323,10 +386,10 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
           position: 'relative',
         }}>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'scripts' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
-            <LabScriptsPane lab={lab} debug={debug} appConfig={appConfig} />
+            <LabScriptsPane lab={lab} debug={debug} appConfig={appConfig} onAnalyze={openAnalyze} saveAllRef={saveAllRef} />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
-            <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} />
+            <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} onAnalyze={openAnalyze} appConfig={appConfig} saveAllRef={saveAllRef} onShowDebugPanel={showDebugPanel} />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'output' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
             <FileManagerEditor
@@ -336,11 +399,29 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
               readOnly
               showModificationDate
               title="Current output"
+              csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+              onAnalyze={(fileName) => openAnalyze({ labId: lab.id, apiPath: `/api/v1/labs/${lab.id}/current_output`, fileName })}
             />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'settings' ? 'block' : 'none', overflow: 'auto' }}>
             <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />
           </div>
+
+          {/* Data Explorer sub-tab content */}
+          {openExplorers.map((explorer) => (
+            <div
+              key={explorer.id}
+              style={{
+                flex: 1, minHeight: 0,
+                display: activeTab === explorer.id ? 'flex' : 'none',
+                flexDirection: 'column', padding: 6, overflow: 'hidden',
+              }}
+            >
+              <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>Loading Data Explorer…</div>}>
+                <DataExplorerTab source={explorer.source} />
+              </Suspense>
+            </div>
+          ))}
         </div>
 
         {/* Splitter handle */}

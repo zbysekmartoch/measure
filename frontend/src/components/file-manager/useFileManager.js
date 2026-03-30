@@ -16,7 +16,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJSON } from '../../lib/fetchJSON.js';
-import { useLanguage } from '../../context/LanguageContext';
 import { useToast } from '../Toast';
 import { extractFiles, isImageFile, isPdfFile, isTextFile } from './fileUtils.js';
 
@@ -28,7 +27,6 @@ export default function useFileManager({
   onFileSelect,
   refreshTrigger = 0,
 }) {
-  const { t } = useLanguage();
   const toast = useToast();
 
   const [tree, setTree] = useState([]);           // raw tree from API
@@ -50,6 +48,129 @@ export default function useFileManager({
   const [changedFiles, setChangedFiles] = useState(new Set());
   // Counter incremented each time the preview is auto-refreshed (drives flash animation)
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
+
+  // ── File locking state ──────────────────────────────────────────────────────
+  // fileLocks: { [filePath]: { userId, userEmail, userName, lockedAt, isMe } }
+  const [fileLocks, setFileLocks] = useState({});
+  // lockRequests: pending requests from others asking me to release
+  const [lockRequests, setLockRequests] = useState([]);
+  // heartbeat ref for refreshing lock TTL
+  const lockHeartbeatRef = useRef(null);
+
+  /** Check if a file is readonly (path contains "readonly") */
+  const isReadonlyFile = useCallback((filePath) => {
+    return filePath && /readonly/i.test(filePath);
+  }, []);
+
+  /** Fetch all locks for our apiBasePath. */
+  const loadLocks = useCallback(async () => {
+    try {
+      const data = await fetchJSON(`/api/v1/locks/list?apiBasePath=${encodeURIComponent(apiBasePath)}`);
+      setFileLocks(data.locks || {});
+    } catch { /* ignore */ }
+  }, [apiBasePath]);
+
+  /** Fetch lock requests directed at me. */
+  const loadLockRequests = useCallback(async () => {
+    try {
+      const data = await fetchJSON('/api/v1/locks/requests');
+      setLockRequests(data.requests || []);
+    } catch { /* ignore */ }
+  }, []);
+
+  /** Acquire exclusive lock on a file. Returns true on success. */
+  const acquireFileLock = useCallback(async (filePath) => {
+    try {
+      const res = await fetch('/api/v1/locks/acquire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath, file: filePath }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'locked') {
+          toast.error(`File is locked by ${data.lock?.userName || data.lock?.userEmail || 'another user'}`);
+        } else if (data.error === 'readonly') {
+          toast.error('This file is read-only');
+        }
+        return false;
+      }
+      await loadLocks();
+      return true;
+    } catch {
+      toast.error('Error acquiring file lock');
+      return false;
+    }
+  }, [apiBasePath, loadLocks, toast]);
+
+  /** Release my lock on a file. */
+  const releaseFileLock = useCallback(async (filePath) => {
+    try {
+      await fetch('/api/v1/locks/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath, file: filePath }),
+      });
+      await loadLocks();
+      return true;
+    } catch {
+      return false;
+    }
+  }, [apiBasePath, loadLocks]);
+
+  /** Send a request to the lock holder asking them to release. */
+  const requestFileLock = useCallback(async (filePath) => {
+    try {
+      const res = await fetch('/api/v1/locks/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath, file: filePath }),
+      });
+      if (res.ok) {
+        toast.success('Lock request sent');
+      }
+    } catch {
+      toast.error('Error requesting lock');
+    }
+  }, [apiBasePath, toast]);
+
+  /** Dismiss a lock request (I decline or handled it). */
+  const dismissLockReq = useCallback(async (requestId) => {
+    try {
+      await fetch(`/api/v1/locks/requests/${requestId}/dismiss`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      await loadLockRequests();
+    } catch { /* ignore */ }
+  }, [loadLockRequests]);
+
+  /** Refresh (heartbeat) the lock I hold while editing. */
+  const refreshMyLock = useCallback(async (filePath) => {
+    try {
+      await fetch('/api/v1/locks/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath, file: filePath }),
+      });
+    } catch { /* ignore */ }
+  }, [apiBasePath]);
+
+  // Poll locks & requests every 5 seconds
+  useEffect(() => {
+    loadLocks();
+    loadLockRequests();
+    const id = setInterval(() => { loadLocks(); loadLockRequests(); }, 5000);
+    return () => clearInterval(id);
+  }, [loadLocks, loadLockRequests]);
+
+  // Heartbeat: while editing, periodically refresh the lock
+  useEffect(() => {
+    if (isEditing && selectedFile) {
+      lockHeartbeatRef.current = setInterval(() => refreshMyLock(selectedFile), 60_000);
+    }
+    return () => { if (lockHeartbeatRef.current) clearInterval(lockHeartbeatRef.current); };
+  }, [isEditing, selectedFile, refreshMyLock]);
 
   // flat file list (derived from tree)
   const files = useMemo(() => extractFiles(tree), [tree]);
@@ -116,7 +237,7 @@ export default function useFileManager({
   // ---- load file content ----
   const loadFileContent = useCallback(async (file, forceLoad = false) => {
     if (!forceLoad && isEditing && fileContent !== originalContent && selectedFile && selectedFile !== file.path) {
-      const msg = t('unsavedChangesConfirm') ||
+      const msg =
         `File "${selectedFile}" has unsaved changes. Do you want to save them?\n\nSave = OK, Discard = Cancel`;
       if (confirm(msg)) {
         try {
@@ -126,9 +247,9 @@ export default function useFileManager({
             body: JSON.stringify({ file: selectedFile, content: fileContent }),
           });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          toast.success(t('fileSaved') || 'File saved');
+          toast.success('File saved');
         } catch {
-          toast.error(t('errorSavingFile') || 'Error saving file');
+          toast.error('Error saving file');
           return;
         }
       }
@@ -152,7 +273,7 @@ export default function useFileManager({
         setImageBlobUrl(URL.createObjectURL(await r.blob()));
         setFileContent('');
       } catch {
-        toast.error(t('errorLoadingFileContent') || 'Error loading image');
+        toast.error('Error loading image');
       } finally { setLoading(false); }
       return;
     }
@@ -167,7 +288,7 @@ export default function useFileManager({
         setPdfBlobUrl(URL.createObjectURL(await r.blob()));
         setFileContent('');
       } catch {
-        toast.error(t('errorLoadingFileContent') || 'Error loading PDF');
+        toast.error('Error loading PDF');
       } finally { setLoading(false); }
       return;
     }
@@ -184,9 +305,9 @@ export default function useFileManager({
       setFileContent(data.content || '');
       setOriginalContent(data.content || '');
     } catch {
-      toast.error(t('errorLoadingFileContent') || 'Error loading file content');
+      toast.error('Error loading file content');
     } finally { setLoading(false); }
-  }, [apiBasePath, t, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
+  }, [apiBasePath, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
 
   // Auto-reload selected file content when it was modified externally (e.g. after workflow, sync agent)
   useEffect(() => {
@@ -195,7 +316,7 @@ export default function useFileManager({
     // Show toast for all changed files
     const names = [...changedFiles].map(p => p.split('/').pop());
     const label = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
-    toast.success(`${t('filesChanged') || 'Files changed'}: ${label}`);
+    toast.success(`Files changed: ${label}`);
 
     // Update selectedFileInfo (mtime, size) from the fresh tree
     if (selectedFile && selectedFileInfo && changedFiles.has(selectedFile)) {
@@ -254,6 +375,10 @@ export default function useFileManager({
   // ---- save ----
   const saveFileContent = useCallback(async () => {
     if (!selectedFile || readOnly) return;
+    if (isReadonlyFile(selectedFile)) {
+      toast.error('This file is read-only');
+      return;
+    }
     try {
       setLoading(true);
       const r = await fetch(`${apiBasePath}/content`, {
@@ -261,18 +386,28 @@ export default function useFileManager({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
         body: JSON.stringify({ file: selectedFile, content: fileContent }),
       });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        if (data.error === 'readonly') {
+          toast.error('This file is read-only');
+          return;
+        }
+        throw new Error();
+      }
       setOriginalContent(fileContent);
-      toast.success(t('fileSaved') || 'File saved');
+      setIsEditing(false);
+      // Release lock after successful save
+      await releaseFileLock(selectedFile);
+      toast.success('File saved');
     } catch {
-      toast.error(t('errorSavingFile') || 'Error saving file');
+      toast.error('Error saving file');
     } finally { setLoading(false); }
-  }, [selectedFile, fileContent, t, apiBasePath, readOnly, toast]);
+  }, [selectedFile, fileContent, apiBasePath, readOnly, toast, releaseFileLock, isReadonlyFile]);
 
   // ---- delete file ----
   const deleteFile = useCallback(async (filepath) => {
     if (!showDelete) return;
-    if (!confirm(t('confirmDeleteFile') || `Are you sure you want to delete file "${filepath}"?`)) return;
+    if (!confirm(`Are you sure you want to delete file "${filepath}"?`)) return;
     try {
       setLoading(true);
       await fetch(`${apiBasePath}?file=${encodeURIComponent(filepath)}`, {
@@ -281,11 +416,11 @@ export default function useFileManager({
       });
       if (selectedFile === filepath) { setSelectedFile(null); setSelectedFileInfo(null); setFileContent(''); }
       await loadFiles();
-      toast.success(t('fileDeleted') || 'File deleted');
+      toast.success('File deleted');
     } catch {
-      toast.error(t('errorDeletingFile') || 'Error deleting file');
+      toast.error('Error deleting file');
     } finally { setLoading(false); }
-  }, [selectedFile, loadFiles, t, apiBasePath, showDelete, toast]);
+  }, [selectedFile, loadFiles, apiBasePath, showDelete, toast]);
 
   // ---- download file ----
   const downloadFile = useCallback(async (filepath) => {
@@ -304,9 +439,9 @@ export default function useFileManager({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch {
-      toast.error(t('errorDownloadingFile') || 'Error downloading file');
+      toast.error('Error downloading file');
     }
-  }, [apiBasePath, toast, t]);
+  }, [apiBasePath, toast]);
 
   // ---- create new empty file ----
   const createNewFile = useCallback(async (filePath) => {
@@ -424,9 +559,9 @@ export default function useFileManager({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch {
-      toast.error(t('errorDownloadingFolder') || 'Error downloading folder');
+      toast.error('Error downloading folder');
     }
-  }, [apiBasePath, toast, t]);
+  }, [apiBasePath, toast]);
 
   // ---- paste (from global clipboard) ----
   const pasteInto = useCallback(async (targetFolder, clipboardItem) => {
@@ -458,7 +593,7 @@ export default function useFileManager({
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const folder = prompt(t('enterFolderPath') || 'Enter folder path (empty for root):', '');
+    const folder = prompt('Enter folder path (empty for root):', '');
     if (folder === null) return;
     const formData = new FormData();
     if (folder) formData.append('targetPath', folder);
@@ -471,11 +606,11 @@ export default function useFileManager({
         body: formData,
       });
       await loadFiles();
-      toast.success(t('fileUploaded') || 'File uploaded');
+      toast.success('File uploaded');
     } catch {
-      toast.error(t('errorUploadingFile') || 'Error uploading file');
+      toast.error('Error uploading file');
     } finally { setLoading(false); }
-  }, [loadFiles, t, apiBasePath, showUpload, toast]);
+  }, [loadFiles, apiBasePath, showUpload, toast]);
 
   const handleFolderUpload = useCallback(async (event) => {
     if (!showUpload) return;
@@ -494,11 +629,11 @@ export default function useFileManager({
       });
       await loadFiles();
       setExpandedFolders((p) => ({ ...p, [uploadTargetFolder]: true }));
-      toast.success(`${t('fileUploadedToFolder') || 'File uploaded to'} ${uploadTargetFolder}`);
+      toast.success(`File uploaded to ${uploadTargetFolder}`);
     } catch {
-      toast.error(t('errorUploadingFile') || 'Error uploading file');
+      toast.error('Error uploading file');
     } finally { setLoading(false); setUploadTargetFolder(null); }
-  }, [loadFiles, t, apiBasePath, showUpload, uploadTargetFolder, toast]);
+  }, [loadFiles, apiBasePath, showUpload, uploadTargetFolder, toast]);
 
   const triggerFolderUpload = useCallback((folder) => {
     setUploadTargetFolder(folder);
@@ -522,14 +657,14 @@ export default function useFileManager({
           body: formData,
         });
       } catch {
-        toast.error(`${t('errorUploadingFile') || 'Error'}: ${file.name}`);
+        toast.error(`Error: ${file.name}`);
       }
     }
     await loadFiles();
     setLoading(false);
     setExpandedFolders((p) => ({ ...p, [targetFolder]: true }));
-    toast.success(t('filesUploaded') || `Uploaded ${dropped.length} file(s)`);
-  }, [loadFiles, t, apiBasePath, showUpload, toast]);
+    toast.success(`Uploaded ${dropped.length} file(s)`);
+  }, [loadFiles, apiBasePath, showUpload, toast]);
 
   // ---- folder toggle ----
   const toggleFolder = useCallback((folder) => {
@@ -555,5 +690,8 @@ export default function useFileManager({
     handleFileUpload, handleFolderUpload, triggerFolderUpload, handleDrop,
     toggleFolder, handleDragOver, handleDragLeave,
     setIsEditing, setFileContent, setDragOverFolder,
+    // File locking
+    fileLocks, lockRequests, isReadonlyFile,
+    acquireFileLock, releaseFileLock, requestFileLock, dismissLockReq, loadLocks,
   };
 }

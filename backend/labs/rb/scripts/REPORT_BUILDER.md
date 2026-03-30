@@ -36,7 +36,6 @@ data.json ─────────┼──▶ build.js ──▶ report.docx
 3. **Pro každý dokument:**
    - Načte datový soubor (`data`) relativně k `RESULT_ROOT`.
    - Načte DOCX šablonu (`template`) relativně k `LAB_ROOT`.
-   - Připraví obrázky z `RESULT_ROOT/img/`.
    - Data obalí do **Proxy** (`createDeepIntrospectingGetLoggerProxy`) pro inline parametrizaci tagů.
    - Vytvoří `ImageModule` s vlastní logikou nalezení a měření obrázků.
    - Zavolá `doc.render(virtualData)`.
@@ -47,7 +46,7 @@ data.json ─────────┼──▶ build.js ──▶ report.docx
 
 ## Konfigurace (`environment.json`)
 
-Soubor `environment.json` v `RESULT_ROOT` obsahuje klíč `report.doc`:
+Soubor `environment.json` v `RESULT_ROOT` obsahuje klíč `report`, kde je kofigurace pro Report Buider:
 
 ```json
 {

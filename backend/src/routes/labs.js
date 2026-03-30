@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
 import archiver from 'archiver';
 import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth, copyRecursive } from '../utils/file-manager.js';
+import { isReadonlyPath } from '../utils/file-locks.js';
 import { getDebugStatus, endDebugSession } from '../debug/debug-engine.js';
 import { startWorkflowRun, abortWorkflowRun } from '../workflow/workflow-runner.js';
 import { query } from '../db.js';
@@ -825,6 +826,11 @@ router.put('/:id/results/:resultId/files/content', async (req, res, next) => {
     const { file, content } = req.body ?? {};
     if (!file || content === undefined) return res.status(400).json({ error: 'Missing file or content' });
 
+    // Reject writes to readonly files
+    if (isReadonlyPath(file)) {
+      return res.status(403).json({ error: 'readonly', message: 'File is read-only' });
+    }
+
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
     if (!hasAccess(lab, req.userId)) {
@@ -1073,6 +1079,7 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       ? path.resolve(LABS_ROOT, dataJson.run._scriptsRoot)
       : getLabScriptsRoot(labId);
     let activeSteps;
+    let commentedSteps = []; // steps starting with # (skipped)
 
     if (typeof workflow === 'string') {
       const wfPath = getSecurePath(scriptsRoot, workflow);
@@ -1088,8 +1095,11 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
 
       const allLines = wfContent.split('\n').map(s => s.trim()).filter(s => s);
       activeSteps = allLines.filter(s => !s.startsWith('#'));
+      commentedSteps = allLines.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
     } else if (Array.isArray(workflow)) {
-      activeSteps = workflow.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim());
+      const allItems = workflow.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim());
+      activeSteps = allItems.filter(s => !s.startsWith('#'));
+      commentedSteps = allItems.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
     } else {
       return res.status(400).json({ error: '"workflow" must be a string (path to .workflow file) or an array of script paths' });
     }
@@ -1166,6 +1176,7 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       labId,
       resultId,
       steps: activeSteps,
+      commentedSteps,
       resultDir,
       scriptsRoot,
       workflowRoot,
@@ -1423,6 +1434,11 @@ router.put('/:id/scripts/content', async (req, res, next) => {
     const { file, content } = req.body ?? {};
     if (!file || content === undefined) {
       return res.status(400).json({ error: 'Missing file or content parameter' });
+    }
+
+    // Reject writes to readonly files
+    if (isReadonlyPath(file)) {
+      return res.status(403).json({ error: 'readonly', message: 'File is read-only' });
     }
 
     const labPath = getLabPath(req.params.id);

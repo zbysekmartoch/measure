@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import CodeEditor from '../components/CodeEditor.jsx';
 import { fetchJSON } from '../lib/fetchJSON.js';
 import { useLanguage } from '../context/LanguageContext';
-import { monacoDefaults } from '../lib/uiConfig.js';
 
 const PAGE_SIZE_OPTIONS = [50, 100, 250, 500, 1000];
 
@@ -34,6 +33,7 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
   const completionRef = useRef(null);
   const containerRef = useRef(null);
   const draggingRef = useRef(false);
+  const runQueryRef = useRef(null);
 
   // Sync external initialSql when it changes (e.g. file reloaded)
   const prevInitialSql = useRef(initialSql);
@@ -92,6 +92,8 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
       setRunning(false);
     }
   }, [sql, t, selectedSource]);
+
+  useEffect(() => { runQueryRef.current = runQuery; }, [runQuery]);
 
   useEffect(() => {
     fetchJSON('/api/health')
@@ -258,9 +260,9 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
       if (selection && !selection.isEmpty()) {
         selectionText = editor.getModel().getValueInRange(selection);
       }
-      runQuery(selectionText || undefined);
+      runQueryRef.current(selectionText || undefined);
     });
-  }, [runQuery]);
+  }, []);
 
   useEffect(() => {
     if (!monacoRef.current) return;
@@ -402,15 +404,13 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
       <div ref={containerRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {/* Editor */}
         <div style={{ flex: `0 0 ${editorPct}%`, minHeight: 80, border: '1px solid #e5e7eb', borderRadius: '8px 8px 0 0', overflow: 'hidden' }}>
-          <Editor
-            height="100%"
-            defaultLanguage="sql"
+          <CodeEditor
             value={sql}
+            language="sql"
             onChange={handleSqlChange}
             onMount={handleEditorMount}
             theme={editorTheme}
             options={{
-              ...monacoDefaults,
               minimap: { enabled: false },
             }}
           />

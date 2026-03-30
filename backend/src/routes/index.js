@@ -15,6 +15,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { getSecurePath, copyRecursive } from '../utils/file-manager.js';
 import debugRoutes from '../debug/debug-routes.js';
 import workflowRoutes from '../workflow/workflow-routes.js';
+import locks from './locks.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,12 +42,14 @@ router.get('/health', async (req, res) => {
     const hostname = os.hostname();
     const port = config.port || process.env.PORT || 3000;
 
-    // Read outputsFolderName from config.json
+    // Read config values from config.json
     let outputsFolderName = 'Outputs';
+    let csvPreviewMaxRows = 100;
     try {
       const configJsonPath = path.join(__dirname, '../../config.json');
       const configData = JSON.parse(await fs.readFile(configJsonPath, 'utf8'));
       if (configData.outputsFolderName) outputsFolderName = configData.outputsFolderName;
+      if (configData.csvPreviewMaxRows != null) csvPreviewMaxRows = configData.csvPreviewMaxRows;
     } catch { /* use default */ }
 
     res.json({ 
@@ -69,6 +72,7 @@ router.get('/health', async (req, res) => {
       },
       config: {
         outputsFolderName,
+        csvPreviewMaxRows,
       },
       timestamp: new Date().toISOString()
     });
@@ -89,6 +93,7 @@ router.use('/v1/labs/:id/sync', authenticateToken, sync);
 router.use('/v1/sql', authenticateToken, sql);
 router.use('/v1/labs', authenticateToken, labs);
 router.use('/v1/users', authenticateToken, users);
+router.use('/v1/locks', authenticateToken, locks);
 router.use('/v1/debug', authenticateToken, debugRoutes);
 router.use('/v1/labs/:labId/results/:resultId/workflow', authenticateToken, workflowRoutes);
 

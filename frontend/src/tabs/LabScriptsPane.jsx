@@ -10,18 +10,19 @@
  *   lab   – lab metadata { id, name, … }
  *   debug – debug session object from useDebugSession() (optional, from LabWorkspaceTab)
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import SqlEditorTab from './SqlEditorTab.jsx';
-import Editor from '@monaco-editor/react';
+import CodeEditor from '../components/CodeEditor.jsx';
 import DebugEditor from '../debug/DebugEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
 import { useToast } from '../components/Toast';
 import ZoomableImage from '../components/ZoomableImage.jsx';
-import { monacoDefaults } from '../lib/uiConfig.js';
+import { fileLocking as lockCfg } from '../lib/uiConfig.js';
 import { setDirtyCount, removeDirtyCount } from '../lib/dirtyRegistry.js';
+import { fetchJSON } from '../lib/fetchJSON.js';
 
-export default function LabScriptsPane({ lab, debug, appConfig }) {
+export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveAllRef }) {
   const toast = useToast();
   const apiBasePath = `/api/v1/labs/${lab.id}/scripts`;
 
@@ -31,16 +32,115 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
     localStorage.getItem('monacoTheme') || 'vs-dark'
   );
 
+  // ── File locking for tab-based editing ────────────────────────────────────
+  // tabLocks: { [filePath]: { userId, userEmail, userName, isMe, locked } }
+  const [tabLocks, setTabLocks] = useState({});
+  const lockHeartbeatRef = useRef(null);
+
+  const isReadonlyFile = useCallback((filePath) => filePath && /readonly/i.test(filePath), []);
+
+  /** Load lock status for all currently open text files. */
+  const loadTabLocks = useCallback(async () => {
+    if (openFiles.length === 0) { setTabLocks({}); return; }
+    try {
+      const data = await fetchJSON(`/api/v1/locks/list?apiBasePath=${encodeURIComponent(apiBasePath)}`);
+      setTabLocks(data.locks || {});
+    } catch { /* ignore */ }
+  }, [apiBasePath, openFiles.length]);
+
+  // Poll locks every 5 seconds while tabs are open
+  useEffect(() => {
+    if (openFiles.length === 0) return;
+    loadTabLocks();
+    const id = setInterval(loadTabLocks, 5000);
+    return () => clearInterval(id);
+  }, [loadTabLocks, openFiles.length]);
+
+  // Heartbeat: refresh locks every 60s for files I have open
+  useEffect(() => {
+    const editableFiles = openFiles.filter(f => f.isText && !isReadonlyFile(f.path));
+    if (editableFiles.length === 0) return;
+    lockHeartbeatRef.current = setInterval(() => {
+      editableFiles.forEach(f => {
+        fetch('/api/v1/locks/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+          body: JSON.stringify({ apiBasePath, file: f.path }),
+        }).catch(() => {});
+      });
+    }, 60_000);
+    return () => { if (lockHeartbeatRef.current) clearInterval(lockHeartbeatRef.current); };
+  }, [openFiles, apiBasePath, isReadonlyFile]);
+
+  /** Acquire lock for a file. Returns true on success. */
+  const acquireTabLock = useCallback(async (filePath) => {
+    if (isReadonlyFile(filePath)) {
+      toast.error('This file is read-only');
+      return false;
+    }
+    try {
+      const res = await fetch('/api/v1/locks/acquire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath, file: filePath }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'locked') {
+          toast.error(`File is locked by ${data.lock?.userName || data.lock?.userEmail || 'another user'}`);
+        } else if (data.error === 'readonly') {
+          toast.error('This file is read-only');
+        }
+        return false;
+      }
+      await loadTabLocks();
+      return true;
+    } catch {
+      toast.error('Error acquiring file lock');
+      return false;
+    }
+  }, [apiBasePath, isReadonlyFile, loadTabLocks, toast]);
+
+  /** Release lock for a file. */
+  const releaseTabLock = useCallback(async (filePath) => {
+    try {
+      await fetch('/api/v1/locks/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ apiBasePath, file: filePath }),
+      });
+      await loadTabLocks();
+    } catch { /* ignore */ }
+  }, [apiBasePath, loadTabLocks]);
+
   // Sync dirty file count to the global registry
   useEffect(() => {
     const dirtyCount = openFiles.filter((f) => f.dirty).length;
     setDirtyCount(`lab:${lab.id}`, dirtyCount);
   }, [openFiles, lab.id]);
 
-  // Cleanup on unmount
+  // Keep a ref to openFiles so the unmount cleanup always sees the latest list
+  // without re-running the effect (which would release locks on every keystroke).
+  const openFilesRef = useRef(openFiles);
+  useEffect(() => { openFilesRef.current = openFiles; }, [openFiles]);
+
+  // Cleanup on unmount only (empty deps)
   useEffect(() => {
-    return () => removeDirtyCount(`lab:${lab.id}`);
-  }, [lab.id]);
+    return () => {
+      removeDirtyCount(`lab:${lab.id}`);
+      // Release all locks held by open tabs
+      openFilesRef.current.forEach(f => {
+        if (f.isText && !(/readonly/i.test(f.path))) {
+          fetch('/api/v1/locks/release', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+            body: JSON.stringify({ apiBasePath, file: f.path }),
+          }).catch(() => {});
+        }
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- Determine which file the debugger is stopped in (relative path) ----
   const stoppedRelPath = (() => {
@@ -60,12 +160,18 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
       setActiveTab(tabKey);
       return;
     }
-    // Otherwise, open it
-    fetch(`${apiBasePath}/content?file=${encodeURIComponent(stoppedRelPath)}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
-    })
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then(data => {
+    // Otherwise, acquire lock and open it
+    (async () => {
+      if (!isReadonlyFile(stoppedRelPath)) {
+        await acquireTabLock(stoppedRelPath);
+        // Even if lock fails, still open file (user can view but editing will be blocked)
+      }
+      try {
+        const r = await fetch(`${apiBasePath}/content?file=${encodeURIComponent(stoppedRelPath)}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        });
+        if (!r.ok) throw new Error();
+        const data = await r.json();
         const name = stoppedRelPath.split('/').pop();
         setOpenFiles(prev => {
           if (prev.find(f => f.path === stoppedRelPath)) return prev;
@@ -77,21 +183,32 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
           }];
         });
         setActiveTab(tabKey);
-      })
-      .catch(() => { /* ignore */ });
+      } catch { /* ignore */ }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stoppedRelPath, debug?.status]);
 
   const saveFile = useCallback(async (filePath) => {
     const file = openFiles.find((f) => f.path === filePath);
     if (!file) return;
+    if (isReadonlyFile(filePath)) {
+      toast.error('This file is read-only');
+      return;
+    }
     try {
       const res = await fetch(`${apiBasePath}/content`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
         body: JSON.stringify({ file: filePath, content: file.content }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.error === 'readonly') {
+          toast.error('This file is read-only');
+          return;
+        }
+        throw new Error();
+      }
       setOpenFiles((prev) =>
         prev.map((f) => (f.path === filePath ? { ...f, originalContent: f.content, dirty: false } : f)),
       );
@@ -99,7 +216,23 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
     } catch {
       toast.error(`Failed to save ${file.name}`);
     }
-  }, [openFiles, apiBasePath, toast]);
+  }, [openFiles, apiBasePath, toast, isReadonlyFile]);
+
+  // ---- Expose save-all-dirty-files for parent (used by LabResultsPane before Run/Debug) ----
+  const saveAllDirtyFiles = useCallback(async () => {
+    const dirtyFiles = openFiles.filter((f) => f.dirty);
+    const saved = [];
+    for (const f of dirtyFiles) {
+      await saveFile(f.path);
+      saved.push(f.path);
+    }
+    return saved;
+  }, [openFiles, saveFile]);
+
+  useEffect(() => {
+    if (saveAllRef) saveAllRef.current = saveAllDirtyFiles;
+    return () => { if (saveAllRef) saveAllRef.current = null; };
+  }, [saveAllRef, saveAllDirtyFiles]);
 
   // ---- Debug workflow: save dirty files, create result run, notify user ----
   const handleDebugWorkflow = useCallback(async (workflowFile) => {
@@ -127,7 +260,7 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
   }, [lab.id, toast, openFiles, saveFile]);
 
   // Open file as a tab (or switch to existing)
-  const handleFileOpen = useCallback((file) => {
+  const handleFileOpen = useCallback(async (file) => {
     const filePath = file.path;
     if (openFiles.find((f) => f.path === filePath)) {
       setActiveTab(`file:${filePath}`);
@@ -139,6 +272,12 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
     const isImg = isImageFile(filePath);
     const isPd = isPdfFile(filePath);
     const isTxt = file.isText || isTextFile(filePath);
+
+    // Acquire lock for editable text files before opening
+    if ((isTxt || isSql) && !isReadonlyFile(filePath)) {
+      const locked = await acquireTabLock(filePath);
+      if (!locked) return; // couldn't acquire lock — don't open
+    }
 
     if (isTxt || isSql) {
       fetch(`${apiBasePath}/content?file=${encodeURIComponent(filePath)}`, {
@@ -154,7 +293,10 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
           }]);
           setActiveTab(`file:${filePath}`);
         })
-        .catch(() => toast.error(`Failed to load ${filePath}`));
+        .catch(() => {
+          releaseTabLock(filePath);
+          toast.error(`Failed to load ${filePath}`);
+        });
     } else if (isImg || isPd) {
       setOpenFiles((prev) => [...prev, {
         path: filePath, name: file.name, content: '', originalContent: '',
@@ -162,14 +304,18 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
       }]);
       setActiveTab(`file:${filePath}`);
     }
-  }, [openFiles, apiBasePath, toast]);
+  }, [openFiles, apiBasePath, toast, acquireTabLock, releaseTabLock, isReadonlyFile]);
 
   const handleFileClose = useCallback((filePath) => {
     const file = openFiles.find((f) => f.path === filePath);
     if (file?.dirty && !confirm(`File "${file.name}" has unsaved changes. Close anyway?`)) return;
+    // Release lock when closing tab
+    if (file?.isText && !isReadonlyFile(filePath)) {
+      releaseTabLock(filePath);
+    }
     setOpenFiles((prev) => prev.filter((f) => f.path !== filePath));
     setActiveTab((prev) => (prev === `file:${filePath}` ? 'browser' : prev));
-  }, [openFiles]);
+  }, [openFiles, releaseTabLock, isReadonlyFile]);
 
   const updateFileContent = useCallback((filePath, newContent) => {
     setOpenFiles((prev) =>
@@ -206,7 +352,14 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
 
         {openFiles.map((file) => {
           const isActive = activeTab === `file:${file.path}`;
-          const icon = file.isSql ? '🧮' : file.isImage ? '🖼️' : file.isPdf ? '📕' : '📄';
+          const lock = tabLocks[file.path];
+          const lockedByMe = lock && lock.isMe;
+          const lockedByOther = lock && !lock.isMe;
+          const rdonly = isReadonlyFile(file.path);
+          const icon = rdonly ? lockCfg.readonlyIcon
+            : lockedByMe ? lockCfg.crownIcon
+            : lockedByOther ? lockCfg.lockIcon
+            : file.isSql ? '🧮' : file.isImage ? '🖼️' : file.isPdf ? '📕' : '📄';
           const shouldBlink = !isActive && debug?.status === 'stopped' && stoppedRelPath === file.path;
           return (
             <span key={file.path} style={{
@@ -259,6 +412,9 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
             onFileDoubleClick={handleFileOpen}
             onDebugWorkflow={handleDebugWorkflow}
             specialFolders={appConfig?.outputsFolderName ? [appConfig.outputsFolderName] : ['Outputs']}
+            csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+            onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: apiBasePath, fileName }) : undefined}
+            labOwnerId={lab.ownerId}
           />
         </div>
 
@@ -291,6 +447,8 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
                 onSave={() => saveFile(file.path)}
                 debug={debug}
                 labId={lab.id}
+                lockInfo={tabLocks[file.path]}
+                isReadonly={isReadonlyFile(file.path)}
               />
             ) : file.isImage ? (
               <ZoomableImage
@@ -323,7 +481,7 @@ export default function LabScriptsPane({ lab, debug, appConfig }) {
  * For Python files: always uses DebugEditor with breakpoint gutter.
  * Breakpoints are stored using relative paths (within lab scripts folder).
  */
-function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSave, debug, labId }) {
+function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSave, debug, labId, lockInfo, isReadonly }) {
   const availableThemes = [
     { value: 'vs', label: 'Light' },
     { value: 'vs-dark', label: 'Dark' },
@@ -331,6 +489,9 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
   ];
 
   const isPython = file.language === 'python';
+  const lockedByMe = lockInfo && lockInfo.isMe;
+  const lockedByOther = lockInfo && !lockInfo.isMe;
+  const editorReadOnly = isReadonly || lockedByOther;
 
   // Breakpoints use relative paths (file.path is relative within scripts/)
   const breakpoints = (isPython && debug) ? debug.getBreakpoints(file.path) : new Set();
@@ -365,6 +526,21 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             background: 'rgba(59,130,246,0.2)', color: editorTheme === 'vs' ? '#1d4ed8' : '#60a5fa',
             padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase',
           }}>{file.language}</span>
+          {isReadonly && (
+            <span style={{ background: 'rgba(239,68,68,0.2)', color: '#dc2626', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
+              {lockCfg.readonlyIcon} Read only
+            </span>
+          )}
+          {lockedByMe && (
+            <span style={{ background: 'rgba(245,158,11,0.2)', color: '#92400e', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
+              {lockCfg.crownIcon} Exclusive
+            </span>
+          )}
+          {lockedByOther && (
+            <span style={{ background: 'rgba(239,68,68,0.2)', color: '#991b1b', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 500, textTransform: 'uppercase' }}>
+              {lockCfg.lockIcon} {lockInfo.userName || lockInfo.userEmail || 'Locked'}
+            </span>
+          )}
           {isPython && debug && (
             <span style={{
               fontSize: 10, color: breakpoints.size > 0 ? '#dc2626' : '#888', fontFamily: 'monospace',
@@ -385,7 +561,7 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             {availableThemes.map((t) => <option key={t.value} value={t.value}>🎨 {t.label}</option>)}
           </select>
         </div>
-        <button className="btn btn-add" onClick={onSave} disabled={!file.dirty} style={{ fontSize: 12, padding: '4px 10px' }}>
+        <button className="btn btn-add" onClick={onSave} disabled={!file.dirty || editorReadOnly} style={{ fontSize: 12, padding: '4px 10px' }}>
           💾 Save{file.dirty ? ' •' : ''}
         </button>
       </div>
@@ -396,8 +572,9 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             editorTheme={editorTheme}
             breakpoints={breakpoints}
             stoppedLine={stoppedLine}
-            readOnly={false}
+            readOnly={editorReadOnly}
             onChange={(val) => onChange(val || '')}
+            onSave={editorReadOnly ? undefined : onSave}
             onToggleBreakpoint={(_filePath, line) => {
               debug.toggleBreakpoint(file.path, line);
             }}
@@ -406,13 +583,13 @@ function TextFileEditor({ file, editorTheme, onEditorThemeChange, onChange, onSa
             }}
           />
         ) : (
-          <Editor
-            height="100%"
-            language={file.language}
+          <CodeEditor
             value={file.content}
-            onChange={(val) => onChange(val || '')}
+            language={file.language}
             theme={editorTheme}
-            options={{ ...monacoDefaults, readOnly: false }}
+            readOnly={editorReadOnly}
+            onChange={editorReadOnly ? undefined : (val) => onChange(val || '')}
+            onSave={editorReadOnly ? undefined : onSave}
           />
         )}
       </div>

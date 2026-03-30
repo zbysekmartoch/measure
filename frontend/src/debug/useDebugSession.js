@@ -52,8 +52,11 @@ export function useDebugSession({ labId } = {}) {
     const sap = info.scriptAbsolutePath;
     if (sp && sap && sap.endsWith(sp)) {
       const root = sap.slice(0, -sp.length);
-      return root + relPath;
+      const resolved = root + relPath;
+      console.log(`[useDebugSession] resolveAbsPath: "${relPath}" → "${resolved}" (root="${root}")`);
+      return resolved;
     }
+    console.warn(`[useDebugSession] resolveAbsPath failed: relPath="${relPath}", scriptPath="${sp}", scriptAbsPath="${sap}"`);
     return null;
   }
 
@@ -181,6 +184,18 @@ export function useDebugSession({ labId } = {}) {
     setVariables([]);
     setStoppedLocation(null);
 
+    // Disconnect any existing DAP client + SSE before reconnecting
+    if (clientRef.current) {
+      console.log('[useDebugSession] Disconnecting previous DAP client before re-attach');
+      try { clientRef.current.disconnect(); } catch { /* ignore */ }
+      clientRef.current = null;
+    }
+    if (sseRef.current) {
+      console.log('[useDebugSession] Closing previous SSE before re-attach');
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+
     try {
       // Get current debug status
       const info = await pollStatus();
@@ -239,11 +254,29 @@ export function useDebugSession({ labId } = {}) {
       });
 
       client.on('terminated', () => {
+        console.log('[useDebugSession] received "terminated" — sending disconnect so debugpy can exit');
         setStatus('ended');
+        setStoppedLocation(null);
+        setCallStack([]);
+        // Send disconnect so debugpy releases the process and it can exit.
+        // Without this, debugpy keeps the child process alive waiting for
+        // the DAP client to disconnect, and the workflow-runner's onExit
+        // listener never fires (workflow hangs on "running" forever).
+        if (clientRef.current?.connected) {
+          clientRef.current.request('disconnect', { terminateDebuggee: false })
+            .catch(() => { /* ignore — best effort */ })
+            .finally(() => {
+              if (clientRef.current) { clientRef.current.disconnect(); clientRef.current = null; }
+            });
+        }
+        if (sseRef.current) { sseRef.current.close(); sseRef.current = null; }
       });
 
       client.on('exited', () => {
+        console.log('[useDebugSession] received "exited"');
         setStatus('ended');
+        setStoppedLocation(null);
+        setCallStack([]);
       });
 
       client.on('disconnected', () => {
@@ -300,7 +333,15 @@ export function useDebugSession({ labId } = {}) {
       // Wait for configuration to also complete (should be done by now)
       await configuredPromise;
 
-      setStatus('running');
+      // Only transition to 'running' if DAP events haven't already moved us
+      // to 'stopped' (breakpoint hit during attach). Without this guard the
+      // unconditional setStatus('running') would overwrite 'stopped', leaving
+      // the UI stuck with "RUNNING" even though variables/stack are loaded.
+      setStatus(prev => {
+        if (prev === 'connecting') return 'running';
+        console.log(`[useDebugSession] attach done, keeping status="${prev}" (not overwriting with "running")`);
+        return prev;
+      });
     } catch (e) {
       setError(e.message);
       setStatus('idle');
@@ -310,10 +351,16 @@ export function useDebugSession({ labId } = {}) {
 
   // ── Detach / stop ──
   const detach = useCallback(async () => {
+    console.log('[useDebugSession] detach called');
     if (clientRef.current) {
       try { await clientRef.current.request('disconnect', { terminateDebuggee: true }); } catch { /* ignore */ }
       clientRef.current.disconnect();
       clientRef.current = null;
+    }
+    // Close SSE
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
     }
     // Also tell backend to stop
     try {

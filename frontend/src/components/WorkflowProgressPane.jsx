@@ -253,10 +253,12 @@ function WorkflowProgressBar({ workflowState }) {
 
 // ── Main component ──────────────────────────────────────────────────────────
 
-export default function WorkflowProgressPane({ workflowState, onClose }) {
+export default function WorkflowProgressPane({ workflowState, onClose, preRunMessages }) {
   if (!workflowState || !workflowState.steps || workflowState.steps.length === 0) {
     return null;
   }
+
+  const commentedSteps = workflowState.commentedSteps || [];
 
   return (
     <div style={{
@@ -279,6 +281,62 @@ export default function WorkflowProgressPane({ workflowState, onClose }) {
         overflowY: 'auto',
         paddingRight: 2,
       }}>
+        {/* Pre-run messages (saved files) */}
+        {preRunMessages && preRunMessages.length > 0 && (
+          <div style={{ marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #e5e7eb' }}>
+            {preRunMessages.map((msg, i) => (
+              <div key={i} style={{
+                fontSize: 10,
+                color: msg.type === 'saved' ? '#16a34a' : '#6b7280',
+                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                padding: '1px 0',
+                lineHeight: 1.4,
+              }}>
+                {msg.type === 'saved' ? '💾 ' : ''}{msg.text}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Commented-out (skipped) scripts */}
+        {commentedSteps.length > 0 && (
+          <div style={{ marginBottom: 4 }}>
+            {commentedSteps.map((name, i) => (
+              <div key={`commented-${i}`} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                paddingBottom: 3,
+              }}>
+                <span style={{
+                  fontSize: 11,
+                  color: '#9ca3af',
+                  fontWeight: 700,
+                  width: 18,
+                  textAlign: 'center',
+                  flexShrink: 0,
+                }}>⊘</span>
+                <span style={{
+                  fontSize: 11,
+                  color: '#9ca3af',
+                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                  wordBreak: 'break-all',
+                  textDecoration: 'line-through',
+                  lineHeight: 1.3,
+                }}>
+                  {name}
+                </span>
+                <span style={{
+                  fontSize: 9,
+                  color: '#b0b8c4',
+                  fontStyle: 'italic',
+                  whiteSpace: 'nowrap',
+                }}>skipped</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {workflowState.steps.map((step, i) => (
           <StepRow
             key={`${step.name}-${i}`}
