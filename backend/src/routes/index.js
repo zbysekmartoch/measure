@@ -85,6 +85,30 @@ router.get('/health', async (req, res) => {
   }
 });
 
+// ─── What's New – public endpoint (no auth) ──────────────────────────────────
+router.get('/whatsnew', async (req, res) => {
+  try {
+    const wnDir = path.join(__dirname, '../../whatsnew');
+    let files;
+    try {
+      files = await fs.readdir(wnDir);
+    } catch {
+      return res.json([]);
+    }
+    const mdFiles = files.filter(f => f.endsWith('.md')).sort().reverse();
+    const entries = await Promise.all(
+      mdFiles.map(async f => {
+        const content = await fs.readFile(path.join(wnDir, f), 'utf8');
+        const version = f.replace(/\.md$/, '');
+        return { version, content };
+      })
+    );
+    res.json(entries);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load whatsnew entries' });
+  }
+});
+
 // API routes - auth endpoint without authentication
 router.use('/v1/auth', auth);
 

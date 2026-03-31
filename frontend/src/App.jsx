@@ -23,6 +23,7 @@ import LabWorkspaceTab from './tabs/LabWorkspaceTab.jsx';
 import { fetchJSON } from './lib/fetchJSON.js';
 import { icons, tabIcons } from './lib/uiConfig.js';
 import { hasDirtyFiles, hasDirtyFilesForLab } from './lib/dirtyRegistry.js';
+import WhatsNewPage from './components/WhatsNewPage.jsx';
 
 /**
  * Standalone lab view — used when opened via popup window (?lab=<id>&standalone=1).
@@ -702,6 +703,11 @@ function AppContent() {
 }
 
 export default function App() {
+  // Public route: /whatsnew — no auth required
+  if (window.location.pathname === '/whatsnew') {
+    return <WhatsNewPage />;
+  }
+
   return (
     <LanguageProvider>
       <SettingsProvider>
