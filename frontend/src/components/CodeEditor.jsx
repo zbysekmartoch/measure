@@ -47,15 +47,18 @@ export default function CodeEditor({
   // During editing we pass value={undefined} so Monaco manages its own state
   // and fast typing doesn't cause cursor jumps. In all other modes we pass the
   // controlled value so file switches update content reliably.
+  //
+  // EXCEPTION: on the very first render we always pass the value so the editor
+  // has initial content (important when Monaco is mounted fresh, e.g. switching
+  // from Markdown preview to edit mode).
   const isEditing = !readOnly && !!onChange;
-
-  const mergedOptions = useMemo(() => ({
-    ...monacoDefaults,
-    readOnly,
-    ...extraOptions,
-  }), [readOnly, extraOptions]);
+  const mountedRef = useRef(false);
 
   const handleMount = useCallback((editor, monaco) => {
+    // Mark as mounted *after* this render cycle so the first render still
+    // passes the controlled value.
+    requestAnimationFrame(() => { mountedRef.current = true; });
+
     // Ctrl+S / Cmd+S → save
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       if (!readOnlyRef.current && onSaveRef.current) {
@@ -67,11 +70,21 @@ export default function CodeEditor({
     onMountProp?.(editor, monaco);
   }, [onMountProp]);
 
+  const mergedOptions = useMemo(() => ({
+    ...monacoDefaults,
+    readOnly,
+    ...extraOptions,
+  }), [readOnly, extraOptions]);
+
+  // During editing, skip controlled value to prevent cursor jumps — BUT only
+  // after the editor has mounted once (so fresh mounts get initial content).
+  const controlledValue = (isEditing && mountedRef.current) ? undefined : (value ?? '');
+
   return (
     <Editor
       height={height}
       language={language}
-      value={isEditing ? undefined : (value ?? '')}
+      value={controlledValue}
       onChange={onChange}
       options={mergedOptions}
       theme={theme}
