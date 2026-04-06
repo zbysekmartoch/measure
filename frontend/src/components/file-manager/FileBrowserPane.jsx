@@ -45,7 +45,7 @@ function FolderNode({
   onTriggerFolderUpload, onDownloadFolderZip, onDeleteFolder,
   onDrop, onDragOver, onDragLeave,
   onCopyFile, onCopyFolder, onPasteInto, clipboard, apiBasePath,
-  onDebugWorkflow, onRename, changedFiles,
+  onDebugWorkflow, onRunWorkflow, onRename, changedFiles,
   onPublish, onCreateSync,
   isRoot,
   specialFolders,
@@ -93,8 +93,8 @@ function FolderNode({
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: isSpecial ? '#7c3aed' : '#374151', minWidth: 0 }}>
           <span style={{ display: 'inline-block', transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>▶</span>
           <span>{isSpecial ? '📦' : '📁'}</span>
-          <span title={node.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: isSpecial ? 'italic' : 'normal' }}>{node.name}</span>
-          {isSpecial && <span style={{ fontSize: 8, color: '#7c3aed', background: '#ede9fe', padding: '0 4px', borderRadius: 4, flexShrink: 0 }}>TEMPLATE</span>}
+          <span title={node.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+
           <span style={{ fontSize: 9, color: '#9ca3af', background: '#e5e7eb', padding: '0 4px', borderRadius: 6, flexShrink: 0 }}>
             {countFiles(node)}
           </span>
@@ -203,6 +203,7 @@ function FolderNode({
             clipboard={clipboard}
             apiBasePath={apiBasePath}
             onDebugWorkflow={onDebugWorkflow}
+            onRunWorkflow={onRunWorkflow}
             onRename={onRename}
             changedFiles={changedFiles}
             onPublish={onPublish}
@@ -228,6 +229,7 @@ function FolderNode({
             onDoubleClick={onFileDoubleClick}
             onCopy={onCopyFile}
             onDebugWorkflow={onDebugWorkflow}
+            onRunWorkflow={onRunWorkflow}
             onRename={onRename}
             isChanged={changedFiles?.has(child.path)}
             onPublish={onPublish}
@@ -246,10 +248,11 @@ function FolderNode({
 }
 
 /* ── file row ───────────────────────────────────────────────────────────────── */
-function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRename, isChanged, onPublish, compactButtons, lockInfo, isReadonly, onRequestLock, onUnlockFile, labOwnerId, currentUserId }) {
+function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRunWorkflow, onRename, isChanged, onPublish, compactButtons, lockInfo, isReadonly, onRequestLock, onUnlockFile, labOwnerId, currentUserId }) {
   const [hovered, setHovered] = useState(false);
   const indent = depth * 16 + 12;
   const isWorkflow = file.name?.endsWith('.workflow');
+  const isDebuggable = isWorkflow || /\.(py|js|cjs)$/i.test(file.name);
   const isLockedByOther = lockInfo && !lockInfo.isMe;
   const isLockedByMe = lockInfo && lockInfo.isMe;
   const changedBg = '#fef9c3';  // light yellow for changed files
@@ -301,8 +304,11 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         {onDoubleClick && (
           <IBtn title={fiBtn.openInTab.label} onClick={(e) => { e.stopPropagation(); onDoubleClick(file); }} bg={fiBtn.openInTab.bg}>{fiBtn.openInTab.icon}</IBtn>
         )}
-        {isWorkflow && onDebugWorkflow && (
+        {isDebuggable && onDebugWorkflow && (
           <IBtn title={fiBtn.debugWorkflow.label} onClick={() => onDebugWorkflow(file.path)} bg={fiBtn.debugWorkflow.bg}>{fiBtn.debugWorkflow.icon}</IBtn>
+        )}
+        {isWorkflow && onRunWorkflow && (
+          <IBtn title={fiBtn.runWorkflow.label} onClick={() => onRunWorkflow(file.path)} bg={fiBtn.runWorkflow.bg}>{fiBtn.runWorkflow.icon}</IBtn>
         )}
         <IBtn title={fiBtn.renameFile.label} onClick={() => {
           const newName = prompt('New name:', file.name);
@@ -373,6 +379,7 @@ export default function FileBrowserPane({
   onDownloadFolderZip,
   onPasteInto,
   onDebugWorkflow,
+  onRunWorkflow,
   onRename,
   changedFiles,
   showModificationDate,
@@ -527,6 +534,7 @@ export default function FileBrowserPane({
         clipboard={clipboard}
         apiBasePath={apiBasePath}
         onDebugWorkflow={onDebugWorkflow}
+        onRunWorkflow={onRunWorkflow}
         onRename={onRename}
         changedFiles={changedFiles}
         onPublish={onPublish}

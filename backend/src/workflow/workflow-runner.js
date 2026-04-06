@@ -176,7 +176,7 @@ export class WorkflowRun extends EventEmitter {
       p.completedAt = new Date().toISOString();
     }
     await fs.writeFile(
-      path.join(this.resultDir, 'progress.json'),
+      path.join(this.resultDir, '_progress.json'),
       JSON.stringify(p, null, 2),
       'utf-8',
     );
@@ -186,6 +186,7 @@ export class WorkflowRun extends EventEmitter {
    * Append a debug log message.
    */
   async _debugLog(msg) {
+    if (!this.debugLogFile) return;
     const line = `[${new Date().toISOString()}] ${msg}\n`;
     await fs.appendFile(this.debugLogFile, line).catch(() => {});
   }
@@ -201,10 +202,10 @@ export class WorkflowRun extends EventEmitter {
     const now = this.startedAt;
     const separator = '='.repeat(80);
 
-    // Initialize log files
-    await fs.writeFile(this.logFile, `Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
-    await fs.writeFile(this.errorFile, '', 'utf-8');
-    await fs.writeFile(this.debugLogFile, `[debuger] Session started at ${now}\n${separator}\n`, 'utf-8');
+    // Initialize log files (skip if null — e.g. output-mode runs from Scripts tab)
+    if (this.logFile) await fs.writeFile(this.logFile, `Workflow execution started at ${now}\n${separator}\n`, 'utf-8');
+    if (this.errorFile) await fs.writeFile(this.errorFile, '', 'utf-8');
+    if (this.debugLogFile) await fs.writeFile(this.debugLogFile, `[debuger] Session started at ${now}\n${separator}\n`, 'utf-8');
 
     this._emit('workflow-start', {
       steps: [...this.steps],
@@ -238,7 +239,7 @@ export class WorkflowRun extends EventEmitter {
         this.stepStatuses[i].startedAt = new Date().toISOString();
 
         await this._writeProgress(i + 1, stepName, 'running');
-        await fs.appendFile(this.logFile, `\n[${new Date().toISOString()}] Step ${i + 1}/${this.steps.length}: ${stepName}\n`);
+        if (this.logFile) await fs.appendFile(this.logFile, `\n[${new Date().toISOString()}] Step ${i + 1}/${this.steps.length}: ${stepName}\n`);
 
         this._emit('step-start', {
           index: i,
@@ -272,7 +273,7 @@ export class WorkflowRun extends EventEmitter {
             });
 
             await this._debugLog(`debugpy listening on port ${port}, PID ${pid}, waiting for client...`);
-            await fs.appendFile(this.logFile, `[debugpy] listening on port ${port}, PID ${pid}\n`);
+            if (this.logFile) await fs.appendFile(this.logFile, `[debugpy] listening on port ${port}, PID ${pid}\n`);
 
             // Emit debug-waiting event
             this.stepStatuses[i].status = StepStatus.DEBUG_WAITING;
@@ -331,7 +332,7 @@ export class WorkflowRun extends EventEmitter {
 
           } catch (err) {
             await this._debugLog(`Failed to start debug session: ${err.message}`);
-            await fs.appendFile(this.errorFile, `[debugpy] Failed: ${err.message}\n`);
+            if (this.errorFile) await fs.appendFile(this.errorFile, `[debugpy] Failed: ${err.message}\n`);
             success = false;
           }
         } else if (isPython) {
@@ -342,7 +343,7 @@ export class WorkflowRun extends EventEmitter {
           const cmdMap = { '.js': 'node', '.cjs': 'node', '.sh': 'bash', '.r': 'Rscript', '.R': 'Rscript' };
           const command = cmdMap[ext];
           if (!command) {
-            await fs.appendFile(this.errorFile, `Unsupported script type: ${ext}\n`);
+            if (this.errorFile) await fs.appendFile(this.errorFile, `Unsupported script type: ${ext}\n`);
             success = false;
           } else {
             success = await this._spawnScript(command, scriptAbsPath);
@@ -387,7 +388,7 @@ export class WorkflowRun extends EventEmitter {
             const totalDuration = Date.now() - workflowStartTime;
 
             await this._writeProgress(i + 1, stepName, 'failed');
-            await fs.appendFile(this.errorFile, `Step ${stepName} failed\n`);
+            if (this.errorFile) await fs.appendFile(this.errorFile, `Step ${stepName} failed\n`);
 
             this._emit('workflow-failed', {
               failedStep: i,
@@ -425,7 +426,7 @@ export class WorkflowRun extends EventEmitter {
           this.completedAt = new Date().toISOString();
           const totalDuration = Date.now() - workflowStartTime;
           await this._writeProgress(this.steps.length, this.steps[this.steps.length - 1], 'completed');
-          await fs.appendFile(this.logFile, `\n${separator}\n[${new Date().toISOString()}] WORKFLOW COMPLETED\n${separator}\n`);
+          if (this.logFile) await fs.appendFile(this.logFile, `\n${separator}\n[${new Date().toISOString()}] WORKFLOW COMPLETED\n${separator}\n`);
           await this._debugLog('WORKFLOW COMPLETED');
 
           this._emit('workflow-complete', { totalDurationMs: totalDuration });
@@ -469,11 +470,11 @@ export class WorkflowRun extends EventEmitter {
       this._currentProcess = child;
 
       child.stdout.on('data', (d) => {
-        fs.appendFile(this.logFile, d.toString()).catch(() => {});
+        if (this.logFile) fs.appendFile(this.logFile, d.toString()).catch(() => {});
       });
 
       child.stderr.on('data', (d) => {
-        fs.appendFile(this.errorFile, d.toString()).catch(() => {});
+        if (this.errorFile) fs.appendFile(this.errorFile, d.toString()).catch(() => {});
       });
 
       child.on('error', () => {

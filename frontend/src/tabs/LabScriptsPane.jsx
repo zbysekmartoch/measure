@@ -21,6 +21,8 @@ import ZoomableImage from '../components/ZoomableImage.jsx';
 import { fileLocking as lockCfg } from '../lib/uiConfig.js';
 import { setDirtyCount, removeDirtyCount } from '../lib/dirtyRegistry.js';
 import { fetchJSON } from '../lib/fetchJSON.js';
+import WorkflowProgressPane from '../components/WorkflowProgressPane.jsx';
+import { useWorkflowEvents } from '../hooks/useWorkflowEvents.js';
 
 export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveAllRef }) {
   const toast = useToast();
@@ -48,11 +50,11 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
     } catch { /* ignore */ }
   }, [apiBasePath, openFiles.length]);
 
-  // Poll locks every 5 seconds while tabs are open
+  // Poll locks every 15 seconds while tabs are open
   useEffect(() => {
     if (openFiles.length === 0) return;
     loadTabLocks();
-    const id = setInterval(loadTabLocks, 5000);
+    const id = setInterval(loadTabLocks, 15_000);
     return () => clearInterval(id);
   }, [loadTabLocks, openFiles.length]);
 
@@ -234,6 +236,65 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
     return () => { if (saveAllRef) saveAllRef.current = null; };
   }, [saveAllRef, saveAllDirtyFiles]);
 
+  // ---- Workflow progress state (for "run workflow" from Scripts tab) ----
+  const [workflowRunning, setWorkflowRunning] = useState(false);
+  const [showProgress, setShowProgress] = useState(false);
+  const [sseKey, setSseKey] = useState(0);
+  const [preRunMessages, setPreRunMessages] = useState([]);
+  const [stopOnFailure, setStopOnFailure] = useState(true);
+
+  // SSE subscription for live workflow progress (virtual resultId "_output")
+  const { workflowState } = useWorkflowEvents(lab.id, '_output', showProgress || workflowRunning, sseKey);
+
+  // Auto-show/hide progress based on workflow state
+  useEffect(() => {
+    if (!workflowState) return;
+    const st = workflowState.status;
+    if (st === 'running') {
+      setShowProgress(true);
+      setWorkflowRunning(true);
+    } else if (st === 'completed' || st === 'failed' || st === 'aborted' || st === 'idle') {
+      setWorkflowRunning(false);
+      if (st === 'idle' && (!workflowState.steps || workflowState.steps.length === 0)) {
+        setShowProgress(false);
+      }
+    }
+  }, [workflowState]);
+
+  // ---- Run workflow: save dirty files, start workflow to Outputs, show progress ----
+  const handleRunWorkflow = useCallback(async (workflowFile) => {
+    try {
+      // Auto-save all dirty open files before running
+      const dirtyFiles = openFiles.filter((f) => f.dirty);
+      if (dirtyFiles.length > 0) {
+        const saved = [];
+        for (const f of dirtyFiles) {
+          await saveFile(f.path);
+          saved.push(f.path);
+        }
+        setPreRunMessages(saved.map(f => ({ type: 'saved', text: `${f} saved` })));
+        toast.info(`Auto-saved ${dirtyFiles.length} file${dirtyFiles.length > 1 ? 's' : ''}`);
+      } else {
+        setPreRunMessages([]);
+      }
+
+      setWorkflowRunning(true);
+      setShowProgress(true);
+
+      const res = await fetch(`/api/v1/labs/${lab.id}/scripts/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ workflowFile, stopOnFailure }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+      setSseKey(k => k + 1);
+      toast.success('Workflow started');
+    } catch (e) {
+      toast.error(`Run workflow error: ${e.message}`);
+      setWorkflowRunning(false);
+    }
+  }, [lab.id, toast, openFiles, saveFile, stopOnFailure]);
+
   // ---- Debug workflow: save dirty files, create result run, notify user ----
   const handleDebugWorkflow = useCallback(async (workflowFile) => {
     try {
@@ -253,9 +314,9 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
       const data = await res.json();
-      toast.success(`Result #${data.resultId} prepared for ${workflowFile}`);
+      toast.success(`Debug session #${data.resultId} prepared for ${workflowFile}`);
     } catch (e) {
-      toast.error(`Prepare to run error: ${e.message}`);
+      toast.error(`Create new debugging session error: ${e.message}`);
     }
   }, [lab.id, toast, openFiles, saveFile]);
 
@@ -401,21 +462,60 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
       {/* Content area */}
       <div style={{ border: '1px solid #012345', background: '#fff', flex: 1, minHeight: 0, position: 'relative' }}>
         {/* File browser */}
-        <div style={{ height: '100%', display: activeTab === 'browser' ? 'block' : 'none', padding: 6 }}>
-          <FileManagerEditor
-            apiBasePath={apiBasePath}
-            showUpload showDelete
-            readOnly={false}
-            showModificationDate
-            title={`${lab.name} — scripts`}
-            refreshTrigger={0}
-            onFileDoubleClick={handleFileOpen}
-            onDebugWorkflow={handleDebugWorkflow}
-            specialFolders={appConfig?.outputsFolderName ? [appConfig.outputsFolderName] : ['Outputs']}
-            csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
-            onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: apiBasePath, fileName }) : undefined}
-            labOwnerId={lab.ownerId}
-          />
+        <div style={{ height: '100%', display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column', padding: 6 }}>
+
+          {/* Stop on failure + progress controls */}
+          {(showProgress || workflowRunning) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                fontSize: 12, color: '#374151', cursor: 'pointer',
+                whiteSpace: 'nowrap', userSelect: 'none',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={stopOnFailure}
+                  onChange={(e) => setStopOnFailure(e.target.checked)}
+                  style={{ cursor: 'pointer', accentColor: '#dc2626' }}
+                />
+                Stop on failure
+              </label>
+              {workflowRunning && (
+                <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 500 }}>
+                  ● Running…
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Main content: progress pane + file browser */}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 0 }}>
+            {showProgress && workflowState && workflowState.steps?.length > 0 && (
+              <WorkflowProgressPane
+                workflowState={workflowState}
+                onClose={() => setShowProgress(false)}
+                preRunMessages={preRunMessages}
+              />
+            )}
+
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+              <FileManagerEditor
+                apiBasePath={apiBasePath}
+                showUpload showDelete
+                readOnly={false}
+                showModificationDate
+                title={`${lab.name} — scripts`}
+                refreshTrigger={0}
+                onFileDoubleClick={handleFileOpen}
+                onDebugWorkflow={handleDebugWorkflow}
+                onRunWorkflow={handleRunWorkflow}
+                specialFolders={appConfig?.outputsFolderName ? [appConfig.outputsFolderName] : ['Outputs']}
+                csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+                onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: apiBasePath, fileName }) : undefined}
+                labOwnerId={lab.ownerId}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Open file editors */}

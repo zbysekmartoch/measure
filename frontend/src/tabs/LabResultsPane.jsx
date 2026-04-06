@@ -23,7 +23,7 @@ import { useToast } from '../components/Toast';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
 import CodeEditor from '../components/CodeEditor.jsx';
-import { appConfig } from '../lib/appConfig.js';
+import { appConfig as appCfg } from '../lib/appConfig.js';
 import { shadow, resultButtons as rbtn } from '../lib/uiConfig.js';
 import ZoomableImage from '../components/ZoomableImage.jsx';
 import WorkflowProgressPane from '../components/WorkflowProgressPane.jsx';
@@ -197,10 +197,10 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
   // ---- Remove result ----
   const handleRemoveResult = useCallback(async () => {
     if (!selectedResult) return;
-    if (!confirm(`Remove result "${getResultLabel(selectedResult)}"?`)) return;
+    if (!confirm(`Remove debug session "${getResultLabel(selectedResult)}"?`)) return;
     try {
       await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResult.id}`, { method: 'DELETE' });
-      toast.success(`Result ${selectedResult.id} removed`);
+      toast.success(`Debug session ${selectedResult.id} removed`);
       setSelectedResultId('');
       setSelectedResult(null);
       loadResults();
@@ -252,7 +252,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
           }
         }
       } catch { /* ignore */ }
-    }, appConfig.RESULT_LOG_POLL_INTERVAL_MS || 3000);
+    }, appCfg.RESULT_LOG_POLL_INTERVAL_MS || 3000);
 
     return () => { if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; } };
   }, [selectedResultId, isPending, lab.id, refreshOpenFileTabs]);
@@ -462,21 +462,6 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
 
   const canRun = selectedResult && !workflowRunning && !isPending;
 
-  // ---- Publish file/folder to current_output ----
-  const handlePublish = useCallback(async (itemPath) => {
-    if (!selectedResultId) return;
-    try {
-      await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResultId}/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: itemPath }),
-      });
-      toast.success(`Published "${itemPath}" to current output`);
-    } catch (err) {
-      toast.error(`Publish failed: ${err.message || err}`);
-    }
-  }, [lab.id, selectedResultId, toast]);
-
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
       {/* Top bar: selector + Run / Debug buttons + stop-on-failure + status */}
@@ -615,9 +600,9 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
             }}
             onMouseEnter={(e) => { e.currentTarget.style.boxShadow = shadow.hover; e.currentTarget.style.transform = 'translateY(-1px)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.boxShadow = shadow.normal; e.currentTarget.style.transform = ''; }}
-            title="Remove this result folder"
+            title="Remove this debug session"
           >
-            🗑 Remove result
+            🗑 Remove debug session
           </button>
         )}
       </div>
@@ -698,7 +683,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
                 title={`Result #${selectedResultId}`}
                 refreshTrigger={refreshTrigger}
                 onFileDoubleClick={handleFileOpen}
-                onPublish={handlePublish}
+
                 csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
                 onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: fileManagerApiPath, fileName }) : undefined}
                 labOwnerId={lab.ownerId}

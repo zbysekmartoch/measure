@@ -3,7 +3,7 @@
  *
  * Three main sub-tabs:
  *   📜 Scripts  — file browser + inline editors for lab scripts
- *   📊 Results  — result picker + file browser for result files
+ *   � Debug    — result picker + file browser for result files
  *   ⚙️ Settings — lab name, description, sharing
  *
  * The debugger panel can be shown right / below / in a popup window.
@@ -29,7 +29,7 @@ const DataExplorerTab = React.lazy(
 
 const TABS = [
   { key: 'scripts',  icon: '📜', label: 'Scripts' },
-  { key: 'results',  icon: '📊', label: 'Results' },
+  { key: 'results',  icon: '🐞', label: 'Debug' },
   { key: 'output',   icon: '📤', label: 'Current output' },
 ];
 

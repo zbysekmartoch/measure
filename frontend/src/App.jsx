@@ -91,7 +91,7 @@ function AppContent() {
       } catch { /* ignore */ }
     };
     poll();
-    lockPollRef.current = setInterval(poll, 3000);
+    lockPollRef.current = setInterval(poll, 10_000);
     return () => { if (lockPollRef.current) clearInterval(lockPollRef.current); };
   }, [user?.id]);
 
@@ -488,7 +488,7 @@ function AppContent() {
       </div>
 
       {/* Content area */}
-      <div style={{ border: '1px solid #012345', padding: 10, background: '#fff', height: 'calc(100vh - 130px)', position: 'relative' }}>
+      <div style={{ border: '1px solid #012345', padding: 3, background: '#fff', height: 'calc(100vh - 100px)', position: 'relative' }}>
 
         {/* My labs / Shared labs browser */}
         {showList && (

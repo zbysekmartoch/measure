@@ -13,7 +13,7 @@ const en = {
 
   // Tabs
   tabAnalyses: 'Analyses',
-  tabResults: 'Results',
+  tabResults: 'Debug',
   tabDebug: 'Debug',
   tabSettings: 'Settings',
 
@@ -137,11 +137,11 @@ const en = {
 
   // Results
   results: 'Results',
-  selectResult: 'Select result on the left...',
+  selectResult: 'Select session on the left...',
   analysisResultTitle: 'Analysis result',
   downloadResult: 'Download result',
   downloadZip: 'Download ZIP',
-  resultFiles: 'Result files',
+  resultFiles: 'Debugging session files',
   deleteSelected: 'Delete selected',
   deleteSelectedResults: 'Delete selected results',
   noResultsSelected: 'No results selected',
@@ -163,8 +163,8 @@ const en = {
 
   // Debug Tab
   runAndDebug: 'Re-run and Debug',
-  selectResultToDebug: 'Select a result to view files and debug',
-  selectResultPlaceholder: '— Select result —',
+  selectResultToDebug: 'Select a session to view files and debug',
+  selectResultPlaceholder: '— Select session —',
   lastCompleted: 'Last completed',
   confirmRunDebug: 'Run analysis in debug mode?',
   debugAnalysisStarted: 'Analysis started in debug mode.',

@@ -11,6 +11,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ===== Global box-sizing reset ===== */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 /* ===== Disable text selection on UI chrome (tabs, buttons, labels) ===== */
 * {
   -webkit-user-select: none;

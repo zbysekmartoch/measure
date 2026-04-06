@@ -47,7 +47,8 @@ export const fileItemButtons = {
   deleteFolder: { icon: '🗑', bg: '#f81717', label: 'Delete folder' },
   renameFile:   { icon: 'R', bg: '#075500', label: 'Rename file' },
   renameFolder: { icon: 'R', bg: '#075500', label: 'Rename folder' },
-  debugWorkflow:{ icon: '🛠', bg: '#bb51c9', label: 'Prepare to run' },
+  debugWorkflow:{ icon: '🛠', bg: '#bb51c9', label: 'Create new debugging session' },
+  runWorkflow:  { icon: '▶', bg: '#16a34a', label: 'Run workflow' },
   createSync:   { icon: '🔄', bg: '#0ea5e9', label: 'Create sync config' },
 };
 

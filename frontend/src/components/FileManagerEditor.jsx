@@ -29,6 +29,7 @@ export default function FileManagerEditor({
   onFileSelect,
   onFileDoubleClick,
   onDebugWorkflow,
+  onRunWorkflow,
   title,
   refreshTrigger = 0,
   onPublish,
@@ -178,6 +179,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
         onDownloadFolderZip={fm.downloadFolderZip}
         onPasteInto={fm.pasteInto}
         onDebugWorkflow={onDebugWorkflow}
+        onRunWorkflow={onRunWorkflow}
         onRename={fm.renameItem}
         changedFiles={fm.changedFiles}
         onPublish={onPublish}

@@ -156,13 +156,12 @@ export default function useFileManager({
     } catch { /* ignore */ }
   }, [apiBasePath]);
 
-  // Poll locks & requests every 5 seconds
+  // Poll locks every 15 seconds
   useEffect(() => {
     loadLocks();
-    loadLockRequests();
-    const id = setInterval(() => { loadLocks(); loadLockRequests(); }, 5000);
+    const id = setInterval(loadLocks, 15_000);
     return () => clearInterval(id);
-  }, [loadLocks, loadLockRequests]);
+  }, [loadLocks]);
 
   // Heartbeat: while editing, periodically refresh the lock
   useEffect(() => {
@@ -222,9 +221,9 @@ export default function useFileManager({
 
   useEffect(() => { loadFiles(); }, [loadFiles, refreshTrigger]);
 
-  // Auto-poll file list every 5 seconds to detect external changes (sync agent, scripts, etc.)
+  // Auto-poll file list every 15 seconds to detect external changes (sync agent, scripts, etc.)
   useEffect(() => {
-    const id = setInterval(() => { loadFiles(true); }, 5000);
+    const id = setInterval(() => { loadFiles(true); }, 15_000);
     return () => clearInterval(id);
   }, [loadFiles]);
 
@@ -260,6 +259,8 @@ export default function useFileManager({
 
     setSelectedFile(file.path);
     setSelectedFileInfo(file);
+    setFileContent('');
+    setOriginalContent('');
     setIsEditing(false);
     onFileSelect?.(file);
 

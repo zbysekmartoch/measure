@@ -668,9 +668,9 @@ function getLabResultsRoot(labId) {
   return path.join(getLabPath(labId), 'results');
 }
 
-// Helper for lab current_output root.
+// Helper for lab current_output root (Outputs folder inside scripts).
 function getLabCurrentOutputRoot(labId) {
-  return path.join(getLabPath(labId), 'current_output');
+  return path.join(getLabPath(labId), 'scripts', 'Outputs');
 }
 
 // ─── Lab Results ──────────────────────────────────────────────────────────────
@@ -703,7 +703,7 @@ router.get('/:id/results', async (req, res, next) => {
       // Try to read progress.json for richer metadata
       let progress = null;
       try {
-        const raw = await fs.readFile(path.join(dirPath, 'progress.json'), 'utf-8');
+        const raw = await fs.readFile(path.join(dirPath, '_progress.json'), 'utf-8');
         progress = JSON.parse(raw);
       } catch { /* no progress.json — that's fine */ }
 
@@ -1005,7 +1005,7 @@ router.post('/:id/results/:resultId/abort', async (req, res, next) => {
     }
 
     // Update progress.json
-    const progressPath = path.join(resultDir, 'progress.json');
+    const progressPath = path.join(resultDir, '_progress.json');
     let progress = {};
     try {
       progress = JSON.parse(await fs.readFile(progressPath, 'utf-8'));
@@ -1149,7 +1149,7 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
     // Read progress.json for metadata
     let progress;
     try {
-      const raw = await fs.readFile(path.join(resultDir, 'progress.json'), 'utf-8');
+      const raw = await fs.readFile(path.join(resultDir, '_progress.json'), 'utf-8');
       progress = JSON.parse(raw);
     } catch {
       progress = {};
@@ -1233,15 +1233,21 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       return res.status(400).json({ error: 'workflowFile is required' });
     }
 
-    // Verify the workflow file exists in scripts
+    // Verify the file exists in scripts
     const scriptsRoot = getLabScriptsRoot(req.params.id);
     const wfPath = getSecurePath(scriptsRoot, workflowFile);
     if (!wfPath) return res.status(400).json({ error: 'Invalid workflow file path' });
+    const wfExt = path.extname(workflowFile).toLowerCase();
+    const isWorkflow = wfExt === '.workflow';
+    const isSingleScript = ['.py', '.js', '.cjs'].includes(wfExt);
+    if (!isWorkflow && !isSingleScript) {
+      return res.status(400).json({ error: 'File must be .workflow, .py, .js or .cjs' });
+    }
     try {
       const wfStat = await fs.stat(wfPath);
-      if (!wfStat.isFile()) return res.status(400).json({ error: 'Workflow path is not a file' });
+      if (!wfStat.isFile()) return res.status(400).json({ error: 'Path is not a file' });
     } catch (e) {
-      if (e.code === 'ENOENT') return res.status(404).json({ error: 'Workflow file not found' });
+      if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
       throw e;
     }
 
@@ -1301,12 +1307,17 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       }
     } catch { /* outputs/ doesn't exist — skip */ }
 
-    // Read workflow steps from the .workflow file
+    // Read workflow steps — from .workflow file or single script
     let workflowSteps = [];
-    try {
-      const wfContent = await fs.readFile(wfPath, 'utf-8');
-      workflowSteps = wfContent.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-    } catch {
+    if (isWorkflow) {
+      try {
+        const wfContent = await fs.readFile(wfPath, 'utf-8');
+        workflowSteps = wfContent.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      } catch {
+        workflowSteps = [workflowFile];
+      }
+    } else {
+      // Single script — workflow is just that one script
       workflowSteps = [workflowFile];
     }
 
@@ -1331,9 +1342,9 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
     // Build the "run" key
     const now = new Date().toISOString();
     dataJson.run = {
-      workflowFile,                    // e.g. "new/fullAnalysis.workflow"
-      workflow: workflowSteps,         // array of script paths from .workflow file
-      name: wfBaseName,                // workflow name without extension
+      workflowFile: isWorkflow ? workflowFile : null,  // null for single-script debug sessions
+      workflow: workflowSteps,         // array of script paths
+      name: wfBaseName,                // filename without extension
       author: userName,                // "firstName lastName"
       private: true,
       _: 'Do not manualy overwrite keys starting with _',
@@ -1358,7 +1369,7 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       createdAt: now,
       updatedAt: now,
     };
-    await fs.writeFile(path.join(resultDir, 'progress.json'), JSON.stringify(progress, null, 2), 'utf-8');
+    await fs.writeFile(path.join(resultDir, '_progress.json'), JSON.stringify(progress, null, 2), 'utf-8');
 
     res.status(201).json({
       resultId: String(nextId),
@@ -1366,6 +1377,145 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       workflowFile,
       environmentJsonCopied,
       progress,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ─── Lab Script Run (run workflow to Outputs folder) ──────────────────────────
+
+/**
+ * POST /api/v1/labs/:id/scripts/run
+ * Body: { workflowFile: "path/to/workflow.workflow", stopOnFailure?: boolean }
+ *
+ * Runs a workflow directly from the Scripts tab with output going to the Outputs
+ * folder (alongside the .workflow file) instead of a numbered result folder.
+ * Uses a virtual resultId "_output" for workflow tracking / SSE events.
+ *
+ * The first script argument (RESULT_ROOT) is set to the Outputs folder path.
+ */
+router.post('/:id/scripts/run', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const labId = req.params.id;
+    const { workflowFile } = req.body ?? {};
+    const stopOnFailure = req.body?.stopOnFailure !== false;
+
+    if (!workflowFile) {
+      return res.status(400).json({ error: 'workflowFile is required' });
+    }
+
+    // Verify the workflow file exists in scripts
+    const scriptsRoot = getLabScriptsRoot(labId);
+    const wfPath = getSecurePath(scriptsRoot, workflowFile);
+    if (!wfPath) return res.status(400).json({ error: 'Invalid workflow file path' });
+    try {
+      const wfStat = await fs.stat(wfPath);
+      if (!wfStat.isFile()) return res.status(400).json({ error: 'Workflow path is not a file' });
+    } catch (e) {
+      if (e.code === 'ENOENT') return res.status(404).json({ error: 'Workflow file not found' });
+      throw e;
+    }
+
+    // Determine the Outputs folder (at lab level, inside scripts root)
+    let outputsFolderName = 'Outputs';
+    try {
+      const cfgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config.json');
+      const cfgData = JSON.parse(await fs.readFile(cfgPath, 'utf-8'));
+      if (cfgData.outputsFolderName) outputsFolderName = cfgData.outputsFolderName;
+    } catch { /* use default */ }
+
+    const outputDir = path.join(scriptsRoot, outputsFolderName);
+    await fs.mkdir(outputDir, { recursive: true });
+
+    // Parse workflow steps
+    let activeSteps;
+    let commentedSteps = [];
+
+    const wfContent = await fs.readFile(wfPath, 'utf-8');
+    const allLines = wfContent.split('\n').map(s => s.trim()).filter(s => s);
+    activeSteps = allLines.filter(s => !s.startsWith('#'));
+    commentedSteps = allLines.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
+
+    if (activeSteps.length === 0) {
+      return res.status(400).json({ error: 'Workflow has no active steps' });
+    }
+
+    // Resolve <ALIAS>/path references
+    const aliases = await readAliases();
+    const resolvedPaths = {};
+    for (let i = 0; i < activeSteps.length; i++) {
+      const step = activeSteps[i];
+      const aliasMatch = step.match(/^<([A-Z0-9_-]+)>\/(.+)$/);
+      if (aliasMatch) {
+        const [, alias, relPath] = aliasMatch;
+        const targetLabId = aliases[alias];
+        if (!targetLabId) {
+          return res.status(400).json({ error: `Unknown alias <${alias}> in step "${step}"` });
+        }
+        const targetScriptsRoot = getLabScriptsRoot(targetLabId);
+        const absPath = getSecurePath(targetScriptsRoot, relPath);
+        if (!absPath) {
+          return res.status(400).json({ error: `Invalid path in aliased step "${step}"` });
+        }
+        resolvedPaths[step] = absPath;
+      }
+    }
+
+    // Workflow root: directory of the .workflow file relative to scripts root
+    const workflowRoot = path.relative(scriptsRoot, path.dirname(wfPath)) || '';
+
+    // Determine python command from config
+    let pythonCmd = 'python';
+    try {
+      const configPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config.json');
+      const configData = JSON.parse(await fs.readFile(configPath, 'utf-8'));
+      const pyConfig = configData.scriptCommands?.['.py'];
+      if (pyConfig?.command) {
+        const cmd = pyConfig.command;
+        if (cmd.startsWith('./') || cmd.startsWith('/')) {
+          pythonCmd = path.isAbsolute(cmd) ? cmd : path.resolve(path.dirname(configPath), cmd);
+        } else {
+          pythonCmd = cmd;
+        }
+      }
+    } catch { /* use default */ }
+
+    // Use virtual resultId "_output" for SSE tracking
+    const resultId = '_output';
+
+    // Start workflow via the workflow runner (runs in background)
+    startWorkflowRun({
+      labId,
+      resultId,
+      steps: activeSteps,
+      commentedSteps,
+      resultDir: outputDir,
+      scriptsRoot,
+      workflowRoot,
+      pythonCmd,
+      debugVisible: false,
+      debugScripts: new Set(),
+      stopOnFailure,
+      resolvedPaths,
+      logFile: null,
+      errorFile: null,
+      debugLogFile: null,
+      progressBase: {},
+    });
+
+    res.json({
+      ok: true,
+      message: 'Workflow execution started (output mode)',
+      steps: activeSteps,
+      resultId,
+      stopOnFailure,
     });
   } catch (e) {
     next(e);
