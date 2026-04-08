@@ -1,0 +1,32 @@
+[
+  {
+    "caseId": 1,
+    "feaure1": 100,
+    "feautre2": 1.02,
+    "feature3": "M"
+  },
+  {
+    "caseId": 2,
+    "feaure1": 150,
+    "feautre2": 3.14,
+    "feature3": "M"
+  },
+  {
+    "caseId": 3,
+    "feaure1": 200,
+    "feautre2": 7.77,
+    "feature3": "M"
+  },
+  {
+    "caseId": 4,
+    "feaure1": 25,
+    "feautre2": 0.0,
+    "feature3": "F"
+  },
+  {
+    "caseId": 5,
+    "feaure1": 147,
+    "feautre2": 13.3,
+    "feature3": "M"
+  }
+]

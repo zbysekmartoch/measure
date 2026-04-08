@@ -3,3 +3,4 @@ backend/backups/
 node_modules/
 *.kate-swp
 co dal.txt
+edit_history.csv
