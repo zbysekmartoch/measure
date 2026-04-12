@@ -1,10 +1,15 @@
 /**
  * LabWorkspaceTab — workspace for a single lab.
  *
- * Three main sub-tabs:
+ * Sub-tabs:
  *   📜 Scripts  — file browser + inline editors for lab scripts
- *   � Debug    — result picker + file browser for result files
+ *   🐞 Debug    — result picker + file browser for result files
+ *   📤 Current output — file manager for current output
+ *   💬 Chat     — real-time lab chat
  *   ⚙️ Settings — lab name, description, sharing
+ *
+ * Every sub-tab can be popped out into its own window via a button
+ * in the tab header.
  *
  * The debugger panel can be shown right / below / in a popup window.
  * A draggable splitter separates main content from the debugger.
@@ -18,10 +23,13 @@ import { createPortal } from 'react-dom';
 import LabScriptsPane from './LabScriptsPane.jsx';
 import LabResultsPane from './LabResultsPane.jsx';
 import LabSettingsPane from './LabSettingsPane.jsx';
+import LabChatPane from './LabChatPane.jsx';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { useDebugSession } from '../debug/useDebugSession.js';
 import DebugPanel from '../debug/DebugPanel.jsx';
 import { shadow, debugModes as dmCfg } from '../lib/uiConfig.js';
+import { useLabChat } from '../hooks/useLabChat.js';
+import { usePopoutWindow } from '../hooks/usePopoutWindow.js';
 
 const DataExplorerTab = React.lazy(
   () => import('./DataExplorerTab.jsx')
@@ -31,6 +39,7 @@ const TABS = [
   { key: 'scripts',  icon: '📜', label: 'Scripts' },
   { key: 'results',  icon: '🐞', label: 'Debug' },
   { key: 'output',   icon: '📤', label: 'Current output' },
+  { key: 'chat',     icon: '💬', label: 'Chat' },
 ];
 
 // Debug panel placement: 'hidden' | 'right' | 'bottom' | 'popup'
@@ -72,6 +81,30 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
 
   // ---- Save-all ref (set by LabScriptsPane, called by LabResultsPane before Run/Debug) ----
   const saveAllRef = useRef(null);
+
+  // ---- Lab Chat ----
+  const chat = useLabChat(lab.id);
+
+  // Mark chat visible/invisible based on active tab
+  useEffect(() => {
+    chat.setVisible(activeTab === 'chat');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // ---- Pop-out windows for sub-tabs ----
+  const popoutScripts = usePopoutWindow({ title: `📜 Scripts — ${lab.name}`, width: 1000, height: 700 });
+  const popoutResults = usePopoutWindow({ title: `🐞 Debug — ${lab.name}`, width: 1000, height: 700 });
+  const popoutOutput  = usePopoutWindow({ title: `📤 Output — ${lab.name}`, width: 900, height: 600 });
+  const popoutChat    = usePopoutWindow({ title: `💬 Chat — ${lab.name}`, width: 500, height: 700 });
+  const popoutSettings = usePopoutWindow({ title: `⚙️ Settings — ${lab.name}`, width: 700, height: 600 });
+
+  const popouts = {
+    scripts: popoutScripts,
+    results: popoutResults,
+    output: popoutOutput,
+    chat: popoutChat,
+    settings: popoutSettings,
+  };
 
   // ---- Auto-show debug panel when debug workflow starts ----
   const showDebugPanel = useCallback(() => {
@@ -259,18 +292,62 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Sub-tab bar */}
       <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', marginTop: 2 }}>
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={tabStyle(
-              activeTab === tab.key,
-              tab.key === 'scripts' && blinkScripts
-            )}
-          >
-            {tab.icon} {tab.label}
-          </button>
-        ))}
+        {TABS.map((tab) => {
+          const isActive = activeTab === tab.key;
+          const blink = tab.key === 'scripts' && blinkScripts;
+          const popout = popouts[tab.key];
+          const showBadge = tab.key === 'chat' && chat.unreadCount > 0 && activeTab !== 'chat';
+          return (
+            <span key={tab.key} style={{
+              display: 'inline-flex', alignItems: 'stretch',
+              marginBottom: isActive ? -1 : 0, zIndex: isActive ? 1 : 0,
+            }}>
+              <button
+                onClick={() => setActiveTab(tab.key)}
+                style={{
+                  ...tabStyle(isActive, blink),
+                  borderRight: popout ? 'none' : undefined,
+                  borderTopRightRadius: popout ? 0 : 6,
+                  position: 'relative',
+                }}
+              >
+                {tab.icon} {tab.label}
+                {showBadge && (
+                  <span style={{
+                    position: 'absolute', top: 2, right: 4,
+                    background: '#dc2626', color: '#fff', borderRadius: '50%',
+                    minWidth: 16, height: 16, fontSize: 10, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '0 4px', lineHeight: 1,
+                  }}>
+                    {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                  </span>
+                )}
+              </button>
+              {popout && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (popout.isPopout) popout.closePopout();
+                    else popout.openPopout();
+                  }}
+                  title={popout.isPopout ? 'Close popup window' : 'Open in popup window'}
+                  style={{
+                    padding: '4px 5px',
+                    border: '1px solid #012345', borderBottom: 'none', borderLeft: 'none',
+                    borderRadius: '0 6px 0 0',
+                    background: popout.isPopout ? '#dbeafe' : (isActive ? '#fff' : (blink ? undefined : '#f3f4f6')),
+                    cursor: 'pointer', color: popout.isPopout ? '#2563eb' : '#6b7280',
+                    fontSize: 11, display: 'flex', alignItems: 'center',
+                    animation: blink ? 'tabBlink 0.8s ease-in-out infinite' : 'none',
+                  }}
+                >
+                  {popout.isPopout ? '⊡' : '⧉'}
+                </button>
+              )}
+            </span>
+          );
+        })}
 
         {/* Data Explorer sub-tabs */}
         {openExplorers.map((explorer) => {
@@ -349,15 +426,41 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
         </div>
 
         {/* Settings tab — pushed to right */}
-        <button
-          onClick={() => setActiveTab('settings')}
-          style={{
-            ...tabStyle(activeTab === 'settings'),
-            marginLeft: 'auto',
-          }}
-        >
-          ⚙️ Settings
-        </button>
+        <span style={{
+          display: 'inline-flex', alignItems: 'stretch',
+          marginLeft: 'auto',
+          marginBottom: activeTab === 'settings' ? -1 : 0,
+          zIndex: activeTab === 'settings' ? 1 : 0,
+        }}>
+          <button
+            onClick={() => setActiveTab('settings')}
+            style={{
+              ...tabStyle(activeTab === 'settings'),
+              borderRight: 'none',
+              borderTopRightRadius: 0,
+            }}
+          >
+            ⚙️ Settings
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (popoutSettings.isPopout) popoutSettings.closePopout();
+              else popoutSettings.openPopout();
+            }}
+            title={popoutSettings.isPopout ? 'Close popup window' : 'Open in popup window'}
+            style={{
+              padding: '4px 5px',
+              border: '1px solid #012345', borderBottom: 'none', borderLeft: 'none',
+              borderRadius: '0 6px 0 0',
+              background: popoutSettings.isPopout ? '#dbeafe' : (activeTab === 'settings' ? '#fff' : '#f3f4f6'),
+              cursor: 'pointer', color: popoutSettings.isPopout ? '#2563eb' : '#6b7280',
+              fontSize: 11, display: 'flex', alignItems: 'center',
+            }}
+          >
+            {popoutSettings.isPopout ? '⊡' : '⧉'}
+          </button>
+        </span>
       </div>
 
       {/* Content area with optional splitter */}
@@ -402,6 +505,9 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
               csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
               onAnalyze={(fileName) => openAnalyze({ labId: lab.id, apiPath: `/api/v1/labs/${lab.id}/current_output`, fileName })}
             />
+          </div>
+          <div style={{ flex: 1, minHeight: 0, display: activeTab === 'chat' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
+            <LabChatPane lab={lab} chat={chat} />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'settings' ? 'block' : 'none', overflow: 'auto' }}>
             <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />
@@ -479,6 +585,47 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
           onExpandVariable={debug.expandVariable}
         />,
         popupContainer
+      )}
+
+      {/* Pop-out portals for sub-tabs */}
+      {popoutScripts.isPopout && popoutScripts.popoutContainer && createPortal(
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 6, overflow: 'hidden', height: '100%' }}>
+          <LabScriptsPane lab={lab} debug={debug} appConfig={appConfig} onAnalyze={openAnalyze} saveAllRef={saveAllRef} />
+        </div>,
+        popoutScripts.popoutContainer
+      )}
+      {popoutResults.isPopout && popoutResults.popoutContainer && createPortal(
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 6, overflow: 'hidden', height: '100%' }}>
+          <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} onAnalyze={openAnalyze} appConfig={appConfig} saveAllRef={saveAllRef} onShowDebugPanel={showDebugPanel} />
+        </div>,
+        popoutResults.popoutContainer
+      )}
+      {popoutOutput.isPopout && popoutOutput.popoutContainer && createPortal(
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 6, overflow: 'hidden', height: '100%' }}>
+          <FileManagerEditor
+            apiBasePath={`/api/v1/labs/${lab.id}/current_output`}
+            showUpload={false}
+            showDelete={false}
+            readOnly
+            showModificationDate
+            title="Current output"
+            csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+            onAnalyze={(fileName) => openAnalyze({ labId: lab.id, apiPath: `/api/v1/labs/${lab.id}/current_output`, fileName })}
+          />
+        </div>,
+        popoutOutput.popoutContainer
+      )}
+      {popoutChat.isPopout && popoutChat.popoutContainer && createPortal(
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
+          <LabChatPane lab={lab} chat={chat} />
+        </div>,
+        popoutChat.popoutContainer
+      )}
+      {popoutSettings.isPopout && popoutSettings.popoutContainer && createPortal(
+        <div style={{ flex: 1, overflow: 'auto', height: '100%' }}>
+          <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />
+        </div>,
+        popoutSettings.popoutContainer
       )}
 
       <style>{`

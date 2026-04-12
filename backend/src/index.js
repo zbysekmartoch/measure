@@ -9,6 +9,7 @@ import api from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { getPool } from './db.js';
 import { attachDapProxy } from './debug/dap-proxy.js';
+import { attachChatWs } from './chat/chat-ws.js';
 import { startBackupScheduler, stopBackupScheduler } from './utils/backup-scheduler.js';
 
 const app = express();
@@ -56,6 +57,9 @@ const server = app.listen(config.port, async () => {
 
 // Attach DAP WebSocket proxy for debugger
 attachDapProxy(server);
+
+// Attach Chat WebSocket server
+attachChatWs(server);
 
 // Graceful shutdown
 function shutdown(signal) {

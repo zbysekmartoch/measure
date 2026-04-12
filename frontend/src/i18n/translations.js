@@ -201,6 +201,24 @@ const en = {
   errorCreatingSyncConfig: 'Error creating sync config',
   filesChanged: 'Files changed',
 
+  // Chat
+  chatTitle: 'Chat',
+  chatNoMessages: 'No messages yet. Start the conversation!',
+  chatNoReplies: 'No replies yet',
+  chatTypePlaceholder: 'Type a message… (@mention, #file)',
+  chatReplyPlaceholder: 'Reply in thread…',
+  chatOnline: 'online',
+  chatDisconnected: 'Disconnected',
+  chatEditing: 'Editing message',
+  chatReplyingTo: 'Replying to',
+  chatReply: 'reply',
+  chatReplies: 'replies',
+  chatEdited: '(edited)',
+  chatSend: 'Send',
+  chatSave: 'Save',
+  chatOpenInWindow: 'Open in popup window',
+  chatCloseWindow: 'Close popup window',
+
   // Labs
   unsavedChangesConfirm: 'has unsaved changes. Do you want to save them?',
 };
