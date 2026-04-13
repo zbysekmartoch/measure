@@ -19,8 +19,20 @@ const app = express();
 // Logging
 app.use(pinoHttp());
 
-// Security headers
-app.use(helmet());
+// Security headers — relax CSP for Monaco Editor (loaded from CDN) and Perspective
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "blob:"],
+      workerSrc: ["'self'", "blob:"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+      fontSrc: ["'self'", "https://cdn.jsdelivr.net", "data:"],
+      connectSrc: ["'self'", "ws:", "wss:", "https://cdn.jsdelivr.net"],
+      imgSrc: ["'self'", "data:", "blob:"],
+    },
+  },
+}));
 
 // CORS
 app.use(cors({
