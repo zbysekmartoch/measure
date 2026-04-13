@@ -201,7 +201,7 @@ async function main() {
         
         // Cesty: template relativní k LAB_ROOT, data a output relativní k RESULT_ROOT
         const templatePath = path.resolve(LAB_ROOT, templateRelPath);
-        const dataPath = path.resolve(RESULT_ROOT, dataRelPath);
+        const dataPath = path.resolve(RESULT_ROOT, dataRelPath||'');
         const outPath = path.resolve(RESULT_ROOT, outputRelPath);
 
         console.log(`\nZpracovávám dokument:`);
