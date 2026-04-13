@@ -68,15 +68,18 @@ export function attachChatWs(server) {
 
   // Hook into HTTP upgrade — handle /chat path
   const existingListeners = server.listeners('upgrade').slice();
+  console.log(`[chat-ws] Attaching chat WS. Captured ${existingListeners.length} existing upgrade listener(s).`);
 
   server.removeAllListeners('upgrade');
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    console.log(`[chat-ws] Upgrade request: pathname=${url.pathname} host=${req.headers.host} origin=${req.headers.origin || 'none'}`);
 
     if (url.pathname === '/chat') {
       // Authenticate via query token
       const token = url.searchParams.get('token');
       if (!token) {
+        console.warn('[chat-ws] Upgrade rejected: no token in query string');
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
@@ -84,16 +87,20 @@ export function attachChatWs(server) {
       try {
         const decoded = jwt.verify(token, config.jwtSecret);
         req.userId = decoded.userId;
-      } catch {
+        console.log(`[chat-ws] Token verified, userId=${decoded.userId}`);
+      } catch (err) {
+        console.warn(`[chat-ws] Upgrade rejected: JWT verify failed — ${err.message}`);
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
       }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
+        console.log(`[chat-ws] WebSocket upgrade complete for userId=${req.userId}`);
         wss.emit('connection', ws, req);
       });
     } else {
+      console.log(`[chat-ws] Not /chat, forwarding to ${existingListeners.length} existing listener(s)`);
       // Forward to other upgrade handlers (DAP proxy, etc.)
       for (const listener of existingListeners) {
         listener.call(server, req, socket, head);
@@ -107,13 +114,18 @@ export function attachChatWs(server) {
     let labId = null;
     let client = null;
 
+    console.log(`[chat-ws] New connection userId=${userId}`);
+
     // Look up user name
     try {
       const rows = await query('SELECT first_name, last_name FROM usr WHERE id = ?', [userId]);
       if (rows.length) {
         userName = `${rows[0].first_name} ${rows[0].last_name}`;
       }
-    } catch { /* ignore */ }
+      console.log(`[chat-ws] User resolved: userId=${userId} userName="${userName}"`);
+    } catch (err) {
+      console.error(`[chat-ws] DB lookup failed for userId=${userId}:`, err.message);
+    }
 
     ws.on('message', async (raw) => {
       let msg;
@@ -123,91 +135,99 @@ export function attachChatWs(server) {
         return send(ws, { type: 'error', error: 'Invalid JSON' });
       }
 
-      switch (msg.type) {
-        case 'join': {
-          if (!msg.labId) return send(ws, { type: 'error', error: 'Missing labId' });
-          // Leave previous room if any
-          if (labId && client) {
-            const prevRoom = rooms.get(labId);
-            if (prevRoom) {
-              prevRoom.delete(client);
-              if (prevRoom.size === 0) rooms.delete(labId);
-              else sendPresence(labId);
+      try {
+        switch (msg.type) {
+          case 'join': {
+            if (!msg.labId) return send(ws, { type: 'error', error: 'Missing labId' });
+            // Leave previous room if any
+            if (labId && client) {
+              const prevRoom = rooms.get(labId);
+              if (prevRoom) {
+                prevRoom.delete(client);
+                if (prevRoom.size === 0) rooms.delete(labId);
+                else sendPresence(labId);
+              }
             }
+            labId = String(msg.labId);
+            client = { ws, userId, userName };
+            getRoom(labId).add(client);
+            console.log(`[chat-ws] userId=${userId} joined lab=${labId} (room size: ${getRoom(labId).size})`);
+            // Send chat history
+            const messages = await getMessages(labId);
+            send(ws, { type: 'history', messages });
+            sendPresence(labId);
+            break;
           }
-          labId = String(msg.labId);
-          client = { ws, userId, userName };
-          getRoom(labId).add(client);
-          // Send chat history
-          const messages = await getMessages(labId);
-          send(ws, { type: 'history', messages });
-          sendPresence(labId);
-          break;
-        }
 
-        case 'message': {
-          if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
-          if (!msg.text || !String(msg.text).trim()) return;
-          const newMsg = await addMessage(labId, {
-            userId,
-            userName,
-            text: msg.text,
-            threadId: msg.threadId,
-            mentions: msg.mentions,
-            fileLinks: msg.fileLinks,
-          });
-          broadcastToRoom(labId, { type: 'message', message: newMsg });
-          break;
-        }
-
-        case 'edit': {
-          if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
-          if (!msg.messageId || !msg.text) return;
-          const edited = await editMessage(labId, msg.messageId, userId, msg.text);
-          if (edited) {
-            broadcastToRoom(labId, { type: 'edited', message: edited });
-          } else {
-            send(ws, { type: 'error', error: 'Cannot edit this message' });
+          case 'message': {
+            if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
+            if (!msg.text || !String(msg.text).trim()) return;
+            const newMsg = await addMessage(labId, {
+              userId,
+              userName,
+              text: msg.text,
+              threadId: msg.threadId,
+              mentions: msg.mentions,
+              fileLinks: msg.fileLinks,
+            });
+            console.log(`[chat-ws] Message from userId=${userId} in lab=${labId}: ${newMsg.id}`);
+            broadcastToRoom(labId, { type: 'message', message: newMsg });
+            break;
           }
-          break;
-        }
 
-        case 'delete': {
-          if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
-          if (!msg.messageId) return;
-          const ok = await deleteMessage(labId, msg.messageId, userId);
-          if (ok) {
-            broadcastToRoom(labId, { type: 'deleted', messageId: msg.messageId });
-          } else {
-            send(ws, { type: 'error', error: 'Cannot delete this message' });
+          case 'edit': {
+            if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
+            if (!msg.messageId || !msg.text) return;
+            const edited = await editMessage(labId, msg.messageId, userId, msg.text);
+            if (edited) {
+              broadcastToRoom(labId, { type: 'edited', message: edited });
+            } else {
+              send(ws, { type: 'error', error: 'Cannot edit this message' });
+            }
+            break;
           }
-          break;
-        }
 
-        case 'react': {
-          if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
-          if (!msg.messageId || !msg.reactionKey) return;
-          const reacted = await toggleReaction(labId, msg.messageId, userId, userName, msg.reactionKey);
-          if (reacted) {
-            broadcastToRoom(labId, { type: 'reacted', message: reacted });
-          } else {
-            send(ws, { type: 'error', error: 'Message not found' });
+          case 'delete': {
+            if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
+            if (!msg.messageId) return;
+            const ok = await deleteMessage(labId, msg.messageId, userId);
+            if (ok) {
+              broadcastToRoom(labId, { type: 'deleted', messageId: msg.messageId });
+            } else {
+              send(ws, { type: 'error', error: 'Cannot delete this message' });
+            }
+            break;
           }
-          break;
-        }
 
-        case 'typing': {
-          if (!labId) return;
-          broadcastToRoom(labId, { type: 'typing', userId, userName }, ws);
-          break;
-        }
+          case 'react': {
+            if (!labId) return send(ws, { type: 'error', error: 'Not joined to a lab' });
+            if (!msg.messageId || !msg.reactionKey) return;
+            const reacted = await toggleReaction(labId, msg.messageId, userId, userName, msg.reactionKey);
+            if (reacted) {
+              broadcastToRoom(labId, { type: 'reacted', message: reacted });
+            } else {
+              send(ws, { type: 'error', error: 'Message not found' });
+            }
+            break;
+          }
 
-        default:
-          send(ws, { type: 'error', error: `Unknown type: ${msg.type}` });
+          case 'typing': {
+            if (!labId) return;
+            broadcastToRoom(labId, { type: 'typing', userId, userName }, ws);
+            break;
+          }
+
+          default:
+            send(ws, { type: 'error', error: `Unknown type: ${msg.type}` });
+        }
+      } catch (err) {
+        console.error(`[chat-ws] Error handling msg type=${msg.type} userId=${userId} lab=${labId}:`, err.message);
+        send(ws, { type: 'error', error: 'Internal server error' });
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
+      console.log(`[chat-ws] Connection closed userId=${userId} lab=${labId} code=${code} reason=${reason || 'none'}`);
       if (labId && client) {
         const room = rooms.get(labId);
         if (room) {
@@ -216,6 +236,10 @@ export function attachChatWs(server) {
           else sendPresence(labId);
         }
       }
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[chat-ws] WS error userId=${userId} lab=${labId}:`, err.message);
     });
 
     // Keepalive ping every 30s

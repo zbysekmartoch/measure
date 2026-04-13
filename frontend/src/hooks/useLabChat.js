@@ -43,11 +43,13 @@ export function useLabChat(labId) {
 
     function connect() {
       if (disposed) return;
+      console.log(`[useLabChat] Connecting to ${url.replace(/token=[^&]+/, 'token=***')}`);
       const ws = new WebSocket(url);
       wsRef.current = ws;
 
       ws.addEventListener('open', () => {
         if (disposed) { ws.close(); return; }
+        console.log('[useLabChat] WebSocket open');
         setConnected(true);
         ws.send(JSON.stringify({ type: 'join', labId }));
       });
@@ -105,7 +107,8 @@ export function useLabChat(labId) {
         }
       });
 
-      ws.addEventListener('close', () => {
+      ws.addEventListener('close', (ev) => {
+        console.log(`[useLabChat] WebSocket closed code=${ev.code} reason=${ev.reason || 'none'} wasClean=${ev.wasClean}`);
         if (wsRef.current === ws) wsRef.current = null;
         setConnected(false);
         if (!disposed) {
@@ -113,8 +116,8 @@ export function useLabChat(labId) {
         }
       });
 
-      ws.addEventListener('error', () => {
-        // onclose will fire after this
+      ws.addEventListener('error', (ev) => {
+        console.error('[useLabChat] WebSocket error:', ev);
       });
     }
 
