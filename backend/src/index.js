@@ -3,6 +3,8 @@ import helmet from 'helmet';
 import cors from 'cors';
 import pinoHttp from 'pino-http';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { config } from './config.js';
 import api from './routes/index.js';
@@ -40,6 +42,19 @@ app.use('/api/', rateLimit({ windowMs: 60_000, max: 300 }));
 
 // Mount API routes
 app.use('/api', api);
+
+// Serve built frontend (from frontend/dist) when available
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DIST = path.resolve(__dirname, '../../frontend/dist');
+app.use(express.static(DIST));
+// SPA fallback — any non-API/non-WS route serves index.html
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path === '/dap' || req.path === '/chat') return next();
+  res.sendFile(path.join(DIST, 'index.html'), (err) => {
+    if (err) next(); // dist not built — fall through to 404
+  });
+});
 
 // 404 + error handler
 app.use(notFound);
