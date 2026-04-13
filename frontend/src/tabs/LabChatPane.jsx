@@ -440,6 +440,7 @@ export default function LabChatPane({ lab, chat }) {
     e.preventDefault();
     const container = containerRef.current;
     if (!container) return;
+    const doc = container.ownerDocument;
     const startY = e.clientY;
     const startHeight = inputAreaHeight;
 
@@ -450,15 +451,15 @@ export default function LabChatPane({ lab, chat }) {
       setInputAreaHeight(newH);
     };
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
+      doc.removeEventListener('mousemove', onMove);
+      doc.removeEventListener('mouseup', onUp);
+      doc.body.style.userSelect = '';
+      doc.body.style.cursor = '';
     };
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'row-resize';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    doc.body.style.userSelect = 'none';
+    doc.body.style.cursor = 'row-resize';
+    doc.addEventListener('mousemove', onMove);
+    doc.addEventListener('mouseup', onUp);
   };
 
   return (

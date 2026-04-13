@@ -429,6 +429,7 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
             e.preventDefault();
             draggingRef.current = true;
             const container = containerRef.current;
+            const doc = container.ownerDocument;
             const startY = e.clientY;
             const startPct = editorPct;
             const onMove = (me) => {
@@ -440,11 +441,11 @@ export default function SqlEditorTab({ initialSql, onSqlChange, extraButtons }) 
             };
             const onUp = () => {
               draggingRef.current = false;
-              document.removeEventListener('mousemove', onMove);
-              document.removeEventListener('mouseup', onUp);
+              doc.removeEventListener('mousemove', onMove);
+              doc.removeEventListener('mouseup', onUp);
             };
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
+            doc.addEventListener('mousemove', onMove);
+            doc.addEventListener('mouseup', onUp);
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = '#93c5fd'; }}
           onMouseLeave={(e) => { if (!draggingRef.current) e.currentTarget.style.background = '#e5e7eb'; }}

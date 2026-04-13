@@ -84,6 +84,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
     e.preventDefault();
     const container = containerRef.current;
     if (!container) return;
+    const doc = container.ownerDocument;
     const startX = e.clientX;
     const startWidth = splitterWidth;
 
@@ -93,16 +94,16 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
     };
 
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
+      doc.removeEventListener('mousemove', onMove);
+      doc.removeEventListener('mouseup', onUp);
+      doc.body.style.userSelect = '';
+      doc.body.style.cursor = '';
     };
 
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    doc.body.style.userSelect = 'none';
+    doc.body.style.cursor = 'col-resize';
+    doc.addEventListener('mousemove', onMove);
+    doc.addEventListener('mouseup', onUp);
   }, [splitterWidth]);
 
   // Handle edit with lock acquisition

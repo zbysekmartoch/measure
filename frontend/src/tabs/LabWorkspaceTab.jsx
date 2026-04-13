@@ -96,14 +96,12 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
   const popoutResults = usePopoutWindow({ title: `🐞 Debug — ${lab.name}`, width: 1000, height: 700 });
   const popoutOutput  = usePopoutWindow({ title: `📤 Output — ${lab.name}`, width: 900, height: 600 });
   const popoutChat    = usePopoutWindow({ title: `💬 Chat — ${lab.name}`, width: 500, height: 700 });
-  const popoutSettings = usePopoutWindow({ title: `⚙️ Settings — ${lab.name}`, width: 700, height: 600 });
 
   const popouts = {
     scripts: popoutScripts,
     results: popoutResults,
     output: popoutOutput,
     chat: popoutChat,
-    settings: popoutSettings,
   };
 
   // ---- Auto-show debug panel when debug workflow starts ----
@@ -221,6 +219,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
     e.preventDefault();
     const container = containerRef.current;
     if (!container) return;
+    const doc = container.ownerDocument;
     const rect = container.getBoundingClientRect();
     const isHorizontal = debugMode === 'right';
 
@@ -232,16 +231,16 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
     };
 
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
+      doc.removeEventListener('mousemove', onMove);
+      doc.removeEventListener('mouseup', onUp);
+      doc.body.style.userSelect = '';
+      doc.body.style.cursor = '';
     };
 
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = isHorizontal ? 'col-resize' : 'row-resize';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    doc.body.style.userSelect = 'none';
+    doc.body.style.cursor = isHorizontal ? 'col-resize' : 'row-resize';
+    doc.addEventListener('mousemove', onMove);
+    doc.addEventListener('mouseup', onUp);
   }, [debugMode]);
 
   // ---- Tab style ----
@@ -426,41 +425,15 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
         </div>
 
         {/* Settings tab — pushed to right */}
-        <span style={{
-          display: 'inline-flex', alignItems: 'stretch',
-          marginLeft: 'auto',
-          marginBottom: activeTab === 'settings' ? -1 : 0,
-          zIndex: activeTab === 'settings' ? 1 : 0,
-        }}>
-          <button
-            onClick={() => setActiveTab('settings')}
-            style={{
-              ...tabStyle(activeTab === 'settings'),
-              borderRight: 'none',
-              borderTopRightRadius: 0,
-            }}
-          >
-            ⚙️ Settings
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (popoutSettings.isPopout) popoutSettings.closePopout();
-              else popoutSettings.openPopout();
-            }}
-            title={popoutSettings.isPopout ? 'Close popup window' : 'Open in popup window'}
-            style={{
-              padding: '4px 5px',
-              border: '1px solid #012345', borderBottom: 'none', borderLeft: 'none',
-              borderRadius: '0 6px 0 0',
-              background: popoutSettings.isPopout ? '#dbeafe' : (activeTab === 'settings' ? '#fff' : '#f3f4f6'),
-              cursor: 'pointer', color: popoutSettings.isPopout ? '#2563eb' : '#6b7280',
-              fontSize: 11, display: 'flex', alignItems: 'center',
-            }}
-          >
-            {popoutSettings.isPopout ? '⊡' : '⧉'}
-          </button>
-        </span>
+        <button
+          onClick={() => setActiveTab('settings')}
+          style={{
+            ...tabStyle(activeTab === 'settings'),
+            marginLeft: 'auto',
+          }}
+        >
+          ⚙️ Settings
+        </button>
       </div>
 
       {/* Content area with optional splitter */}
@@ -621,13 +594,6 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
         </div>,
         popoutChat.popoutContainer
       )}
-      {popoutSettings.isPopout && popoutSettings.popoutContainer && createPortal(
-        <div style={{ flex: 1, overflow: 'auto', height: '100%' }}>
-          <LabSettingsPane lab={lab} onLabUpdate={onLabUpdate} />
-        </div>,
-        popoutSettings.popoutContainer
-      )}
-
       <style>{`
         @keyframes tabBlink {
           0%, 100% { background: #fef3c7; }
