@@ -30,6 +30,8 @@ app.use(helmet({
       fontSrc: ["'self'", "https://cdn.jsdelivr.net", "data:"],
       connectSrc: ["'self'", "ws:", "wss:", "https://cdn.jsdelivr.net"],
       imgSrc: ["'self'", "data:", "blob:"],
+      objectSrc: ["'self'", "blob:"],
+      frameSrc: ["'self'", "blob:"],
     },
   },
 }));

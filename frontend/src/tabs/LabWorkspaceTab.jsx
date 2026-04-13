@@ -172,16 +172,15 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
     if (debugMode === 'popup') {
       if (!popupRef.current || popupRef.current.closed) {
         const debugTitle = `🛠 Debugger — ${lab.name}`;
-        const faviconEl = document.querySelector('link[rel="icon"]');
-        const faviconHref = faviconEl ? new URL(faviconEl.href, location.origin).href : '';
-        const faviconTag = faviconHref ? `<link rel="icon" href="${faviconHref}">` : '';
-        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${debugTitle}</title>${faviconTag}</head><body></body></html>`;
-        const blob = new Blob([html], { type: 'text/html' });
-        const blobUrl = URL.createObjectURL(blob);
-        const w = window.open(blobUrl, `debug_${lab.id}`, 'popup,width=480,height=700,resizable=yes');
-        URL.revokeObjectURL(blobUrl);
+        const w = window.open('', `debug_${lab.id}`, 'popup,width=480,height=700,resizable=yes');
         if (w) {
           popupRef.current = w;
+          const faviconEl = document.querySelector('link[rel="icon"]');
+          const faviconHref = faviconEl ? new URL(faviconEl.href, location.origin).href : '';
+          const faviconTag = faviconHref ? `<link rel="icon" href="${faviconHref}">` : '';
+          w.document.open();
+          w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${debugTitle}</title>${faviconTag}</head><body></body></html>`);
+          w.document.close();
           // Add base styles
           const style = w.document.createElement('style');
           style.textContent = 'body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#1e1e1e;color:#d4d4d4;}';

@@ -59,24 +59,21 @@ export function usePopoutWindow({ title = 'Window', width = 800, height = 600, o
       return;
     }
 
-    // Resolve the app favicon URL for the popup
+    // "popup" feature triggers minimal UI (no address bar) in Chrome/Edge
+    const w = window.open('', `popout_${title}_${Date.now()}`, `popup,width=${width},height=${height},resizable=yes`);
+    if (!w) return; // popup blocked
+
+    popupRef.current = w;
+
+    // Resolve the app favicon URL
     const faviconEl = document.querySelector('link[rel="icon"]');
     const faviconHref = faviconEl ? new URL(faviconEl.href, location.origin).href : '';
     const faviconTag = faviconHref ? `<link rel="icon" href="${faviconHref}">` : '';
 
-    // Build a minimal HTML document as a blob URL so:
-    // 1) The address bar shows a real URL (not about:blank)
-    // 2) Chrome/Edge "popup" feature can hide the address bar
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>${faviconTag}</head><body></body></html>`;
-    const blob = new Blob([html], { type: 'text/html' });
-    const blobUrl = URL.createObjectURL(blob);
-
-    // "popup" feature triggers minimal UI (no address bar) in Chrome/Edge
-    const w = window.open(blobUrl, `popout_${title}_${Date.now()}`, `popup,width=${width},height=${height},resizable=yes`);
-    URL.revokeObjectURL(blobUrl);
-    if (!w) return; // popup blocked
-
-    popupRef.current = w;
+    // Write a complete document with title + favicon
+    w.document.open();
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>${faviconTag}</head><body></body></html>`);
+    w.document.close();
 
     // Base styles for the popup
     const baseStyle = w.document.createElement('style');

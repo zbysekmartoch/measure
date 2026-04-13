@@ -57,6 +57,8 @@ export default function FileManagerEditor({
     const faviconEl = document.querySelector('link[rel="icon"]');
     const faviconHref = faviconEl ? new URL(faviconEl.href, location.origin).href : '';
     const faviconTag = faviconHref ? `<link rel="icon" href="${faviconHref}">` : '';
+    const w = window.open('', '_blank', 'popup,width=1200,height=800');
+    if (!w) return;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${fm.selectedFile} - Editor</title>${faviconTag}
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif}
 #c{height:100vh;display:flex;flex-direction:column}
@@ -76,10 +78,8 @@ value:${JSON.stringify(fm.fileContent)},language:'${getLanguageFromFilename(fm.s
 theme:'vs-dark',fontSize:13,minimap:{enabled:true},automaticLayout:true,wordWrap:'on',tabSize:2,readOnly:${readOnly}});
 document.getElementById('ts').addEventListener('change',e=>monaco.editor.setTheme(e.target.value));
 ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{try{const r=await fetch('${apiBasePath}/content',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${localStorage.getItem('authToken')}'},body:JSON.stringify({file:'${fm.selectedFile}',content:ed.getValue()})});if(!r.ok)throw 0;alert('Saved!');}catch{alert('Error saving');}});` : ''}});<` + `/script></body></html>`;
-    const blob = new Blob([html], { type: 'text/html' });
-    const blobUrl = URL.createObjectURL(blob);
-    window.open(blobUrl, '_blank', 'popup,width=1200,height=800');
-    URL.revokeObjectURL(blobUrl);
+    w.document.write(html);
+    w.document.close();
   }, [fm.selectedFile, fm.selectedFileInfo, fm.fileContent, apiBasePath, readOnly]);
 
   // ---- Splitter drag handling ----
