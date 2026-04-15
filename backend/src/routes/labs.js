@@ -1239,9 +1239,9 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
     if (!wfPath) return res.status(400).json({ error: 'Invalid workflow file path' });
     const wfExt = path.extname(workflowFile).toLowerCase();
     const isWorkflow = wfExt === '.workflow';
-    const isSingleScript = ['.py', '.js', '.cjs'].includes(wfExt);
+    const isSingleScript = ['.py', '.js', '.cjs', '.r'].includes(wfExt);
     if (!isWorkflow && !isSingleScript) {
-      return res.status(400).json({ error: 'File must be .workflow, .py, .js or .cjs' });
+      return res.status(400).json({ error: 'File must be .workflow, .py, .js, .cjs or .r' });
     }
     try {
       const wfStat = await fs.stat(wfPath);
@@ -1438,10 +1438,18 @@ router.post('/:id/scripts/run', async (req, res, next) => {
     let activeSteps;
     let commentedSteps = [];
 
-    const wfContent = await fs.readFile(wfPath, 'utf-8');
-    const allLines = wfContent.split('\n').map(s => s.trim()).filter(s => s);
-    activeSteps = allLines.filter(s => !s.startsWith('#'));
-    commentedSteps = allLines.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
+    const wfExt = path.extname(workflowFile).toLowerCase();
+    const isSingleScript = ['.py', '.js', '.cjs', '.r'].includes(wfExt);
+
+    if (isSingleScript) {
+      // Single script — treat as a one-step workflow
+      activeSteps = [workflowFile];
+    } else {
+      const wfContent = await fs.readFile(wfPath, 'utf-8');
+      const allLines = wfContent.split('\n').map(s => s.trim()).filter(s => s);
+      activeSteps = allLines.filter(s => !s.startsWith('#'));
+      commentedSteps = allLines.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
+    }
 
     if (activeSteps.length === 0) {
       return res.status(400).json({ error: 'Workflow has no active steps' });

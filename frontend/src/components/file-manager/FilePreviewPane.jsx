@@ -61,7 +61,7 @@ export default function FilePreviewPane({
   const isLockedByOther = lockInfo && !lockInfo.isMe;
   const fileIsReadonly = isReadonlyFile?.(selectedFile);
 
-  const editorReadOnly = readOnly || !isEditing || fileIsReadonly || isLockedByOther;
+  const editorReadOnly = readOnly || fileIsReadonly || isLockedByOther;
 
   // CSV/TSV preview truncation — only in read-only / non-editing mode
   const isCsvLike = selectedFile && /\.(csv|tsv)$/i.test(selectedFile);
@@ -374,7 +374,7 @@ export default function FilePreviewPane({
               theme={editorTheme}
               readOnly={editorReadOnly}
               onChange={editorReadOnly ? undefined : (value) => onContentChange(value || '')}
-              onSave={isEditing ? onSave : undefined}
+              onSave={onSave}
             />
           </div>
         </div>

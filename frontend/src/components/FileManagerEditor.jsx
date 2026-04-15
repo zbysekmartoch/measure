@@ -119,6 +119,18 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
     }
   }, [fm]);
 
+  // Auto-edit: first keystroke in Monaco triggers lock acquisition
+  const autoEditPendingRef = useRef(false);
+  const handleContentChange = useCallback((newContent) => {
+    fm.setFileContent(newContent);
+    // Only trigger auto-edit when content actually differs from original
+    // (model.setValue during file switch fires onChange with the same content)
+    if (!fm.isEditing && !autoEditPendingRef.current && newContent !== fm.originalContent) {
+      autoEditPendingRef.current = true;
+      handleEdit().finally(() => { autoEditPendingRef.current = false; });
+    }
+  }, [fm, handleEdit]);
+
   // Handle cancel — release lock and reload
   const handleCancelEdit = useCallback(async () => {
     if (fm.selectedFile) {
@@ -227,7 +239,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
           onEdit={handleEdit}
           onSave={fm.saveFileContent}
           onCancel={handleCancelEdit}
-          onContentChange={fm.setFileContent}
+          onContentChange={handleContentChange}
           onThemeChange={handleThemeChange}
           onOpenInNewWindow={openInNewWindow}
           onDownloadFile={fm.downloadFile}

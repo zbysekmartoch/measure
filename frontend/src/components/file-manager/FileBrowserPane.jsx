@@ -252,7 +252,8 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
   const [hovered, setHovered] = useState(false);
   const indent = depth * 16 + 12;
   const isWorkflow = file.name?.endsWith('.workflow');
-  const isDebuggable = isWorkflow || /\.(py|js|cjs)$/i.test(file.name);
+  const isRunnableScript = /\.(py|js|cjs|r)$/i.test(file.name);
+  const isDebuggable = isWorkflow || isRunnableScript;
   const isLockedByOther = lockInfo && !lockInfo.isMe;
   const isLockedByMe = lockInfo && lockInfo.isMe;
   const changedBg = '#fef9c3';  // light yellow for changed files
@@ -307,7 +308,7 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         {isDebuggable && onDebugWorkflow && (
           <IBtn title={fiBtn.debugWorkflow.label} onClick={() => onDebugWorkflow(file.path)} bg={fiBtn.debugWorkflow.bg}>{fiBtn.debugWorkflow.icon}</IBtn>
         )}
-        {isWorkflow && onRunWorkflow && (
+        {(isWorkflow || isRunnableScript) && onRunWorkflow && (
           <IBtn title={fiBtn.runWorkflow.label} onClick={() => onRunWorkflow(file.path)} bg={fiBtn.runWorkflow.bg}>{fiBtn.runWorkflow.icon}</IBtn>
         )}
         <IBtn title={fiBtn.renameFile.label} onClick={() => {

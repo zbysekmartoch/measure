@@ -53,8 +53,22 @@ export default function CodeEditor({
   // from Markdown preview to edit mode).
   const isEditing = !readOnly && !!onChange;
   const mountedRef = useRef(false);
+  const editorRef = useRef(null);
+
+  // When the value prop changes externally (e.g. file switch) while in editing
+  // mode, push it imperatively via the editor model. Must run in useEffect
+  // (not during render) because model.setValue fires onChange → setState.
+  useEffect(() => {
+    if (isEditing && mountedRef.current && editorRef.current) {
+      const model = editorRef.current.getModel();
+      if (model && model.getValue() !== value) {
+        model.setValue(value ?? '');
+      }
+    }
+  }, [value, isEditing]);
 
   const handleMount = useCallback((editor, monaco) => {
+    editorRef.current = editor;
     // Mark as mounted *after* this render cycle so the first render still
     // passes the controlled value.
     requestAnimationFrame(() => { mountedRef.current = true; });

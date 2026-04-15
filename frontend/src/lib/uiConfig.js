@@ -277,6 +277,8 @@ export const fileIcons = {
   htm:      '🌐',
   css:      '🎨',
   scss:     '🎨',
+  // R
+  r:        '🅁',
   // Shell
   sh:       '🖥️',
   bash:     '🖥️',

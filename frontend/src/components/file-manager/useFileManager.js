@@ -254,6 +254,11 @@ export default function useFileManager({
       }
     }
 
+    // Release lock on previous file when switching
+    if (isEditing && selectedFile && selectedFile !== file.path) {
+      releaseFileLock(selectedFile);
+    }
+
     if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
     if (imageBlobUrl) { URL.revokeObjectURL(imageBlobUrl); setImageBlobUrl(null); }
 
@@ -308,7 +313,7 @@ export default function useFileManager({
     } catch {
       toast.error('Error loading file content');
     } finally { setLoading(false); }
-  }, [apiBasePath, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile]);
+  }, [apiBasePath, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile, releaseFileLock]);
 
   // Auto-reload selected file content when it was modified externally (e.g. after workflow, sync agent)
   useEffect(() => {
@@ -396,9 +401,6 @@ export default function useFileManager({
         throw new Error();
       }
       setOriginalContent(fileContent);
-      setIsEditing(false);
-      // Release lock after successful save
-      await releaseFileLock(selectedFile);
       toast.success('File saved');
     } catch {
       toast.error('Error saving file');

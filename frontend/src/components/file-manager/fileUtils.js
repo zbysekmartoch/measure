@@ -19,6 +19,7 @@ export const getLanguageFromFilename = (filename) => {
     md: 'markdown', markdown: 'markdown',
     mexpr: 'markdown', latex: 'latex',
     xml: 'xml', yaml: 'yaml', yml: 'yaml',
+    r: 'r',
     sh: 'shell', bash: 'shell',
     txt: 'plaintext', log: 'plaintext', err: 'plaintext', csv: 'plaintext',
   };
@@ -58,7 +59,7 @@ export const isTextFile = (filename) => {
   const textExts = [
     'log','err','txt','json','xml','yaml','yml','md','tex',
     'py','js','jsx','ts','tsx','css','html','htm',
-    'sql','sh','bash','csv','ini','cfg','conf','properties',
+    'sql','sh','bash','csv','ini','cfg','conf','properties','r',
   ];
   return textExts.includes(ext);
 };
