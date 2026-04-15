@@ -17,6 +17,7 @@ export const getLanguageFromFilename = (filename) => {
     html: 'html', htm: 'html',
     css: 'css', scss: 'scss', less: 'less',
     md: 'markdown', markdown: 'markdown',
+    mexpr: 'markdown', latex: 'latex',
     xml: 'xml', yaml: 'yaml', yml: 'yaml',
     sh: 'shell', bash: 'shell',
     txt: 'plaintext', log: 'plaintext', err: 'plaintext', csv: 'plaintext',
@@ -37,12 +38,25 @@ export const isPdfFile = (filename) => {
   return filename.split('.').pop()?.toLowerCase() === 'pdf';
 };
 
+/** Markdown file? */
+export const isMarkdownFile = (filename) => {
+  if (!filename) return false;
+  return ['md', 'markdown','mexpr'].includes(filename.split('.').pop()?.toLowerCase());
+};
+
+/** LaTeX file? */
+export const isLatexFile = (filename) => {
+  if (!filename) return false;
+  return ['tex', 'latex'].includes(filename.split('.').pop()?.toLowerCase());
+};
+
+
 /** Text-editable file? */
 export const isTextFile = (filename) => {
   if (!filename) return false;
   const ext = filename.split('.').pop()?.toLowerCase();
   const textExts = [
-    'log','err','txt','json','xml','yaml','yml','md',
+    'log','err','txt','json','xml','yaml','yml','md','tex',
     'py','js','jsx','ts','tsx','css','html','htm',
     'sql','sh','bash','csv','ini','cfg','conf','properties',
   ];

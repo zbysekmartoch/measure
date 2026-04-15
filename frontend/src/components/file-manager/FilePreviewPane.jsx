@@ -11,7 +11,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import CodeEditor from '../CodeEditor.jsx';
-import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate } from './fileUtils.js';
+import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate, isMarkdownFile } from './fileUtils.js';
 import { filePreviewButtons as fpBtn, shadow, fileLocking as lockCfg } from '../../lib/uiConfig.js';
 
 export default function FilePreviewPane({
@@ -104,7 +104,8 @@ export default function FilePreviewPane({
   const isText = selectedFileInfo.isText || isTextFile(selectedFile);
   const isImg = isImageFile(selectedFile);
   const isPdf = isPdfFile(selectedFile);
-  const isMarkdown = selectedFile && /\.md$/i.test(selectedFile);
+  //const isMarkdown = selectedFile && /\.md$/i.test(selectedFile);
+  const isMarkdown = isMarkdownFile(selectedFile);
   const showMarkdownPreview = isMarkdown && !isEditing;
 
   const canEdit = isText && !readOnly && !fileIsReadonly && !isLockedByOther;

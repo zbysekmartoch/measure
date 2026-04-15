@@ -1,12 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 //import mysql from 'mysql2/promise';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import ImageModule from 'docxtemplater-image-module-free';
 import { DateTime } from "luxon";
+import {  imageSize  } from 'image-size';
+import os from 'os';
 
 const DEFAULT_LOCALE = "cs";
 const DEFAULT_ZONE = "Europe/Prague";
@@ -23,7 +25,7 @@ const ALLOWED_TOKENS = new Set([
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
+let gData; // globální pro případ potřeby v customizeValue
 let IMAGES_DIR;
 // --- Načtení parametrů ---
 // argv[2] = RESULT_ROOT, argv[3] = WORKFLOW_ROOT (ignorován), argv[4] = LAB_ROOT
@@ -35,6 +37,9 @@ const LAB_ROOT = process.argv[4] || __dirname;
 ///console.log(`LAB_ROOT:    ${LAB_ROOT}`);
 
 let gImgParams=[]; // globální pole parametrů obrázků
+
+
+let formulaCache = new Map();
 
 // Globální objekt pro data
 //let data = {};
@@ -78,29 +83,28 @@ function makeObjectFromKeys(keys, value) {
 }
 
 
-function enhanceProducts(products) {
-    products.forEach(p => {
-         let charCaptions = {
-            N: 'N - Počet pozorování za vybrané období',
-            Nmin: 'Nmin - minimální počet nenulového denního pozorování',
-            Nmax: 'Nmax - maximální počet nenulového denního pozorování',
-            Pmin: 'Pmin - minimální cena za vybrané období',
-            Pmax: 'Pmax - maximální cena za vybrané období',
-            PmodeAll: 'Pmode - Nejnižší nejčastější cena za vybrané období',
-            Pp: 'Pp - Průměrná cena za  vybrané období',
-            Pmed: 'Pmed - Mediánová cena za vybrané období',
-            Nmode: 'Počet výskytů Pmode za vybrané období',
-            T0: 'Počet dní s žádnou pozorovanou cenou',
-            determ: 'Hodnota determinace cen'
-        }
-        let characteristics = Object.keys(p)
-            .filter(k => ['N', 'Nmin', 'Nmax', 'Pmin', 'Pmax', 'PmodeAll', 'Nmode', 'T0', 'Pp', 'Pmed', 'determ'].includes(k))
-            .map(k => ({ key: charCaptions[k], value: p[k] ?? '' }));
+function getFilenameFromData(filename, tagValue) {
+    /* pokud filename začíná tečkou tak obsahuje název property (i více oddělené tečkou) 
+    např. ".foto" v objektu gData od místa které má adresu v gImgParams[tagValue].pathArr, 
+    např. "osoba.2" takže se podíváme do gData.osoba[2].foto a použijeme jeho hodnotu jako filename.
+    
+    */
 
-        p.characteristics = characteristics;
-    });
+    const propPath = filename.slice(1).split('.'); // ["foto"]
+    const basePath = gImgParams[tagValue]?.pathArr.slice(0,-1) || []; // ["osoba", "2"]
+    const fullPath = basePath.concat(propPath); // ["osoba", "2", "foto"]
+    let current = gData;
+    for (const p of fullPath) {
+        if (current == null) break;
+        current = current[p];
+    }
+    if (typeof current === 'string') {
+        return current;
+    } else {
+        console.warn(`neplatná cesta ${fullPath.join('.')} ale našel jsem:`, current);
+        return null;
+    }
 }
-
 
 // --- Image module config pro Docxtemplater ---
 function buildImageModule(allProducts) {
@@ -110,16 +114,42 @@ function buildImageModule(allProducts) {
         centered: false,
         getImage: function (tagValue, tagName) {
             // tagValue očekáváme jako index produktu (číslo) nebo přímo buffer/filepath
-            // V šabloně použijeme {{{img/slozka}}} a do data vložíme id → tady z cache vrátíme buffer.
-            let subFolderName = gImgParams[tagValue]?.params?.path;
-            let index = gImgParams[tagValue]?.pathArr.slice(-2,-1)[0]; // předposlední část path je index v poli
             let filename = gImgParams[tagValue]?.params?.filename;
+            if (filename && filename.startsWith('.')) {
+                filename=getFilenameFromData(filename, tagValue);
+            }
+
             let imgPath = path.join(`${RESULT_ROOT}/${filename}`);
- 
-            // Pokud je tagValue přímo buffer nebo cesta k souboru, použij to
-   
-            if (fs.existsSync(imgPath)) {
-                return fs.readFileSync(imgPath);
+            let buffer;
+            let params=gImgParams[tagValue]?.params||{}
+            if (filename && fs.existsSync(imgPath)) {
+                buffer = fs.readFileSync(imgPath);
+                if (filename.endsWith(".mexpr") || filename.endsWith(".expr")) {
+                    buffer = latexToSvgCached(buffer.toString());
+                }
+            }
+            if (!filename && params.expr) {
+                // Pokud máme LaTeX výraz, převedeme ho na SVG
+                let expr=params.expr.replaceAll('–','-'); // nahradíme dlouhé pomlčky, které tam word často cpe
+                buffer = latexToSvgCached(expr);
+                
+            }
+            if (buffer) {
+                const dimensions = imageSize(buffer);
+                // pokud není nastaven params.width ani params.height, použij skutečné rozměry obrázku
+                if (!params.width && !params.height) {  
+                    params.width = dimensions.width;
+                    params.height = dimensions.height;
+                }
+                // pokud je nastaven jen jeden z rozměrů, dopočítej druhý pro zachování poměru
+                if (params.width && !params.height) {
+                    params.height = Math.round(dimensions.height * (params.width / dimensions.width));
+                } else if (!params.width && params.height) {
+                    params.width = Math.round(dimensions.width * (params.height / dimensions.height));
+                }
+                gImgParams[tagValue].params=params;
+                
+                return buffer;
             }
 
             // Bez obrázku vrať 1×1 transparentní PNG (aby se generování nezastavilo)
@@ -130,6 +160,7 @@ function buildImageModule(allProducts) {
             return emptyPng;
         },
         getSize: function (img, tagValue, tagName) {
+            
             return [gImgParams[tagValue]?.params?.width||500, 
             gImgParams[tagValue]?.params?.height||400];
         },
@@ -215,7 +246,7 @@ async function main() {
             if (dataRelPath) { // pokud je zadáno, načti data, jinak nech reportData prázdný (ne všechny dokumenty musí mít data)
                 reportData=loadData(dataPath);
             }
-
+/*
             // Obrázky – podsložky v RESULT_ROOT/img
             if (fs.existsSync(IMAGES_DIR)) {
                 let imgKeys = getSubfolders(IMAGES_DIR).map(e => 'img_' + e);
@@ -223,8 +254,8 @@ async function main() {
                 if (reportData.products) {
                     reportData.products = reportData.products.map(p => ({ ...p, ...makeObjectFromKeys(imgKeys, p.id) }));
                 }
-            }
-
+            }*/
+            gData=reportData; // globální pro případ potřeby v customizeValue
             let virtualData = createDeepIntrospectingGetLoggerProxy(reportData);
 
             if (!fs.existsSync(templatePath)) {
@@ -294,11 +325,11 @@ function normalizeQuotes(str) {
   return str.replace(/[“”„‟«»‹›]/g, '"');
 }
 
-
+/*
 function normalizeProp(prop) {
-/* Rozdělí prop na název a případné parametry ve formátu JSON objektu
-   Vrací [propName, paramsObject|null]
-*/    
+// Rozdělí prop na název a případné parametry ve formátu JSON objektu
+//   Vrací [propName, paramsObject|null]
+    
     let params = null;
     let paramStr;
     if (typeof prop === "string") {
@@ -317,7 +348,7 @@ function normalizeProp(prop) {
     }   
     return [prop, params];
 }
-
+*/
 
 function formatTemplateDate(iso, { dateFormat, locale, zone } = {}) {
     const usedFormat = dateFormat ?? DEFAULT_PATTERN;
@@ -327,18 +358,55 @@ function formatTemplateDate(iso, { dateFormat, locale, zone } = {}) {
     return DateTime.fromSQL(iso, { zone: usedZone }).setLocale(usedLocale).toFormat(usedFormat);
 }
 
+function formatNumber(value, {
+  locale = 'cs-CZ',
+  minDecimals = 0,
+  maxDecimals = 5,
+  useGrouping = true
+} = {}) {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: minDecimals,
+    maximumFractionDigits: maxDecimals,
+    useGrouping
+  }).format(value);
+}
+
 function customizeValue(value, params, pathArr) {
     // Upraví value dle params (např. formátování data)
+    let ret;
     if (params.dateFormat) {  // ok jde o formátování datumu
-        value = formatTemplateDate(value, params);
+        ret = formatTemplateDate(value, params);
+    }
+
+    if (params.numFormat) {  // ok jde o formátování datumu
+        ret = formatNumber(value, params.numFormat);
+    }
+
+    if (params.orderBy && Array.isArray(value)) {
+        //ret = [...value]; // clone
+        ret=value;
+        // podporuje víceúrovňové řazení. params.orderby je string "key1,key2 desc,key3"
+        const orderBys = params.orderBy.split(',').map(s => {
+            const [key, dir] = s.trim().split(' ');
+            return { key, desc: dir && dir.toLowerCase() === 'desc' };
+        });
+
+        ret.sort((a, b) => {
+            for (const { key, desc } of orderBys) {
+                if (a[key] < b[key]) return desc ? 1 : -1;
+                if (a[key] > b[key]) return desc ? -1 : 1;
+            }
+            return 0;
+        }); 
+        
     }
     // pokud je poslední část pathArr "img", tak jde o obrázek a  vrátíme pathArr
     if (pathArr[pathArr.length - 1]=='img') {
         gImgParams.push({params,pathArr});
-        value=gImgParams.length -1;
+        ret=gImgParams.length -1;
     }
 
-    return value;
+    return ret;
 }
 
 
@@ -390,8 +458,16 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
         if (prop === Symbol.toStringTag) return Reflect.get(t, prop, receiver);
 
         let params;
-        [prop,params]=normalizeProp(prop)
-
+        let latexSplit = splitLatexExpression(prop);
+        if (latexSplit) {  // je to LaTeX math výraz. pro účely parsování parametrů ho dočasně nahradíme placeholderem
+            // uděláme z toho img tag a do parametru expr dáme původní LaTeX, ať to projde do customizeValue, kde poznáme že jde o obrázek s LaTeXem a v getImageModule to zase poznáme a převedeme na SVG
+            [prop, params] = normalizeProp(`img ${latexSplit[1]}`);
+            if (!params) params={};
+            params.expr=latexSplit[0];
+            
+        } else {
+            [prop, params] = normalizeProp(prop);
+        }
 
         if (typeof prop === "string" && prop.includes(".")) {
             const lastDot = prop.lastIndexOf(".");
@@ -451,4 +527,297 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
   return getProxy(rootObj, []);
 }
 
+/// ************************ params parser *******************
 
+function splitLatexExpression(input) {
+    // Rozdělí string na dvě části: 1) LaTeX výraz v $...$ a 2) zbytek textu
+    if (typeof input !== "string") return null;
+
+    const m = input.match(/^\s*(\$(?:\\.|[^$\\])*\$)\s*(.*)$/);
+    if (!m) return null;
+
+    return [m[1], m[2]];
+}
+
+function normalizeProp(prop) {
+    /* Rozdělí prop na název a případné parametry
+
+       Podporované zápisy:
+       1) product.from {"dateFormat":"D.M.YYYY","color":"red"}
+       2) product.from dateFormat="D.M.YYYY" color=red
+       3) prop param1=ahoj param2 = 12, param3="delší text" param4= něco ; param5 ="1,2"
+
+       Vrací [propName, paramsObject|null]
+    */
+    console.log(`normalizeProp: ${prop}`);
+    if (typeof prop !== "string") {
+        return [prop, null];
+    }
+
+    prop = prop.trim();
+
+    if (!prop) {
+        return ["", null];
+    }
+
+    const jsonResult = tryParseJsonSyntax(prop);
+    if (jsonResult) {
+        return jsonResult;
+    }
+
+    return parseSimpleSyntax(prop);
+}
+
+function tryParseJsonSyntax(prop) {
+    const jsonStart = prop.indexOf("{");
+    if (jsonStart === -1) {
+        return null;
+    }
+
+    const propName = prop.slice(0, jsonStart).trim();
+    let paramStr = prop.slice(jsonStart);
+
+    paramStr = normalizeQuotes(paramStr);
+
+    try {
+        const params = JSON.parse(paramStr);
+        return [propName, params];
+    } catch (e) {
+        console.warn("Chyba při parsování JSON parametrů:", paramStr);
+        return [propName, null];
+    }
+}
+
+function parseSimpleSyntax(prop) {
+    const firstParamIndex = findFirstParamIndex(prop);
+
+    if (firstParamIndex === -1) {
+        return [prop.trim(), null];
+    }
+
+    const propName = prop.slice(0, firstParamIndex).trim();
+    let paramPart = prop.slice(firstParamIndex).trim();
+
+    paramPart = normalizeQuotes(paramPart);
+
+    const protectedText = protectQuotedParts(paramPart);
+    const normalized = normalizeSeparators(protectedText);
+    const rawTokens = splitTokens(normalized);
+    const joinedTokens = joinBrokenKeyValueTokens(rawTokens);
+    const params = parseKeyValueTokens(joinedTokens);
+
+    return [propName, Object.keys(params).length ? params : null];
+}
+
+function findFirstParamIndex(text) {
+    const match = text.match(/\s+[A-Za-z0-9_]+\s*=/);
+    return match ? match.index : -1;
+}
+
+
+function protectQuotedParts(text) {
+    return text.replace(/"([^"\\]*(\\.[^"\\]*)*)"|'([^'\\]*(\\.[^'\\]*)*)'/g, (full) => {
+        const inner = full.slice(1, -1);
+
+        return inner
+            .replaceAll(" ", "__SPACE__")
+            .replaceAll(",", "__COMMA__")
+            .replaceAll(";", "__SEMICOLON__")
+            .replaceAll('"', "");
+    });
+}
+function normalizeSeparators(text) {
+    return text
+        .replace(/[;,]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function splitTokens(text) {
+    if (!text) {
+        return [];
+    }
+    return text.split(" ").map(t => t.trim()).filter(Boolean);
+}
+
+function joinBrokenKeyValueTokens(tokens) {
+    const result = [];
+    let i = 0;
+
+    while (i < tokens.length) {
+        let token = tokens[i];
+
+        if (token.includes("=")) {
+            const parts = token.split("=");
+
+            if (parts.length === 2 && parts[1] === "" && i + 1 < tokens.length) {
+                token = token + tokens[i + 1];
+                i += 2;
+                result.push(token);
+                continue;
+            }
+        } else if (
+            i + 1 < tokens.length &&
+            tokens[i + 1] === "=" &&
+            i + 2 < tokens.length
+        ) {
+            token = tokens[i] + "=" + tokens[i + 2];
+            i += 3;
+            result.push(token);
+            continue;
+        }
+
+        result.push(token);
+        i++;
+    }
+
+    return result;
+}
+
+function parseKeyValueTokens(tokens) {
+    const params = {};
+
+    for (const t of tokens) {
+        const i = t.indexOf("=");
+        if (i === -1) continue;
+
+        const key = t.slice(0, i).trim();
+        let value = t.slice(i + 1).trim();
+
+        value = restoreValue(value);
+
+        if (key) {
+            params[key] = value;
+        }
+    }
+
+    return params;
+}
+
+function restoreValue(value) {
+    return value
+        .replaceAll("__SPACE__", " ")
+        .replaceAll("__COMMA__", ",")
+        .replaceAll("__SEMICOLON__", ";");
+}
+
+/// *************************** LaTeX → SVG (pro vzorce v dokumentu)
+
+
+function latexToSvgCached(formula) {
+  if (formulaCache.has(formula)) {
+    return formulaCache.get(formula);
+  }
+
+  const buffer = latexToSvg(formula);
+  formulaCache.set(formula, buffer);
+  return buffer;
+}
+
+
+/**
+ * Převede LaTeX výraz na SVG a vrátí ho jako Buffer.
+ *
+ * Požadavky v systému:
+ *   sudo apt install texlive-latex-base texlive-latex-extra dvisvgm
+ *
+ * @param {string} formula
+ *   Např. '$\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$'
+ *   nebo '\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}'
+ *
+ * @returns {Buffer}
+ */
+function latexToSvg(formula) {
+  if (typeof formula !== "string" || !formula.trim()) {
+    throw new Error("formula musí být neprázdný string");
+  }
+
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "latex-svg-"));
+
+  try {
+    const normalizedFormula = normalizeFormula(formula);
+
+    const texContent = [
+      "\\documentclass[preview]{standalone}",
+      "\\usepackage[utf8]{inputenc}",
+      "\\usepackage[T1]{fontenc}",
+      "\\usepackage{amsmath,amssymb}",
+      "\\begin{document}",
+      normalizedFormula,
+      "\\end{document}",
+      ""
+    ].join("\n");
+
+    const texPath = path.join(workDir, "input.tex");
+    const dviPath = path.join(workDir, "input.dvi");
+    const svgPath = path.join(workDir, "output.svg");
+    const logPath = path.join(workDir, "input.log");
+
+    fs.writeFileSync(texPath, texContent, "utf8");
+
+    execFileSync(
+      "latex",
+      ["-interaction=nonstopmode", "-halt-on-error", "input.tex"],
+      {
+        cwd: workDir,
+        timeout: 15000,
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+
+    execFileSync(
+      "dvisvgm",
+      ["--no-fonts", "--exact", dviPath, "-o", svgPath],
+      {
+        cwd: workDir,
+        timeout: 15000,
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+
+    return fs.readFileSync(svgPath);
+  } catch (err) {
+    let details = "";
+
+    try {
+      details = fs.readFileSync(logPath, "utf8");
+    } catch {
+      // ignorovat
+    }
+
+    const stderr = err && err.stderr ? err.stderr.toString("utf8") : "";
+    const stdout = err && err.stdout ? err.stdout.toString("utf8") : "";
+
+    throw new Error(
+      [
+        "Nepodařilo se převést LaTeX na SVG.",
+        stderr ? `STDERR:\n${stderr}` : "",
+        stdout ? `STDOUT:\n${stdout}` : "",
+        details ? `LOG:\n${details}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    );
+  } finally {
+    try {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    } catch {
+      // ignorovat
+    }
+  }
+}
+
+function normalizeFormula(formula) {
+  const trimmed = formula.trim();
+
+  if (
+    trimmed.startsWith("$") ||
+    trimmed.startsWith("\\(") ||
+    trimmed.startsWith("\\[") ||
+    trimmed.startsWith("\\begin{")
+  ) {
+    return trimmed;
+  }
+
+  return `$${trimmed}$`;
+}

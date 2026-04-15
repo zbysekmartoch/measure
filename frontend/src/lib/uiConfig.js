@@ -268,6 +268,7 @@ export const fileIcons = {
   sql:      '🗃️',
   // Documents
   md:       '📝',
+  mexpr:      '∑',
   txt:      '📄',
   log:      '📃',
   err:      '🚨',

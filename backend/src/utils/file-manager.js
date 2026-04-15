@@ -54,7 +54,7 @@ export async function copyRecursive(src, dest) {
  * List of allowed extensions for viewing
  */
 const ALLOWED_EXTENSIONS = [
-  '.doc', '.docx', '.xls', '.xlsx', '.js', '.cjs', '.py', '.txt', '.md', 
+  '.doc', '.docx', '.xls', '.xlsx', '.js', '.cjs', '.py', '.txt', '.md', '.tex', '.mexpr', 
   '.json', '.workflow', '.sql', '.sh', '.css', '.html', '.xml', '.yaml', '.yml', '.env',
   '.log', '.err', '.csv', '.r',
 ];
@@ -63,7 +63,7 @@ const ALLOWED_EXTENSIONS = [
  * Extensions readable as text
  */
 const TEXT_EXTENSIONS = [
-  '.js', '.cjs', '.py', '.txt', '.md', '.json', '.workflow', '.sql', 
+  '.js', '.cjs', '.py', '.txt', '.md', '.tex', '.mexpr', '.json', '.workflow', '.sql', 
   '.sh', '.css', '.html', '.xml', '.yaml', '.yml', '.env',
   '.log', '.err', '.csv', '.r',
 ];
