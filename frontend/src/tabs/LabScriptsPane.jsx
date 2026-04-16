@@ -511,6 +511,7 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
                 onRunWorkflow={handleRunWorkflow}
                 specialFolders={appConfig?.outputsFolderName ? [appConfig.outputsFolderName] : ['Outputs']}
                 csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+                previewMaxFileSize={appConfig?.previewMaxFileSize}
                 onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: apiBasePath, fileName }) : undefined}
                 labOwnerId={lab.ownerId}
               />

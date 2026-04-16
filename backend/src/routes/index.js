@@ -45,11 +45,13 @@ router.get('/health', async (req, res) => {
     // Read config values from config.json
     let outputsFolderName = 'Outputs';
     let csvPreviewMaxRows = 100;
+    let previewMaxFileSize = 1048576; // 1MB default
     try {
       const configJsonPath = path.join(__dirname, '../../config.json');
       const configData = JSON.parse(await fs.readFile(configJsonPath, 'utf8'));
       if (configData.outputsFolderName) outputsFolderName = configData.outputsFolderName;
       if (configData.csvPreviewMaxRows != null) csvPreviewMaxRows = configData.csvPreviewMaxRows;
+      if (configData.previewMaxFileSize != null) previewMaxFileSize = configData.previewMaxFileSize;
     } catch { /* use default */ }
 
     res.json({ 
@@ -73,6 +75,7 @@ router.get('/health', async (req, res) => {
       config: {
         outputsFolderName,
         csvPreviewMaxRows,
+        previewMaxFileSize,
       },
       timestamp: new Date().toISOString()
     });

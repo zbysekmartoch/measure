@@ -1,0 +1,1 @@
+$\int_{0}^{\infty} x^{s-1} e^{-x} \, dx = \Gamma(s)$

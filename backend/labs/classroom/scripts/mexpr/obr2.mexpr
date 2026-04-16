@@ -1,0 +1,7 @@
+$
+\begin{aligned}
+\mathbf{F} &= m \mathbf{a} \\
+           &= m \frac{d \mathbf{v}}{dt} \\
+           &= m \frac{d^2 \mathbf{r}}{dt^2}
+\end{aligned}
+$

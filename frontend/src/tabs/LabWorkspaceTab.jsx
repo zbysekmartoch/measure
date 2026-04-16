@@ -478,6 +478,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
               showModificationDate
               title="Current output"
               csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+              previewMaxFileSize={appConfig?.previewMaxFileSize}
               onAnalyze={(fileName) => openAnalyze({ labId: lab.id, apiPath: `/api/v1/labs/${lab.id}/current_output`, fileName })}
             />
           </div>
@@ -585,6 +586,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
             showModificationDate
             title="Current output"
             csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+            previewMaxFileSize={appConfig?.previewMaxFileSize}
             onAnalyze={(fileName) => openAnalyze({ labId: lab.id, apiPath: `/api/v1/labs/${lab.id}/current_output`, fileName })}
           />
         </div>,

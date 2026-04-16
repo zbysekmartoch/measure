@@ -1,0 +1,12 @@
+{
+  "report": {
+    "doc": [
+      {
+        "template": "reports/SeznamOsobTemplate.docx",
+        "renderTo": "SeznamOsob.docx",
+        "data": "Data/fyzici.json",
+        "exportPDF": true
+      }
+    ]
+  }
+}

@@ -685,6 +685,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
                 onFileDoubleClick={handleFileOpen}
 
                 csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
+                previewMaxFileSize={appConfig?.previewMaxFileSize}
                 onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: fileManagerApiPath, fileName }) : undefined}
                 labOwnerId={lab.ownerId}
               />

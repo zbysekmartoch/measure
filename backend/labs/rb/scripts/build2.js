@@ -31,6 +31,7 @@ let IMAGES_DIR;
 // argv[2] = RESULT_ROOT, argv[3] = WORKFLOW_ROOT (ignorován), argv[4] = LAB_ROOT
 // Pokud nejsou zadány, použije se složka skriptu (pro testování)
 const RESULT_ROOT = process.argv[2] || __dirname;
+const WORKFLOW_ROOT = process.argv[3] || __dirname;
 const LAB_ROOT = process.argv[4] || __dirname;
 
 ///console.log(`RESULT_ROOT: ${RESULT_ROOT}`);
@@ -83,14 +84,14 @@ function makeObjectFromKeys(keys, value) {
 }
 
 
-function getFilenameFromData(filename, tagValue) {
-    /* pokud filename začíná tečkou tak obsahuje název property (i více oddělené tečkou) 
+function getValueFromData(propName, tagValue) {
+    /* pokud propName začíná tečkou tak obsahuje název property (i více oddělené tečkou) 
     např. ".foto" v objektu gData od místa které má adresu v gImgParams[tagValue].pathArr, 
     např. "osoba.2" takže se podíváme do gData.osoba[2].foto a použijeme jeho hodnotu jako filename.
     
     */
 
-    const propPath = filename.slice(1).split('.'); // ["foto"]
+    const propPath = propName.slice(1).split('.'); // ["foto"]
     const basePath = gImgParams[tagValue]?.pathArr.slice(0,-1) || []; // ["osoba", "2"]
     const fullPath = basePath.concat(propPath); // ["osoba", "2", "foto"]
     let current = gData;
@@ -107,7 +108,7 @@ function getFilenameFromData(filename, tagValue) {
 }
 
 // --- Image module config pro Docxtemplater ---
-function buildImageModule(allProducts) {
+function buildImageModule() {
     // Mapuj index → buffer obrázku (vyřešíme dopředu, ať v getImage jen sáhne do cache)
 
     return new ImageModule({
@@ -116,7 +117,7 @@ function buildImageModule(allProducts) {
             // tagValue očekáváme jako index produktu (číslo) nebo přímo buffer/filepath
             let filename = gImgParams[tagValue]?.params?.filename;
             if (filename && filename.startsWith('.')) {
-                filename=getFilenameFromData(filename, tagValue);
+                filename=getValueFromData(filename, tagValue);
             }
 
             let imgPath = path.join(`${RESULT_ROOT}/${filename}`);
@@ -129,8 +130,13 @@ function buildImageModule(allProducts) {
                 }
             }
             if (!filename && params.expr) {
+                let expr=params.expr;
+                if (expr.startsWith('.')) {
+                    expr=getValueFromData(expr, tagValue);
+                }
+                
                 // Pokud máme LaTeX výraz, převedeme ho na SVG
-                let expr=params.expr.replaceAll('–','-'); // nahradíme dlouhé pomlčky, které tam word často cpe
+                expr=expr.replaceAll('–','-'); // nahradíme dlouhé pomlčky, které tam word často cpe
                 buffer = latexToSvgCached(expr);
                 
             }
@@ -230,9 +236,11 @@ async function main() {
         gImgParams = []; // reset pro každý dokument
         gImgParams.push({params:{},pathArr:[]}); // rezervuj index 0 pro případ, že by nějaký tag měl přímo buffer/cestu
         
-        // Cesty: template relativní k LAB_ROOT, data a output relativní k RESULT_ROOT
+        // Cesty: template relativní k LAB_ROOT a output relativní k RESULT_ROOT
+        // data pokud není, tak data nepotřebuje, pokud je v docConfig nastaven atribut dataInResult tak hledáme data relativně k RESULT_ROOT, jinak relativně k LAB_ROOT   
+
         const templatePath = path.resolve(LAB_ROOT, templateRelPath);
-        const dataPath = path.resolve(RESULT_ROOT, dataRelPath||'');
+        const dataPath = dataRelPath ? path.resolve(docConfig.dataInResult ? RESULT_ROOT : LAB_ROOT, dataRelPath) : null;  
         const outPath = path.resolve(RESULT_ROOT, outputRelPath);
 
         console.log(`\nZpracovávám dokument:`);

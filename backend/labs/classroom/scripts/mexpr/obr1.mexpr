@@ -1,0 +1,1 @@
+$\langle E \rangle = \frac{\sum_{n=0}^{\infty} E_n e^{-E_n/(kT)}}{\sum_{n=0}^{\infty} e^{-E_n/(kT)}}$

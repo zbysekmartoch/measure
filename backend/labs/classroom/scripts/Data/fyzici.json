@@ -1,0 +1,39 @@
+{
+  "osoba": [
+    {
+      "jmeno": "Isaac",
+      "prijmeni": "Newton",
+      "obor": "klasická mechanika",
+      "rovnice": "$F = m a$",
+      "portret":"portrety/newton.png"
+    },
+    {
+      "jmeno": "Albert",
+      "prijmeni": "Einstein",
+      "obor": "relativita",
+      "rovnice": "$E = m c^2$",
+      "portret":"portrety/einstein.png"
+    },
+    {
+      "jmeno": "James Clerk",
+      "prijmeni": "Maxwell",
+      "obor": "elektromagnetismus",
+      "rovnice": "$\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}$",
+      "portret":"portrety/maxwell.png"
+    },
+    {
+      "jmeno": "Erwin",
+      "prijmeni": "Schrödinger",
+      "obor": "kvantová mechanika",
+      "rovnice": "$i \\hbar \\frac{\\partial}{\\partial t} \\Psi = \\hat{H} \\Psi$",
+      "portret":"portrety/schrodinger.png"
+    },
+    {
+      "jmeno": "Galileo",
+      "prijmeni": "Galilei",
+      "obor": "kinematika",
+      "rovnice": "$s = v_0 t + \\frac{1}{2} a t^2$",
+      "portret":"portrety/galilei.png"
+    }
+  ]
+}

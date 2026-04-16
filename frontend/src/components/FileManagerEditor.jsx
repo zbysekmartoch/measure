@@ -36,6 +36,7 @@ export default function FileManagerEditor({
   specialFolders,
   onAnalyze,
   csvPreviewMaxRows,
+  previewMaxFileSize,
   labOwnerId,
 }) {
   const { user } = useAuth();
@@ -44,7 +45,7 @@ export default function FileManagerEditor({
   const [splitterWidth, setSplitterWidth] = useState(380);
   const containerRef = useRef(null);
 
-  const fm = useFileManager({ apiBasePath, showUpload, showDelete, readOnly, onFileSelect, refreshTrigger });
+  const fm = useFileManager({ apiBasePath, showUpload, showDelete, readOnly, onFileSelect, refreshTrigger, previewMaxFileSize });
 
   const handleThemeChange = useCallback((theme) => {
     setEditorTheme(theme);
@@ -246,6 +247,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
           onDeleteFile={fm.deleteFile}
           onAnalyze={onAnalyze}
           csvPreviewMaxRows={csvPreviewMaxRows}
+          previewMaxFileSize={previewMaxFileSize}
           fileLocks={fm.fileLocks}
           isReadonlyFile={fm.isReadonlyFile}
           onReleaseLock={fm.releaseFileLock}

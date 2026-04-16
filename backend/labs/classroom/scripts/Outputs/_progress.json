@@ -1,9 +1,9 @@
 {
   "status": "completed",
-  "totalSteps": 3,
-  "currentStep": 3,
-  "currentStepName": "101 measure/computeArea.py",
-  "analysisStartedAt": "2026-04-06T13:27:51.464Z",
-  "updatedAt": "2026-04-06T13:27:51.622Z",
-  "completedAt": "2026-04-06T13:27:51.622Z"
+  "totalSteps": 1,
+  "currentStep": 1,
+  "currentStepName": "<RB>/build2.js",
+  "analysisStartedAt": "2026-04-16T12:48:15.636Z",
+  "updatedAt": "2026-04-16T12:48:18.421Z",
+  "completedAt": "2026-04-16T12:48:18.421Z"
 }

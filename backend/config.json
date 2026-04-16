@@ -45,5 +45,6 @@
     "hiddenFilePrefixes": [".","_","node_modules"]
   },
   "outputsFolderName": "Outputs",
-  "csvPreviewMaxRows": 100
+  "csvPreviewMaxRows": 100,
+  "previewMaxFileSize": 1048576
 }

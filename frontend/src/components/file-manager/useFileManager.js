@@ -26,6 +26,7 @@ export default function useFileManager({
   readOnly = false,
   onFileSelect,
   refreshTrigger = 0,
+  previewMaxFileSize,
 }) {
   const toast = useToast();
 
@@ -300,6 +301,14 @@ export default function useFileManager({
     }
 
     if (!file.isText && !isTextFile(file.path)) { setFileContent(''); return; }
+
+    // Skip fetching content for files exceeding preview size limit
+    if (previewMaxFileSize && file.size > previewMaxFileSize) {
+      setFileContent('');
+      setOriginalContent('');
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);

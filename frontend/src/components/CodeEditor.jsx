@@ -39,9 +39,10 @@ export default function CodeEditor({
   const onSaveRef = useRef(onSave);
   const readOnlyRef = useRef(readOnly);
 
-  // Keep refs fresh
-  useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
-  useEffect(() => { readOnlyRef.current = readOnly; }, [readOnly]);
+  // Keep refs fresh — update synchronously during render so they are never stale
+  // when a keybinding fires between render and effect.
+  onSaveRef.current = onSave;
+  readOnlyRef.current = readOnly;
 
   // Editing = not readOnly AND onChange is provided.
   // During editing we pass value={undefined} so Monaco manages its own state
@@ -54,11 +55,19 @@ export default function CodeEditor({
   const isEditing = !readOnly && !!onChange;
   const mountedRef = useRef(false);
   const editorRef = useRef(null);
+  // Flag: true when the last value change came from user typing (onChange),
+  // false when it came from an external source (file switch).
+  const selfChangeRef = useRef(false);
 
   // When the value prop changes externally (e.g. file switch) while in editing
   // mode, push it imperatively via the editor model. Must run in useEffect
   // (not during render) because model.setValue fires onChange → setState.
+  // Skip when the change originated from the user's own typing.
   useEffect(() => {
+    if (selfChangeRef.current) {
+      selfChangeRef.current = false;
+      return;
+    }
     if (isEditing && mountedRef.current && editorRef.current) {
       const model = editorRef.current.getModel();
       if (model && model.getValue() !== value) {
@@ -67,17 +76,28 @@ export default function CodeEditor({
     }
   }, [value, isEditing]);
 
+  const handleChange = useCallback((newValue) => {
+    selfChangeRef.current = true;
+    onChange?.(newValue);
+  }, [onChange]);
+
   const handleMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
     // Mark as mounted *after* this render cycle so the first render still
     // passes the controlled value.
     requestAnimationFrame(() => { mountedRef.current = true; });
 
-    // Ctrl+S / Cmd+S → save
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      if (!readOnlyRef.current && onSaveRef.current) {
-        onSaveRef.current();
-      }
+    // Ctrl+S / Cmd+S → save (use addAction instead of addCommand for reliable
+    // per-instance keybinding that only fires when THIS editor has focus)
+    editor.addAction({
+      id: 'custom-save',
+      label: 'Save',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+      run: () => {
+        if (!readOnlyRef.current && onSaveRef.current) {
+          onSaveRef.current();
+        }
+      },
     });
 
     // Forward to consumer's onMount
@@ -99,7 +119,7 @@ export default function CodeEditor({
       height={height}
       language={language}
       value={controlledValue}
-      onChange={onChange}
+      onChange={handleChange}
       options={mergedOptions}
       theme={theme}
       onMount={handleMount}

@@ -37,6 +37,7 @@ export default function FilePreviewPane({
   onDeleteFile,
   onAnalyze,
   csvPreviewMaxRows,
+  previewMaxFileSize,
   // File locking
   fileLocks,
   isReadonlyFile,
@@ -109,6 +110,10 @@ export default function FilePreviewPane({
   const showMarkdownPreview = isMarkdown && !isEditing;
 
   const canEdit = isText && !readOnly && !fileIsReadonly && !isLockedByOther;
+
+  // Large file guard — skip Monaco for files exceeding the configured limit
+  const maxSize = previewMaxFileSize || 1048576;
+  const fileTooLarge = isText && !isMarkdown && selectedFileInfo.size > maxSize;
 
   return (
     <section style={{
@@ -245,6 +250,11 @@ export default function FilePreviewPane({
         </div>
       </div>
 
+      {/* Loading overlay */}
+      {loading && (
+        <div style={{ padding: '8px 0', color: '#6b7280', fontSize: 12, textAlign: 'center' }}>Loading...</div>
+      )}
+
       {/* Content area */}
       {isImg ? (
         <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 16 }}>
@@ -267,6 +277,25 @@ export default function FilePreviewPane({
               Loading...
             </div>
           )}
+        </div>
+      ) : isText && fileTooLarge ? (
+        /* Large file — info card instead of Monaco */
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6b7280', gap: 16, border: '1px solid #e5e7eb', borderRadius: 6, background: '#f8fafc' }}>
+          <div style={{ fontSize: 64 }}>📄</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#374151' }}>{selectedFile.split('/').pop()}</div>
+          <div style={{ fontSize: 14, color: '#6b7280' }}>
+            {formatFileSize(selectedFileInfo.size)} · {editorLanguage}
+          </div>
+          <div style={{ fontSize: 13, textAlign: 'center', maxWidth: 400, lineHeight: 1.6 }}>
+            This file is too large for inline preview ({formatFileSize(previewMaxFileSize || 1048576)} limit).
+            Double-click the file in the browser to open it in a dedicated tab for editing.
+          </div>
+          <button
+            onClick={() => onDownloadFile(selectedFile)}
+            style={{ padding: '6px 16px', background: fpBtn.download.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, boxShadow: shadow.small }}
+          >
+            {fpBtn.download.icon} {fpBtn.download.label}
+          </button>
         </div>
       ) : isText ? (
         showMarkdownPreview ? (
@@ -364,12 +393,16 @@ export default function FilePreviewPane({
               borderBottom: `1px solid ${editorTheme === 'vs' ? '#e5e7eb' : '#333'}`,
               display: 'flex', alignItems: 'center', gap: 6,
             }}>
-              ⚠️ Showing {csvPreviewMaxRows} of {totalRows} rows. Use <strong>🔍 Analyze</strong> for full data.
+              ⚠️ Showing {csvPreviewMaxRows} of {totalRows} rows. Open in a tab or use <strong>🔍 Analyze</strong> for full data.
             </div>
           )}
+          {truncated ? (
+            /* Truncated CSV — readonly HTML table */
+            <CsvTablePreview content={displayContent} />
+          ) : (
           <div style={{ flex: 1 }}>
             <CodeEditor
-              value={truncated ? displayContent : fileContent}
+              value={fileContent}
               language={editorLanguage}
               theme={editorTheme}
               readOnly={editorReadOnly}
@@ -377,6 +410,7 @@ export default function FilePreviewPane({
               onSave={onSave}
             />
           </div>
+          )}
         </div>
         )
       ) : (
@@ -390,5 +424,58 @@ export default function FilePreviewPane({
         </div>
       )}
     </section>
+  );
+}
+
+/* ── Simple CSV/TSV table preview (readonly) ────────────────────────────────── */
+function CsvTablePreview({ content }) {
+  const rows = useMemo(() => {
+    if (!content) return [];
+    const lines = content.split('\n').filter(l => l.trim());
+    const sep = content.includes('\t') ? '\t' : ',';
+    return lines.map(line => {
+      const cells = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') { inQuotes = !inQuotes; continue; }
+        if (ch === sep && !inQuotes) { cells.push(cur); cur = ''; continue; }
+        cur += ch;
+      }
+      cells.push(cur);
+      return cells;
+    });
+  }, [content]);
+
+  if (rows.length === 0) return null;
+  const header = rows[0];
+  const data = rows.slice(1);
+
+  return (
+    <div style={{ flex: 1, overflow: 'auto', fontSize: 12, fontFamily: "'Fira Code', monospace" }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <thead>
+          <tr>
+            {header.map((h, i) => (
+              <th key={i} style={{ position: 'sticky', top: 0, padding: '6px 10px', background: '#f3f4f6', border: '1px solid #d1d5db', fontWeight: 600, textAlign: 'left', whiteSpace: 'nowrap', fontSize: 11 }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, ri) => (
+            <tr key={ri} style={{ background: ri % 2 === 0 ? '#fff' : '#f9fafb' }}>
+              {row.map((cell, ci) => (
+                <td key={ci} style={{ padding: '4px 10px', border: '1px solid #e5e7eb', whiteSpace: 'nowrap', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

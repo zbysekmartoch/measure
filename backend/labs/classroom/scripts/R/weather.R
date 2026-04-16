@@ -1,11 +1,11 @@
 library(measure)
 
 result_dir <- RESULT_ROOT()
-workflow_dir <- WORKFLOW_ROOT()
+
 lab_dir <- LAB_ROOT()
   
 print(result_dir)
-print(workflow_dir)
+
 print(lab_dir)
 
 if (!require("ggplot2")) {

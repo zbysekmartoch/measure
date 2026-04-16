@@ -500,8 +500,6 @@ export default function FileBrowserPane({
         </div>
       </div>
 
-      {loading && <div style={{ color: '#6b7280', fontSize: 12 }}>{'Loading...'}</div>}
-
       {/* Hidden input for folder-specific upload */}
       {showUpload && (
         <input ref={folderUploadRef} type="file" style={{ display: 'none' }} onChange={onFolderUpload} />
