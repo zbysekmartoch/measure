@@ -134,7 +134,7 @@ function buildImageModule() {
                 if (expr.startsWith('.')) {
                     expr=getValueFromData(expr, tagValue);
                 }
-                
+
                 // Pokud máme LaTeX výraz, převedeme ho na SVG
                 expr=expr.replaceAll('–','-'); // nahradíme dlouhé pomlčky, které tam word často cpe
                 buffer = latexToSvgCached(expr);
@@ -717,7 +717,7 @@ function latexToSvgCached(formula) {
     return formulaCache.get(formula);
   }
 
-  const buffer = latexToSvg(formula);
+  const buffer = latexToImg(formula,'png'); // pro větší kompatibilitu s Wordem použijeme PNG místo SVG
   formulaCache.set(formula, buffer);
   return buffer;
 }
@@ -735,7 +735,7 @@ function latexToSvgCached(formula) {
  *
  * @returns {Buffer}
  */
-function latexToSvg(formula) {
+function latexToImg(formula,type='svg') {
   if (typeof formula !== "string" || !formula.trim()) {
     throw new Error("formula musí být neprázdný string");
   }
@@ -758,7 +758,7 @@ function latexToSvg(formula) {
 
     const texPath = path.join(workDir, "input.tex");
     const dviPath = path.join(workDir, "input.dvi");
-    const svgPath = path.join(workDir, "output.svg");
+    const imgPath = path.join(workDir, "output." + type);
     const logPath = path.join(workDir, "input.log");
 
     fs.writeFileSync(texPath, texContent, "utf8");
@@ -772,18 +772,28 @@ function latexToSvg(formula) {
         stdio: ["ignore", "pipe", "pipe"]
       }
     );
-
-    execFileSync(
-      "dvisvgm",
-      ["--no-fonts", "--exact", dviPath, "-o", svgPath],
-      {
-        cwd: workDir,
-        timeout: 15000,
-        stdio: ["ignore", "pipe", "pipe"]
-      }
-    );
-
-    return fs.readFileSync(svgPath);
+    if (type === 'svg') { 
+        execFileSync(
+            "dvisvgm",
+            ["--no-fonts", "--exact", dviPath, "-o", imgPath],
+            {
+                cwd: workDir,
+                timeout: 15000,
+                stdio: ["ignore", "pipe", "pipe"]
+            }
+        );
+    } else if (type === 'png') {
+        execFileSync(
+            "dvipng",
+            ["-T", "tight", "-D", "1200", "-o", imgPath, dviPath],  //TODO dát D do konfigu, nebo ho dynamicky přizpůsobit velikosti vzorce
+            {
+              cwd: workDir,
+              timeout: 15000,
+              stdio: ["ignore", "pipe", "pipe"]
+            }
+          );
+    }
+    return fs.readFileSync(imgPath);
   } catch (err) {
     let details = "";
 
@@ -798,7 +808,7 @@ function latexToSvg(formula) {
 
     throw new Error(
       [
-        "Nepodařilo se převést LaTeX na SVG.",
+        `Nepodařilo se převést LaTeX na ${type.toUpperCase()}.`,
         stderr ? `STDERR:\n${stderr}` : "",
         stdout ? `STDOUT:\n${stdout}` : "",
         details ? `LOG:\n${details}` : ""
