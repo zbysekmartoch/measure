@@ -746,7 +746,7 @@ function latexToImg(formula,type='svg') {
     const normalizedFormula = normalizeFormula(formula);
 
     const texContent = [
-      "\\documentclass[preview]{standalone}",
+      "\\documentclass[border=2pt]{standalone}",
       "\\usepackage[utf8]{inputenc}",
       "\\usepackage[T1]{fontenc}",
       "\\usepackage{amsmath,amssymb}",
@@ -785,7 +785,7 @@ function latexToImg(formula,type='svg') {
     } else if (type === 'png') {
         execFileSync(
             "dvipng",
-            ["-T", "tight", "-D", "1200", "-o", imgPath, dviPath],  //TODO dát D do konfigu, nebo ho dynamicky přizpůsobit velikosti vzorce
+            ["-T", "bbox", "-D", "1200", "-o"  , imgPath, "-bg", "Transparent", dviPath],  //TODO dát D do konfigu, nebo ho dynamicky přizpůsobit velikosti vzorce
             {
               cwd: workDir,
               timeout: 15000,
