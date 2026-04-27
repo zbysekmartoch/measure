@@ -123,10 +123,12 @@ function buildImageModule() {
             let imgPath = path.join(`${RESULT_ROOT}/${filename}`);
             let buffer;
             let params=gImgParams[tagValue]?.params||{}
+            let settingsType="img";
             if (filename && fs.existsSync(imgPath)) {
                 buffer = fs.readFileSync(imgPath);
                 if (filename.endsWith(".mexpr") || filename.endsWith(".expr")) {
                     buffer = latexToSvgCached(buffer.toString());
+                    settingsType="mexpr";
                 }
             }
             if (!filename && params.expr) {
@@ -138,14 +140,29 @@ function buildImageModule() {
                 // Pokud máme LaTeX výraz, převedeme ho na SVG
                 expr=expr.replaceAll('–','-'); // nahradíme dlouhé pomlčky, které tam word často cpe
                 buffer = latexToSvgCached(expr);
-                
+                settingsType="mexpr";
             }
             if (buffer) {
                 const dimensions = imageSize(buffer);
+                // nejdřív zkusíme, zda je nastaven parametr "scale"
+                if (params.scale) {
+                    params.width = Math.round(dimensions.width * params.scale);
+                    params.height = Math.round(dimensions.height * params.scale);
+                }
                 // pokud není nastaven params.width ani params.height, použij skutečné rozměry obrázku
-                if (!params.width && !params.height) {  
-                    params.width = dimensions.width;
-                    params.height = dimensions.height;
+                if (!params.width && !params.height) {  // není nastaveno přímo v parametrech tagu, zkusíme globální defaulty pro daný typ (img/mexpr), a pokud tam taky nejsou, tak použijeme skutečné rozměry
+                    // zkusíme default scale pro daný typ
+                    if (gDocDefualts[settingsType]?.scale) {
+                        params.width = Math.round(dimensions.width * gDocDefualts[settingsType].scale);
+                        params.height = Math.round(dimensions.height * gDocDefualts[settingsType].scale);
+                    } else
+                    if (!gDocDefualts[settingsType]?.width && !gDocDefualts[settingsType]?.height) { //neni ani v   globálních defaultech, tak použij skutečné rozměry 
+                        params.width = dimensions.width;
+                        params.height = dimensions.height;
+                    } else {  // je v globálních defaultech, tak použij ty, a pokud tam není některá z dimenzí, tak ji dopočítej pro zachování poměru
+                        params.width = gDocDefualts[settingsType]?.width;
+                        params.height = gDocDefualts[settingsType]?.height;
+                     }
                 }
                 // pokud je nastaven jen jeden z rozměrů, dopočítej druhý pro zachování poměru
                 if (params.width && !params.height) {
@@ -205,11 +222,12 @@ function convertDocxToPdf(inputPath, outDir) {
         );
     });
 }
-
+var environment={};
+var gDocDefualts={}; // globální pro případ potřeby v customizeValue
 async function main() {
 
     // 1) Načti konfiguraci z environment.json
-    const environment = loadEnvironment();
+    environment = loadEnvironment();
 
     IMAGES_DIR = path.join(RESULT_ROOT, 'img');
 
@@ -243,6 +261,8 @@ async function main() {
         const dataPath = dataRelPath ? path.resolve(docConfig.dataInResult ? RESULT_ROOT : LAB_ROOT, dataRelPath) : null;  
         const outPath = path.resolve(RESULT_ROOT, outputRelPath);
 
+        gDocDefualts=docConfig.defaults||{}; // globální pro případ potřeby v customizeValue
+        
         console.log(`\nZpracovávám dokument:`);
         console.log(`  šablona: ${templatePath}`);
         console.log(`  data:    ${dataPath}`);
