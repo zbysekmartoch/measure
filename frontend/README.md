@@ -27,6 +27,9 @@ VITE_CHAT_WS_URL=ws://192.168.1.10:50100/chat npm run dev -- --host
 Optional: if your backend listens on a non-default port, set `VITE_BACKEND_PORT`
 for chat fallback attempts (default is `50100`).
 
+Optional: tune chat WS handshake timeout (in ms) for slow networks/proxies
+using `VITE_CHAT_WS_CONNECT_TIMEOUT_MS` (default `2500`).
+
 ## Tech Stack
 
 - **React 19** with hooks, functional components only

@@ -94,6 +94,7 @@ export function useLabChat(labId) {
     let disposed = false;
     let preferredCandidateIndex = 0;
     const timers = typingTimers.current;
+    const connectTimeoutMs = Number(import.meta.env.VITE_CHAT_WS_CONNECT_TIMEOUT_MS || 2500);
 
     function scheduleConnect(delay = 0) {
       connectTimer = setTimeout(() => connect(preferredCandidateIndex), delay);
@@ -106,10 +107,30 @@ export function useLabChat(labId) {
       const ws = new WebSocket(url);
       wsRef.current = ws;
       let opened = false;
+      let movedToNextCandidate = false;
+
+      const moveToNextCandidate = (reason) => {
+        if (disposed || movedToNextCandidate) return;
+        movedToNextCandidate = true;
+        console.warn(`[useLabChat] Switching WS candidate (${reason})`);
+        if (candidateIndex + 1 < wsCandidates.length) {
+          connect(candidateIndex + 1);
+        } else {
+          scheduleConnect(3000);
+        }
+      };
+
+      const connectWatchdog = setTimeout(() => {
+        if (disposed || opened) return;
+        console.warn(`[useLabChat] WS connect timeout after ${connectTimeoutMs}ms`);
+        try { ws.close(); } catch { /* ignore */ }
+        moveToNextCandidate('timeout');
+      }, connectTimeoutMs);
 
       ws.addEventListener('open', () => {
         if (disposed) { ws.close(); return; }
         opened = true;
+        clearTimeout(connectWatchdog);
         preferredCandidateIndex = candidateIndex;
         console.log('[useLabChat] WebSocket open');
         setConnected(true);
@@ -170,13 +191,16 @@ export function useLabChat(labId) {
       });
 
       ws.addEventListener('close', (ev) => {
+        clearTimeout(connectWatchdog);
         console.log(`[useLabChat] WebSocket closed code=${ev.code} reason=${ev.reason || 'none'} wasClean=${ev.wasClean}`);
         if (wsRef.current === ws) wsRef.current = null;
         setConnected(false);
         if (!disposed) {
           // If handshake failed before open, try next candidate immediately.
-          if (!opened && candidateIndex + 1 < wsCandidates.length) {
-            connect(candidateIndex + 1);
+          if (!opened) {
+            if (!movedToNextCandidate) {
+              moveToNextCandidate('close-before-open');
+            }
             return;
           }
           scheduleConnect(3000);
@@ -185,6 +209,10 @@ export function useLabChat(labId) {
 
       ws.addEventListener('error', (ev) => {
         console.error('[useLabChat] WebSocket error:', ev);
+        if (!opened) {
+          try { ws.close(); } catch { /* ignore */ }
+          moveToNextCandidate('error-before-open');
+        }
       });
     }
 
