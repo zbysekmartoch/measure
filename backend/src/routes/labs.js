@@ -1512,8 +1512,8 @@ router.post('/:id/scripts/run', async (req, res, next) => {
       debugScripts: new Set(),
       stopOnFailure,
       resolvedPaths,
-      logFile: null,
-      errorFile: null,
+      logFile: path.join(outputDir, 'output.log'),
+      errorFile: path.join(outputDir, 'output.err'),
       debugLogFile: null,
       progressBase: {},
     });

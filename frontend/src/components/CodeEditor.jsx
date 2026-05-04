@@ -55,6 +55,9 @@ export default function CodeEditor({
   const isEditing = !readOnly && !!onChange;
   const mountedRef = useRef(false);
   const editorRef = useRef(null);
+  // Queue of values recently emitted from local typing. When React feeds these
+  // values back via props, we skip model.setValue() to avoid caret jumps.
+  const pendingLocalValuesRef = useRef([]);
   // True while we are pushing an external value into Monaco model.
   // onChange fired from that setValue() is ignored to prevent feedback loops.
   const applyingExternalUpdateRef = useRef(false);
@@ -64,10 +67,22 @@ export default function CodeEditor({
   // (not during render) because model.setValue can fire onChange -> setState.
   useEffect(() => {
     if (isEditing && mountedRef.current && editorRef.current) {
+      const nextValue = value ?? '';
+      const pending = pendingLocalValuesRef.current;
+
+      // Skip values that originated from this editor instance itself.
+      // This avoids replaying stale intermediate states back into Monaco while typing fast.
+      const localIdx = pending.indexOf(nextValue);
+      if (localIdx !== -1) {
+        pending.splice(0, localIdx + 1);
+        return;
+      }
+
       const model = editorRef.current.getModel();
-      if (model && model.getValue() !== value) {
+      if (model && model.getValue() !== nextValue) {
+        pendingLocalValuesRef.current = [];
         applyingExternalUpdateRef.current = true;
-        model.setValue(value ?? '');
+        model.setValue(nextValue);
         // Keep the guard active for any synchronous onChange callbacks
         // emitted by Monaco due to setValue().
         queueMicrotask(() => {
@@ -79,7 +94,13 @@ export default function CodeEditor({
 
   const handleChange = useCallback((newValue) => {
     if (applyingExternalUpdateRef.current) return;
-    onChange?.(newValue);
+    const nextValue = newValue ?? '';
+    const pending = pendingLocalValuesRef.current;
+    pending.push(nextValue);
+    if (pending.length > 100) {
+      pending.splice(0, pending.length - 100);
+    }
+    onChange?.(nextValue);
   }, [onChange]);
 
   const handleMount = useCallback((editor, monaco) => {
