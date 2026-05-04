@@ -57,6 +57,22 @@ export default function useFileManager({
   const [lockRequests, setLockRequests] = useState([]);
   // heartbeat ref for refreshing lock TTL
   const lockHeartbeatRef = useRef(null);
+  // Guards against out-of-order preview responses when rapidly switching files
+  const previewRequestIdRef = useRef(0);
+  const previewAbortRef = useRef(null);
+  const autoRefreshRequestIdRef = useRef(0);
+  const autoRefreshAbortRef = useRef(null);
+
+  const clearPreviewBlobs = useCallback(() => {
+    setPdfBlobUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setImageBlobUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }, []);
 
   /** Check if a file is readonly (path contains "readonly") */
   const isReadonlyFile = useCallback((filePath) => {
@@ -234,8 +250,22 @@ export default function useFileManager({
     if (imageBlobUrl) URL.revokeObjectURL(imageBlobUrl);
   }, [pdfBlobUrl, imageBlobUrl]);
 
+  // Abort in-flight preview refreshes on unmount
+  useEffect(() => () => {
+    previewAbortRef.current?.abort();
+    autoRefreshAbortRef.current?.abort();
+  }, []);
+
   // ---- load file content ----
   const loadFileContent = useCallback(async (file, forceLoad = false) => {
+    if (!file?.path) return;
+
+    const requestId = ++previewRequestIdRef.current;
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
+    const isCurrentRequest = () => previewRequestIdRef.current === requestId;
+
     if (!forceLoad && isEditing && fileContent !== originalContent && selectedFile && selectedFile !== file.path) {
       const msg =
         `File "${selectedFile}" has unsaved changes. Do you want to save them?\n\nSave = OK, Discard = Cancel`;
@@ -260,8 +290,7 @@ export default function useFileManager({
       releaseFileLock(selectedFile);
     }
 
-    if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
-    if (imageBlobUrl) { URL.revokeObjectURL(imageBlobUrl); setImageBlobUrl(null); }
+    clearPreviewBlobs();
 
     setSelectedFile(file.path);
     setSelectedFileInfo(file);
@@ -269,60 +298,100 @@ export default function useFileManager({
     setOriginalContent('');
     setIsEditing(false);
     onFileSelect?.(file);
+    setLoading(true);
 
     if (isImageFile(file.path)) {
       try {
-        setLoading(true);
         const r = await fetch(`${apiBasePath}/download?file=${encodeURIComponent(file.path)}`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+          signal: controller.signal,
         });
         if (!r.ok) throw new Error();
-        setImageBlobUrl(URL.createObjectURL(await r.blob()));
+        const blob = await r.blob();
+        if (!isCurrentRequest()) return;
+        setImageBlobUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
         setFileContent('');
-      } catch {
-        toast.error('Error loading image');
-      } finally { setLoading(false); }
+      } catch (e) {
+        if (e?.name !== 'AbortError' && isCurrentRequest()) {
+          toast.error('Error loading image');
+        }
+      } finally {
+        if (isCurrentRequest()) setLoading(false);
+      }
       return;
     }
 
     if (isPdfFile(file.path)) {
       try {
-        setLoading(true);
         const r = await fetch(`${apiBasePath}/download?file=${encodeURIComponent(file.path)}`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+          signal: controller.signal,
         });
         if (!r.ok) throw new Error();
-        setPdfBlobUrl(URL.createObjectURL(await r.blob()));
+        const blob = await r.blob();
+        if (!isCurrentRequest()) return;
+        setPdfBlobUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
         setFileContent('');
-      } catch {
-        toast.error('Error loading PDF');
-      } finally { setLoading(false); }
+      } catch (e) {
+        if (e?.name !== 'AbortError' && isCurrentRequest()) {
+          toast.error('Error loading PDF');
+        }
+      } finally {
+        if (isCurrentRequest()) setLoading(false);
+      }
       return;
     }
 
-    if (!file.isText && !isTextFile(file.path)) { setFileContent(''); return; }
+    if (!file.isText && !isTextFile(file.path)) {
+      if (isCurrentRequest()) setLoading(false);
+      return;
+    }
 
     // Skip fetching content for files exceeding preview size limit
     if (previewMaxFileSize && file.size > previewMaxFileSize) {
-      setFileContent('');
-      setOriginalContent('');
-      setLoading(false);
+      if (isCurrentRequest()) {
+        setFileContent('');
+        setOriginalContent('');
+        setLoading(false);
+      }
       return;
     }
 
     try {
-      setLoading(true);
       const r = await fetch(`${apiBasePath}/content?file=${encodeURIComponent(file.path)}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        signal: controller.signal,
       });
       if (!r.ok) throw new Error();
       const data = await r.json();
+      if (!isCurrentRequest()) return;
       setFileContent(data.content || '');
       setOriginalContent(data.content || '');
-    } catch {
-      toast.error('Error loading file content');
-    } finally { setLoading(false); }
-  }, [apiBasePath, onFileSelect, toast, pdfBlobUrl, imageBlobUrl, isEditing, fileContent, originalContent, selectedFile, releaseFileLock]);
+    } catch (e) {
+      if (e?.name !== 'AbortError' && isCurrentRequest()) {
+        toast.error('Error loading file content');
+      }
+    } finally {
+      if (isCurrentRequest()) setLoading(false);
+    }
+  }, [
+    apiBasePath,
+    onFileSelect,
+    toast,
+    isEditing,
+    fileContent,
+    originalContent,
+    selectedFile,
+    releaseFileLock,
+    previewMaxFileSize,
+    clearPreviewBlobs,
+  ]);
 
   // Auto-reload selected file content when it was modified externally (e.g. after workflow, sync agent)
   useEffect(() => {
@@ -357,35 +426,69 @@ export default function useFileManager({
     setPreviewRefreshKey(k => k + 1);
 
     // Re-fetch the file content based on file type
+    const requestId = ++autoRefreshRequestIdRef.current;
+    autoRefreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    autoRefreshAbortRef.current = controller;
+    const isCurrentRequest = () => autoRefreshRequestIdRef.current === requestId;
     const authHeaders = { Authorization: `Bearer ${localStorage.getItem('authToken')}` };
 
-    if (isTextFile(selectedFile) || selectedFileInfo.isText) {
-      fetch(`${apiBasePath}/content?file=${encodeURIComponent(selectedFile)}`, { headers: authHeaders })
-        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-        .then(data => {
+    const refreshPreview = async () => {
+      try {
+        if (isTextFile(selectedFile) || selectedFileInfo.isText) {
+          const r = await fetch(`${apiBasePath}/content?file=${encodeURIComponent(selectedFile)}`, {
+            headers: authHeaders,
+            signal: controller.signal,
+          });
+          if (!r.ok) throw new Error();
+          const data = await r.json();
+          if (!isCurrentRequest()) return;
           setFileContent(data.content || '');
           setOriginalContent(data.content || '');
-        })
-        .catch(() => { /* ignore */ });
-    } else if (isImageFile(selectedFile)) {
-      fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, { headers: authHeaders })
-        .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
-        .then(blob => {
-          if (imageBlobUrl) URL.revokeObjectURL(imageBlobUrl);
-          setImageBlobUrl(URL.createObjectURL(blob));
-        })
-        .catch(() => { /* ignore */ });
-    } else if (isPdfFile(selectedFile)) {
-      fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, { headers: authHeaders })
-        .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
-        .then(blob => {
-          if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
-          setPdfBlobUrl(URL.createObjectURL(blob));
-        })
-        .catch(() => { /* ignore */ });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [changedFiles]);
+          return;
+        }
+
+        if (isImageFile(selectedFile)) {
+          const r = await fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, {
+            headers: authHeaders,
+            signal: controller.signal,
+          });
+          if (!r.ok) throw new Error();
+          const blob = await r.blob();
+          if (!isCurrentRequest()) return;
+          setImageBlobUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return URL.createObjectURL(blob);
+          });
+          return;
+        }
+
+        if (isPdfFile(selectedFile)) {
+          const r = await fetch(`${apiBasePath}/download?file=${encodeURIComponent(selectedFile)}`, {
+            headers: authHeaders,
+            signal: controller.signal,
+          });
+          if (!r.ok) throw new Error();
+          const blob = await r.blob();
+          if (!isCurrentRequest()) return;
+          setPdfBlobUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return URL.createObjectURL(blob);
+          });
+        }
+      } catch (e) {
+        if (e?.name !== 'AbortError') {
+          // Ignore transient refresh errors; user can still manually reload/open file.
+        }
+      }
+    };
+
+    refreshPreview();
+
+    return () => {
+      controller.abort();
+    };
+  }, [changedFiles, selectedFile, selectedFileInfo, isEditing, tree, apiBasePath, toast]);
 
   // ---- save ----
   const saveFileContent = useCallback(async () => {

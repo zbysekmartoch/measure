@@ -402,6 +402,7 @@ export default function FilePreviewPane({
           ) : (
           <div style={{ flex: 1 }}>
             <CodeEditor
+              key={selectedFile}
               value={fileContent}
               language={editorLanguage}
               theme={editorTheme}

@@ -16,7 +16,14 @@ export default defineConfig({
       // Forward DAP WebSocket proxy
       '/dap': {
         target: 'ws://localhost:50100',
-        ws: true
+        ws: true,
+        changeOrigin: true
+      },
+      // Forward Chat WebSocket proxy
+      '/chat': {
+        target: 'ws://localhost:50100',
+        ws: true,
+        changeOrigin: true
       }
     }
   }

@@ -55,29 +55,30 @@ export default function CodeEditor({
   const isEditing = !readOnly && !!onChange;
   const mountedRef = useRef(false);
   const editorRef = useRef(null);
-  // Flag: true when the last value change came from user typing (onChange),
-  // false when it came from an external source (file switch).
-  const selfChangeRef = useRef(false);
+  // True while we are pushing an external value into Monaco model.
+  // onChange fired from that setValue() is ignored to prevent feedback loops.
+  const applyingExternalUpdateRef = useRef(false);
 
   // When the value prop changes externally (e.g. file switch) while in editing
   // mode, push it imperatively via the editor model. Must run in useEffect
-  // (not during render) because model.setValue fires onChange → setState.
-  // Skip when the change originated from the user's own typing.
+  // (not during render) because model.setValue can fire onChange -> setState.
   useEffect(() => {
-    if (selfChangeRef.current) {
-      selfChangeRef.current = false;
-      return;
-    }
     if (isEditing && mountedRef.current && editorRef.current) {
       const model = editorRef.current.getModel();
       if (model && model.getValue() !== value) {
+        applyingExternalUpdateRef.current = true;
         model.setValue(value ?? '');
+        // Keep the guard active for any synchronous onChange callbacks
+        // emitted by Monaco due to setValue().
+        queueMicrotask(() => {
+          applyingExternalUpdateRef.current = false;
+        });
       }
     }
   }, [value, isEditing]);
 
   const handleChange = useCallback((newValue) => {
-    selfChangeRef.current = true;
+    if (applyingExternalUpdateRef.current) return;
     onChange?.(newValue);
   }, [onChange]);
 

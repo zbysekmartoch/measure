@@ -11,6 +11,22 @@ npm run build     # production build → dist/
 npm run preview   # preview production build
 ```
 
+For LAN testing of the Vite dev server, run with host exposure:
+
+```bash
+npm run dev -- --host
+```
+
+If your network/proxy setup needs an explicit chat WebSocket endpoint,
+set `VITE_CHAT_WS_URL` (supports `ws://`, `wss://`, `http://`, `https://`):
+
+```bash
+VITE_CHAT_WS_URL=ws://192.168.1.10:50100/chat npm run dev -- --host
+```
+
+Optional: if your backend listens on a non-default port, set `VITE_BACKEND_PORT`
+for chat fallback attempts (default is `50100`).
+
 ## Tech Stack
 
 - **React 19** with hooks, functional components only
@@ -95,6 +111,8 @@ src/
 ## Configuration
 
 `vite.config.js` proxies `/api` to `http://localhost:50100`.
+
+It also proxies `/dap` and `/chat` WebSocket endpoints to the backend.
 
 ```bash
 npm run dev      # Development with HMR (:50101)
