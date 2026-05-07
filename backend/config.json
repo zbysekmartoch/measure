@@ -40,6 +40,17 @@
     "defaultTimeout": 300000,
     "maxConcurrentAnalyses": 5
   },
+  "requestLimits": {
+    "jsonBodyLimit": "1mb",
+    "auth": {
+      "windowMs": 60000,
+      "maxPerIp": 40
+    },
+    "api": {
+      "windowMs": 60000,
+      "maxPerKey": 1200
+    }
+  },
   "fileManager": {
     "defaultDepth": 0,
     "hiddenFilePrefixes": [".","_","node_modules"]

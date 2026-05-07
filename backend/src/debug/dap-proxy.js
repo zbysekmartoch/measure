@@ -17,6 +17,11 @@ import { getDebugStatus, setDebugRunning } from './debug-engine.js';
 /** Track active WS connections so we can close them on new debug session */
 const activeConnections = new Set();
 
+const verboseDapLogs = process.env.DAP_VERBOSE_LOGS === '1';
+const dapLog = (...args) => {
+  if (verboseDapLogs) console.log(...args);
+};
+
 /**
  * Close all active DAP proxy connections.
  * Called before starting a new debug session to prevent stale connections.
@@ -26,7 +31,7 @@ export function closeAllDapConnections() {
     try { ws.close(4002, 'New debug session starting'); } catch { /* ignore */ }
   }
   activeConnections.clear();
-  console.log('[dap-proxy] All existing DAP connections closed');
+  dapLog('[dap-proxy] All existing DAP connections closed');
 }
 
 /**
@@ -38,27 +43,27 @@ export function attachDapProxy(server) {
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    console.log(`[dap-proxy] Upgrade request for ${url.pathname}`);
+    dapLog(`[dap-proxy] Upgrade request for ${url.pathname}`);
     if (url.pathname !== '/dap') return; // let other upgrades pass through
 
     wss.handleUpgrade(req, socket, head, (ws) => {
-      console.log('[dap-proxy] WebSocket upgrade complete');
+      dapLog('[dap-proxy] WebSocket upgrade complete');
       wss.emit('connection', ws, req);
     });
   });
 
   wss.on('connection', (ws) => {
     const status = getDebugStatus();
-    console.log(`[dap-proxy] WS connection received. Debug status: ${JSON.stringify({ active: status.active, status: status.status, port: status.port, pid: status.pid })}`);
+    dapLog(`[dap-proxy] WS connection received. Debug status: ${JSON.stringify({ active: status.active, status: status.status, port: status.port, pid: status.pid })}`);
 
     if (!status.active || !status.port) {
-      console.log('[dap-proxy] No active debug session, closing WS');
+      dapLog('[dap-proxy] No active debug session, closing WS');
       ws.close(4000, 'No active debug session');
       return;
     }
 
     const targetPort = status.port;
-    console.log(`[dap-proxy] Bridging WS to TCP 127.0.0.1:${targetPort}`);
+    dapLog(`[dap-proxy] Bridging WS to TCP 127.0.0.1:${targetPort}`);
 
     const tcp = net.createConnection({ host: '127.0.0.1', port: targetPort });
 
@@ -66,7 +71,7 @@ export function attachDapProxy(server) {
     activeConnections.add(ws);
 
     tcp.on('connect', () => {
-      console.log(`[dap-proxy] TCP connected to debugpy on port ${targetPort}`);
+      dapLog(`[dap-proxy] TCP connected to debugpy on port ${targetPort}`);
       // Transition debug state to 'running' now that a DAP client has connected
       setDebugRunning();
     });
@@ -74,13 +79,13 @@ export function attachDapProxy(server) {
     // WS → TCP
     ws.on('message', (data) => {
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-      console.log(`[dap-proxy] WS→TCP ${buf.length} bytes`);
+      dapLog(`[dap-proxy] WS→TCP ${buf.length} bytes`);
       tcp.write(buf);
     });
 
     // TCP → WS
     tcp.on('data', (chunk) => {
-      console.log(`[dap-proxy] TCP→WS ${chunk.length} bytes`);
+      dapLog(`[dap-proxy] TCP→WS ${chunk.length} bytes`);
       if (ws.readyState === ws.OPEN) {
         ws.send(chunk);
       }
@@ -88,7 +93,7 @@ export function attachDapProxy(server) {
 
     // Clean shutdown
     ws.on('close', (code, reason) => {
-      console.log(`[dap-proxy] WS closed code=${code} reason=${reason}`);
+      dapLog(`[dap-proxy] WS closed code=${code} reason=${reason}`);
       activeConnections.delete(ws);
       tcp.destroy();
     });
@@ -99,7 +104,7 @@ export function attachDapProxy(server) {
     });
 
     tcp.on('close', (hadError) => {
-      console.log(`[dap-proxy] TCP closed hadError=${hadError}`);
+      dapLog(`[dap-proxy] TCP closed hadError=${hadError}`);
       if (ws.readyState === ws.OPEN) ws.close(1000);
     });
 
@@ -109,5 +114,5 @@ export function attachDapProxy(server) {
     });
   });
 
-  console.log('[dap-proxy] DAP WebSocket proxy registered on /dap');
+  dapLog('[dap-proxy] DAP WebSocket proxy registered on /dap');
 }

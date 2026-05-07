@@ -1,11 +1,26 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const envPath = path.resolve(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
+
+const fileConfig = (() => {
+  try {
+    const configPath = path.resolve(__dirname, '..', 'config.json');
+    return JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch {
+    return {};
+  }
+})();
+
+const toNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 
 const required = (key) => {
   if (!process.env[key]) {
@@ -37,6 +52,30 @@ export const config = {
       pass: process.env.EMAIL_PASSWORD
     },
     from: process.env.EMAIL_FROM || 'noreply@rpa-backend.com'
+  },
+
+  requestLimits: {
+    jsonBodyLimit: process.env.JSON_BODY_LIMIT || fileConfig.requestLimits?.jsonBodyLimit || '1mb',
+    auth: {
+      windowMs: toNumber(
+        process.env.AUTH_RATE_LIMIT_WINDOW_MS,
+        toNumber(fileConfig.requestLimits?.auth?.windowMs, 60_000)
+      ),
+      maxPerIp: toNumber(
+        process.env.AUTH_RATE_LIMIT_MAX_PER_IP,
+        toNumber(fileConfig.requestLimits?.auth?.maxPerIp, 40)
+      )
+    },
+    api: {
+      windowMs: toNumber(
+        process.env.RATE_LIMIT_WINDOW_MS,
+        toNumber(fileConfig.requestLimits?.api?.windowMs, 60_000)
+      ),
+      maxPerKey: toNumber(
+        process.env.RATE_LIMIT_MAX_PER_KEY,
+        toNumber(fileConfig.requestLimits?.api?.maxPerKey, 1200)
+      )
+    }
   },
   
   // Frontend URL for reset links

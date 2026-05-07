@@ -42,6 +42,16 @@ See [PYTHON_SETUP.md](PYTHON_SETUP.md) for details.
 | `EMAIL_SECURE` | `true` or `false` for TLS |
 | `EMAIL_FROM` | Sender address |
 | `FRONTEND_URL` | Frontend URL for reset links |
+| `RATE_LIMIT_WINDOW_MS` | Optional override for `config.json.requestLimits.api.windowMs` |
+| `RATE_LIMIT_MAX_PER_KEY` | Optional override for `config.json.requestLimits.api.maxPerKey` |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | Optional override for `config.json.requestLimits.auth.windowMs` |
+| `AUTH_RATE_LIMIT_MAX_PER_IP` | Optional override for `config.json.requestLimits.auth.maxPerIp` |
+| `JSON_BODY_LIMIT` | Optional override for `config.json.requestLimits.jsonBodyLimit` |
+| `PERF_ACTIVE_USER_TTL_MS` | User activity window for Performance stats active users (default 30000 = 30 s) |
+| `PERF_RECENT_REQUESTS_LIMIT` | Size of in-memory recent request ring buffer for Performance request details (default 500) |
+| `WS_VERBOSE_LOGS` | Set to `1` to enable verbose chat WebSocket logs (default disabled) |
+| `DAP_VERBOSE_LOGS` | Set to `1` to enable verbose DAP proxy logs (default disabled) |
+| `EMAIL_VERBOSE_LOGS` | Set to `1` to enable verbose email subsystem info logs (default disabled) |
 
 ### `config.json`
 
@@ -53,8 +63,30 @@ Script execution commands, file manager settings, logging, outputs folder name. 
 | `scriptCommands` | See config | File extension → execution command |
 | `logging` | See config | Log file names and format |
 | `analysis` | See config | Timeouts and concurrency |
+| `requestLimits` | See config | JSON body size + auth/API rate limit windows and maxima |
 | `fileManager` | See config | File browser defaults |
 | `outputsFolderName` | `"Outputs"` | Name of special outputs/template folder |
+
+#### Request limits in `config.json`
+
+```json
+{
+	"requestLimits": {
+		"jsonBodyLimit": "1mb",
+		"auth": {
+			"windowMs": 60000,
+			"maxPerIp": 40
+		},
+		"api": {
+			"windowMs": 60000,
+			"maxPerKey": 1200
+		}
+	}
+}
+```
+
+These values are shown in the frontend **Performance** tab in the **Request limits** panel.
+Environment variables can still override these values for deployment-specific tuning.
 
 ## Architecture
 
@@ -82,6 +114,7 @@ See [API.md](API.md) for the complete reference.
 | Clipboard | `/api/v1/clipboard` | Per-user file clipboard (GET/PUT/DELETE) |
 | Paste | `/api/v1/paste` | Cross-root file copy |
 | Debug | `/api/v1/debug` | Debug session status, events, stop |
+| Performance | `/api/v1/performance` | Runtime/request metrics (`/stats`), SSE stream (`/stream`), and request details (`/requests`) |
 | Workflow | `/api/v1/labs/:id/results/:rid/workflow` | SSE progress, state |
 | DAP | `ws://…/dap` | Debug Adapter Protocol WebSocket |
 

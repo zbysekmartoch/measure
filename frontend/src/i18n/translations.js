@@ -16,6 +16,7 @@ const en = {
   tabResults: 'Debug',
   tabDebug: 'Debug',
   tabSettings: 'Settings',
+  tabPerformance: 'Performance',
 
   // Auth forms
   login: 'Login',

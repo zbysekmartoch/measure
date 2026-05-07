@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import pinoHttp from 'pino-http';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -13,11 +14,48 @@ import { getPool } from './db.js';
 import { attachDapProxy } from './debug/dap-proxy.js';
 import { attachChatWs } from './chat/chat-ws.js';
 import { startBackupScheduler, stopBackupScheduler } from './utils/backup-scheduler.js';
+import { performanceMetricsMiddleware } from './utils/performance-metrics.js';
 
 const app = express();
 
+function getTokenFromRequest(req) {
+  const authHeader = req.headers?.authorization;
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+  if (typeof req.query?.token === 'string' && req.query.token.length > 0) {
+    return req.query.token;
+  }
+  return null;
+}
+
+function getRateLimitKey(req) {
+  const token = getTokenFromRequest(req);
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, config.jwtSecret);
+      if (decoded?.userId != null) {
+        return `user:${decoded.userId}`;
+      }
+    } catch {
+      // Fall back to IP key when token is missing/invalid.
+    }
+  }
+  return `ip:${req.ip}`;
+}
+
 // Logging
-app.use(pinoHttp());
+app.use(pinoHttp({
+  customLogLevel(req, res, err) {
+    if (err || res.statusCode >= 500) return 'error';
+    if (res.statusCode >= 400) return 'warn';
+    return 'silent';
+  },
+  redact: ['req.headers.authorization', 'req.headers.cookie'],
+}));
+
+// Runtime metrics collection for /api/v1/performance/stats
+app.use(performanceMetricsMiddleware);
 
 // Security headers — relax CSP for Monaco Editor (loaded from CDN) and Perspective
 app.use(helmet({
@@ -49,10 +87,33 @@ app.use(cors({
 }));
 
 // JSON parsing
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: config.requestLimits.jsonBodyLimit }));
 
-// Rate limiting (basic, adjust as needed)
-app.use('/api/', rateLimit({ windowMs: 60_000, max: 300 }));
+// Rate limiting:
+// - auth routes: strict per-IP limits to protect login/reset endpoints
+// - authenticated API: per-user limits (fallback IP) to avoid shared-NAT collisions
+const authRateLimiter = rateLimit({
+  windowMs: config.requestLimits.auth.windowMs,
+  max: config.requestLimits.auth.maxPerIp,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => `ip:${req.ip}`,
+});
+
+const apiRateLimiter = rateLimit({
+  windowMs: config.requestLimits.api.windowMs,
+  max: config.requestLimits.api.maxPerKey,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: getRateLimitKey,
+  skip: (req) => (req.headers.accept || '').includes('text/event-stream'),
+});
+
+app.use('/api/v1/auth/login', authRateLimiter);
+app.use('/api/v1/auth/register', authRateLimiter);
+app.use('/api/v1/auth/reset-password', authRateLimiter);
+app.use('/api/v1/auth/reset-password/confirm', authRateLimiter);
+app.use('/api/v1/', apiRateLimiter);
 
 // Mount API routes
 app.use('/api', api);

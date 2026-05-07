@@ -35,7 +35,17 @@ function getResultLabel(r) {
   return `#${r.id}`;
 }
 
-export default function LabResultsPane({ lab, debug, debugVisible = false, runDebugRef, onAnalyze, appConfig, saveAllRef, onShowDebugPanel }) {
+export default function LabResultsPane({
+  lab,
+  debug,
+  debugVisible = false,
+  runDebugRef,
+  onAnalyze,
+  appConfig,
+  saveAllRef,
+  onShowDebugPanel,
+  pollingEnabled = true,
+}) {
   const { t } = useLanguage();
   const { user } = useAuth();
   const toast = useToast();
@@ -162,7 +172,10 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     }
   }, [lab.id]);
 
-  useEffect(() => { loadResults(); }, [loadResults]);
+  useEffect(() => {
+    if (!pollingEnabled) return;
+    loadResults();
+  }, [loadResults, pollingEnabled]);
 
   // ---- Filter & sort results ----
   // Show own results + non-private results from others, sort alphabetically by display name
@@ -233,6 +246,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
 
   useEffect(() => {
     if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
+    if (!pollingEnabled) return;
     if (!selectedResultId || !isPending) return;
 
     pollIntervalRef.current = setInterval(async () => {
@@ -255,7 +269,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
     }, appCfg.RESULT_LOG_POLL_INTERVAL_MS || 3000);
 
     return () => { if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; } };
-  }, [selectedResultId, isPending, lab.id, refreshOpenFileTabs]);
+  }, [selectedResultId, isPending, lab.id, refreshOpenFileTabs, pollingEnabled]);
 
   // Refresh file browser when workflow steps complete (for file change highlighting)
   useEffect(() => {
@@ -682,6 +696,7 @@ export default function LabResultsPane({ lab, debug, debugVisible = false, runDe
                 showModificationDate
                 title={`Result #${selectedResultId}`}
                 refreshTrigger={refreshTrigger}
+                pollingEnabled={pollingEnabled && activeSubTab === 'browser'}
                 onFileDoubleClick={handleFileOpen}
 
                 csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}

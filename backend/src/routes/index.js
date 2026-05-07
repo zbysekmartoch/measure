@@ -16,6 +16,7 @@ import { getSecurePath, copyRecursive } from '../utils/file-manager.js';
 import debugRoutes from '../debug/debug-routes.js';
 import workflowRoutes from '../workflow/workflow-routes.js';
 import locks from './locks.js';
+import performance from './performance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,6 +122,7 @@ router.use('/v1/sql', authenticateToken, sql);
 router.use('/v1/labs', authenticateToken, labs);
 router.use('/v1/users', authenticateToken, users);
 router.use('/v1/locks', authenticateToken, locks);
+router.use('/v1/performance', authenticateToken, performance);
 router.use('/v1/debug', authenticateToken, debugRoutes);
 router.use('/v1/labs/:labId/results/:resultId/workflow', authenticateToken, workflowRoutes);
 

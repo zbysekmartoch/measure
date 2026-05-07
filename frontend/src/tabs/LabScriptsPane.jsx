@@ -24,7 +24,7 @@ import { fetchJSON } from '../lib/fetchJSON.js';
 import WorkflowProgressPane from '../components/WorkflowProgressPane.jsx';
 import { useWorkflowEvents } from '../hooks/useWorkflowEvents.js';
 
-export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveAllRef }) {
+export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveAllRef, pollingEnabled = true }) {
   const toast = useToast();
   const apiBasePath = `/api/v1/labs/${lab.id}/scripts`;
 
@@ -52,11 +52,11 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
 
   // Poll locks every 15 seconds while tabs are open
   useEffect(() => {
-    if (openFiles.length === 0) return;
+    if (!pollingEnabled || openFiles.length === 0) return;
     loadTabLocks();
     const id = setInterval(loadTabLocks, 15_000);
     return () => clearInterval(id);
-  }, [loadTabLocks, openFiles.length]);
+  }, [loadTabLocks, openFiles.length, pollingEnabled]);
 
   // Heartbeat: refresh locks every 60s for files I have open
   useEffect(() => {
@@ -506,6 +506,7 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
                 showModificationDate
                 title={`${lab.name} — scripts`}
                 refreshTrigger={0}
+                pollingEnabled={pollingEnabled && activeTab === 'browser'}
                 onFileDoubleClick={handleFileOpen}
                 onDebugWorkflow={handleDebugWorkflow}
                 onRunWorkflow={handleRunWorkflow}

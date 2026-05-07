@@ -27,6 +27,7 @@ export default function useFileManager({
   onFileSelect,
   refreshTrigger = 0,
   previewMaxFileSize,
+  pollingEnabled = true,
 }) {
   const toast = useToast();
 
@@ -175,10 +176,11 @@ export default function useFileManager({
 
   // Poll locks every 15 seconds
   useEffect(() => {
+    if (!pollingEnabled) return;
     loadLocks();
     const id = setInterval(loadLocks, 15_000);
     return () => clearInterval(id);
-  }, [loadLocks]);
+  }, [loadLocks, pollingEnabled]);
 
   // Heartbeat: while editing, periodically refresh the lock
   useEffect(() => {
@@ -236,13 +238,17 @@ export default function useFileManager({
     }
   }, [apiBasePath]);
 
-  useEffect(() => { loadFiles(); }, [loadFiles, refreshTrigger]);
+  useEffect(() => {
+    if (!pollingEnabled) return;
+    loadFiles();
+  }, [loadFiles, refreshTrigger, pollingEnabled]);
 
   // Auto-poll file list every 15 seconds to detect external changes (sync agent, scripts, etc.)
   useEffect(() => {
+    if (!pollingEnabled) return;
     const id = setInterval(() => { loadFiles(true); }, 15_000);
     return () => clearInterval(id);
-  }, [loadFiles]);
+  }, [loadFiles, pollingEnabled]);
 
   // Cleanup PDF/image blob on unmount
   useEffect(() => () => {

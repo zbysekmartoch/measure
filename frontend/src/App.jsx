@@ -19,6 +19,7 @@ import { ToastProvider, useToast } from './components/Toast';
 import { FileClipboardProvider } from './components/file-manager/ClipboardContext.jsx';
 import LockRequestNotifications from './components/file-manager/LockRequestNotifications.jsx';
 import SettingsTab from './tabs/SettingsTab';
+import PerformanceTab from './tabs/PerformanceTab.jsx';
 import LabWorkspaceTab from './tabs/LabWorkspaceTab.jsx';
 import { fetchJSON } from './lib/fetchJSON.js';
 import { icons, tabIcons } from './lib/uiConfig.js';
@@ -59,7 +60,7 @@ function StandaloneLabView({ labId }) {
  * Labs browser (My Labs / Shared Labs) + open lab tabs are all at the top level.
  */
 function AppContent() {
-  // tab: 'mine' | 'shared' | 'lab:<id>' | 'settings'
+  // tab: 'mine' | 'shared' | 'lab:<id>' | 'settings' | 'performance'
   const [tab, setTab] = useState('mine');
   const [healthInfo, setHealthInfo] = useState(null);
   const { user, logout } = useAuth();
@@ -483,6 +484,7 @@ function AppContent() {
         })}
 
         <div style={{ marginLeft: 'auto', display: 'flex' }}>
+          <TabButton style={{marginRight:4}} id="performance">{t('tabPerformance') || 'Performance'}</TabButton>
           <TabButton id="settings">{t('tabSettings')}</TabButton>
         </div>
       </div>
@@ -690,12 +692,21 @@ function AppContent() {
               padding: 4,
             }}
           >
-            <LabWorkspaceTab lab={lab} onLabUpdate={handleLabUpdate} appConfig={healthInfo?.config} />
+            <LabWorkspaceTab
+              lab={lab}
+              onLabUpdate={handleLabUpdate}
+              appConfig={healthInfo?.config}
+              isVisible={tab === `lab:${lab.id}`}
+            />
           </div>
         ))}
 
         <div style={{ display: tab === 'settings' ? 'block' : 'none', height: '100%' }}>
           <SettingsTab />
+        </div>
+
+        <div style={{ display: tab === 'performance' ? 'block' : 'none', height: '100%' }}>
+          <PerformanceTab />
         </div>
       </div>
     </div>

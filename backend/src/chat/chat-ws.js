@@ -29,6 +29,31 @@ import { addMessage, editMessage, deleteMessage, getMessages, toggleReaction } f
 
 /** Map<labId, Set<{ ws, userId, userName }>> */
 const rooms = new Map();
+const userConnectionCounts = new Map();
+
+const verboseWsLogs = process.env.WS_VERBOSE_LOGS === '1';
+const wsLog = (...args) => {
+  if (verboseWsLogs) console.log(...args);
+};
+
+function addConnectedUser(userId) {
+  const id = String(userId);
+  userConnectionCounts.set(id, (userConnectionCounts.get(id) || 0) + 1);
+}
+
+function removeConnectedUser(userId) {
+  const id = String(userId);
+  const next = (userConnectionCounts.get(id) || 0) - 1;
+  if (next <= 0) {
+    userConnectionCounts.delete(id);
+  } else {
+    userConnectionCounts.set(id, next);
+  }
+}
+
+export function getChatConnectedUsersCount() {
+  return userConnectionCounts.size;
+}
 
 function getRoom(labId) {
   if (!rooms.has(labId)) rooms.set(labId, new Set());
@@ -68,12 +93,12 @@ export function attachChatWs(server) {
 
   // Hook into HTTP upgrade — handle /chat path
   const existingListeners = server.listeners('upgrade').slice();
-  console.log(`[chat-ws] Attaching chat WS. Captured ${existingListeners.length} existing upgrade listener(s).`);
+  wsLog(`[chat-ws] Attaching chat WS. Captured ${existingListeners.length} existing upgrade listener(s).`);
 
   server.removeAllListeners('upgrade');
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    console.log(`[chat-ws] Upgrade request: pathname=${url.pathname} host=${req.headers.host} origin=${req.headers.origin || 'none'}`);
+    wsLog(`[chat-ws] Upgrade request: pathname=${url.pathname} host=${req.headers.host} origin=${req.headers.origin || 'none'}`);
 
     if (url.pathname === '/chat') {
       // Authenticate via query token
@@ -87,7 +112,7 @@ export function attachChatWs(server) {
       try {
         const decoded = jwt.verify(token, config.jwtSecret);
         req.userId = decoded.userId;
-        console.log(`[chat-ws] Token verified, userId=${decoded.userId}`);
+        wsLog(`[chat-ws] Token verified, userId=${decoded.userId}`);
       } catch (err) {
         console.warn(`[chat-ws] Upgrade rejected: JWT verify failed — ${err.message}`);
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -96,11 +121,11 @@ export function attachChatWs(server) {
       }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        console.log(`[chat-ws] WebSocket upgrade complete for userId=${req.userId}`);
+        wsLog(`[chat-ws] WebSocket upgrade complete for userId=${req.userId}`);
         wss.emit('connection', ws, req);
       });
     } else {
-      console.log(`[chat-ws] Not /chat, forwarding to ${existingListeners.length} existing listener(s)`);
+      wsLog(`[chat-ws] Not /chat, forwarding to ${existingListeners.length} existing listener(s)`);
       // Forward to other upgrade handlers (DAP proxy, etc.)
       for (const listener of existingListeners) {
         listener.call(server, req, socket, head);
@@ -114,7 +139,8 @@ export function attachChatWs(server) {
     let labId = null;
     let client = null;
 
-    console.log(`[chat-ws] New connection userId=${userId}`);
+    addConnectedUser(userId);
+    wsLog(`[chat-ws] New connection userId=${userId}`);
 
     // Look up user name
     try {
@@ -122,7 +148,7 @@ export function attachChatWs(server) {
       if (rows.length) {
         userName = `${rows[0].first_name} ${rows[0].last_name}`;
       }
-      console.log(`[chat-ws] User resolved: userId=${userId} userName="${userName}"`);
+      wsLog(`[chat-ws] User resolved: userId=${userId} userName="${userName}"`);
     } catch (err) {
       console.error(`[chat-ws] DB lookup failed for userId=${userId}:`, err.message);
     }
@@ -151,7 +177,7 @@ export function attachChatWs(server) {
             labId = String(msg.labId);
             client = { ws, userId, userName };
             getRoom(labId).add(client);
-            console.log(`[chat-ws] userId=${userId} joined lab=${labId} (room size: ${getRoom(labId).size})`);
+            wsLog(`[chat-ws] userId=${userId} joined lab=${labId} (room size: ${getRoom(labId).size})`);
             // Send chat history
             const messages = await getMessages(labId);
             send(ws, { type: 'history', messages });
@@ -170,7 +196,7 @@ export function attachChatWs(server) {
               mentions: msg.mentions,
               fileLinks: msg.fileLinks,
             });
-            console.log(`[chat-ws] Message from userId=${userId} in lab=${labId}: ${newMsg.id}`);
+            wsLog(`[chat-ws] Message from userId=${userId} in lab=${labId}: ${newMsg.id}`);
             broadcastToRoom(labId, { type: 'message', message: newMsg });
             break;
           }
@@ -227,7 +253,8 @@ export function attachChatWs(server) {
     });
 
     ws.on('close', (code, reason) => {
-      console.log(`[chat-ws] Connection closed userId=${userId} lab=${labId} code=${code} reason=${reason || 'none'}`);
+      removeConnectedUser(userId);
+      wsLog(`[chat-ws] Connection closed userId=${userId} lab=${labId} code=${code} reason=${reason || 'none'}`);
       if (labId && client) {
         const room = rooms.get(labId);
         if (room) {

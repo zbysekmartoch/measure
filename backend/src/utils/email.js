@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { config } from '../config.js';
 
 let transporter = null;
+const verboseEmailLogs = process.env.EMAIL_VERBOSE_LOGS === '1';
 
 /**
  * Initialize email transport
@@ -31,9 +32,10 @@ export async function sendPasswordResetEmail(email, resetToken) {
   const transport = getTransporter();
   
   if (!transport) {
-    console.warn('Email transport is not configured. Reset token:', resetToken);
+    console.warn('Email transport is not configured. Password reset email was not sent.');
     return false;
   }
+  
 
   const resetUrl = `${config.frontendUrl}/reset-password?token=${resetToken}`;
   
@@ -111,10 +113,12 @@ RPA Backend - Retail Prices Analyzer
 
   try {
     const info = await transport.sendMail(mailOptions);
-    console.log('Reset email sent:', info.messageId);
+    if (verboseEmailLogs) {
+      console.log('Reset email sent:', info.messageId);
+    }
     return true;
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error sending email:', error.message);
     return false;
   }
 }
@@ -132,7 +136,9 @@ export async function verifyEmailConfig() {
 
   try {
     await transport.verify();
-    console.log('Email configuration is valid');
+    if (verboseEmailLogs) {
+      console.log('Email configuration is valid');
+    }
     return true;
   } catch (error) {
     console.error('Email configuration is not valid:', error.message);

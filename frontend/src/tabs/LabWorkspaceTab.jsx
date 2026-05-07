@@ -50,7 +50,7 @@ const DEBUG_MODES = [
   { key: 'popup',  label: dmCfg.popup.label,  icon: dmCfg.popup.icon },
 ];
 
-export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
+export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible = true }) {
   const [activeTab, setActiveTab] = useState('scripts');
   const [debugMode, setDebugMode] = useState('hidden');
   const popupRef = useRef(null);
@@ -464,10 +464,27 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
           position: 'relative',
         }}>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'scripts' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
-            <LabScriptsPane lab={lab} debug={debug} appConfig={appConfig} onAnalyze={openAnalyze} saveAllRef={saveAllRef} />
+            <LabScriptsPane
+              lab={lab}
+              debug={debug}
+              appConfig={appConfig}
+              onAnalyze={openAnalyze}
+              saveAllRef={saveAllRef}
+              pollingEnabled={isVisible && activeTab === 'scripts' && !popoutScripts.isPopout}
+            />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'results' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
-            <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} onAnalyze={openAnalyze} appConfig={appConfig} saveAllRef={saveAllRef} onShowDebugPanel={showDebugPanel} />
+            <LabResultsPane
+              lab={lab}
+              debug={debug}
+              debugVisible={debugMode !== 'hidden'}
+              runDebugRef={runDebugRef}
+              onAnalyze={openAnalyze}
+              appConfig={appConfig}
+              saveAllRef={saveAllRef}
+              onShowDebugPanel={showDebugPanel}
+              pollingEnabled={isVisible && activeTab === 'results' && !popoutResults.isPopout}
+            />
           </div>
           <div style={{ flex: 1, minHeight: 0, display: activeTab === 'output' ? 'flex' : 'none', flexDirection: 'column', padding: 6, overflow: 'hidden' }}>
             <FileManagerEditor
@@ -479,6 +496,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
               title="Current output"
               csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
               previewMaxFileSize={appConfig?.previewMaxFileSize}
+              pollingEnabled={isVisible && activeTab === 'output' && !popoutOutput.isPopout}
               onAnalyze={(fileName) => openAnalyze({ labId: lab.id, apiPath: `/api/v1/labs/${lab.id}/current_output`, fileName })}
             />
           </div>
@@ -566,13 +584,30 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
       {/* Pop-out portals for sub-tabs */}
       {popoutScripts.isPopout && popoutScripts.popoutContainer && createPortal(
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 6, overflow: 'hidden', height: '100%' }}>
-          <LabScriptsPane lab={lab} debug={debug} appConfig={appConfig} onAnalyze={openAnalyze} saveAllRef={saveAllRef} />
+          <LabScriptsPane
+            lab={lab}
+            debug={debug}
+            appConfig={appConfig}
+            onAnalyze={openAnalyze}
+            saveAllRef={saveAllRef}
+            pollingEnabled={popoutScripts.isPopout}
+          />
         </div>,
         popoutScripts.popoutContainer
       )}
       {popoutResults.isPopout && popoutResults.popoutContainer && createPortal(
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 6, overflow: 'hidden', height: '100%' }}>
-          <LabResultsPane lab={lab} debug={debug} debugVisible={debugMode !== 'hidden'} runDebugRef={runDebugRef} onAnalyze={openAnalyze} appConfig={appConfig} saveAllRef={saveAllRef} onShowDebugPanel={showDebugPanel} />
+          <LabResultsPane
+            lab={lab}
+            debug={debug}
+            debugVisible={debugMode !== 'hidden'}
+            runDebugRef={runDebugRef}
+            onAnalyze={openAnalyze}
+            appConfig={appConfig}
+            saveAllRef={saveAllRef}
+            onShowDebugPanel={showDebugPanel}
+            pollingEnabled={popoutResults.isPopout}
+          />
         </div>,
         popoutResults.popoutContainer
       )}
@@ -587,6 +622,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig }) {
             title="Current output"
             csvPreviewMaxRows={appConfig?.csvPreviewMaxRows}
             previewMaxFileSize={appConfig?.previewMaxFileSize}
+            pollingEnabled={popoutOutput.isPopout}
             onAnalyze={(fileName) => openAnalyze({ labId: lab.id, apiPath: `/api/v1/labs/${lab.id}/current_output`, fileName })}
           />
         </div>,

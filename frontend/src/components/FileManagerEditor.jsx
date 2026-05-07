@@ -38,6 +38,7 @@ export default function FileManagerEditor({
   csvPreviewMaxRows,
   previewMaxFileSize,
   labOwnerId,
+  pollingEnabled = true,
 }) {
   const { user } = useAuth();
   const [showPreview, setShowPreview] = useState(true);
@@ -45,7 +46,16 @@ export default function FileManagerEditor({
   const [splitterWidth, setSplitterWidth] = useState(380);
   const containerRef = useRef(null);
 
-  const fm = useFileManager({ apiBasePath, showUpload, showDelete, readOnly, onFileSelect, refreshTrigger, previewMaxFileSize });
+  const fm = useFileManager({
+    apiBasePath,
+    showUpload,
+    showDelete,
+    readOnly,
+    onFileSelect,
+    refreshTrigger,
+    previewMaxFileSize,
+    pollingEnabled,
+  });
 
   const handleThemeChange = useCallback((theme) => {
     setEditorTheme(theme);

@@ -160,7 +160,7 @@ router.post('/reset-password', async (req, res, next) => {
     const emailSent = await sendPasswordResetEmail(rows[0].email, resetToken);
     
     if (!emailSent) {
-      console.error(`Failed to send reset email to ${rows[0].email}`);
+      console.warn('Password reset email could not be sent.');
       // Even if the email failed to send, return success for security
       // In production you can log to DB or a monitoring system
     }
@@ -222,8 +222,6 @@ router.post('/reset-password/confirm', async (req, res, next) => {
       'UPDATE usr SET password_hash = ? WHERE id = ?',
       [passwordHash, decoded.userId]
     );
-
-    console.log(`Password successfully changed for user: ${rows[0].email}`);
 
     res.json({ message: 'Password has been successfully changed. You can now log in with your new password.' });
   } catch (e) {

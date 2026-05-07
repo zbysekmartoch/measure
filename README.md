@@ -81,6 +81,7 @@ mysql -u root -p < backend/sql/create.sql
 - **Publish** — publish result files to lab's `current_output` for external access
 - **Shared Libraries** — `labs/lib/scripts/` is automatically added to PYTHONPATH for all Python scripts across labs
 - **Configurable Outputs** — special outputs/template folder with custom name and visual styling via `config.json`
+- **Configurable Request Limits** — API/auth rate limits and JSON body size are configurable in `backend/config.json` (`requestLimits`), with live visibility in the Performance tab
 - **Markdown & KaTeX** — render Markdown files with math formula support
 
 ## License
