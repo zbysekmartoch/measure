@@ -1,0 +1,181 @@
+{
+  "formatStyles": {
+    "coef3": {
+      "number": {
+        "minDecimals": 3,
+        "maxDecimals": 3,
+        "decimalSeparator": ".",
+        "thousandSeparator": " ",
+        "useGrouping": false
+      }
+    },
+    "coef4": {
+      "number": {
+        "minDecimals": 4,
+        "maxDecimals": 4,
+        "decimalSeparator": ".",
+        "thousandSeparator": " ",
+        "useGrouping": false
+      }
+    },
+    "integer": {
+      "number": {
+        "minDecimals": 0,
+        "maxDecimals": 0,
+        "decimalSeparator": ".",
+        "thousandSeparator": " ",
+        "useGrouping": true
+      }
+    },
+    "percent1": {
+      "number": {
+        "mode": "percent",
+        "minDecimals": 1,
+        "maxDecimals": 1,
+        "suffix": " %"
+      }
+    },
+    "percent2": {
+      "number": {
+        "mode": "percent",
+        "minDecimals": 2,
+        "maxDecimals": 2,
+        "suffix": " %"
+      }
+    },
+    "scientific3": {
+      "number": {
+        "mode": "scientific",
+        "minDecimals": 3,
+        "maxDecimals": 3
+      }
+    },
+    "pValue": {
+      "number": {
+        "minDecimals": 4,
+        "maxDecimals": 4,
+        "decimalSeparator": ".",
+        "thousandSeparator": " ",
+        "nullText": "n/a"
+      }
+    },
+    "pValueStar": {
+      "number": {
+        "mode": "star"
+      }
+    },
+    "isoDateTime": {
+      "date": {
+        "pattern": "yyyy-LL-dd'T'HH:mm:ss",
+        "locale": "en",
+        "zone": "UTC"
+      }
+    },
+    "enDateTime": {
+      "date": {
+        "pattern": "d LLLL yyyy HH:mm:ss",
+        "locale": "en",
+        "zone": "UTC"
+      }
+    },
+    "csDateShort": {
+      "date": {
+        "pattern": "dd. MM. yyyy",
+        "locale": "cs",
+        "zone": "Europe/Prague"
+      }
+    },
+    "csDateLong": {
+      "date": {
+        "pattern": "d. LLLL yyyy",
+        "locale": "cs",
+        "zone": "Europe/Prague"
+      }
+    },
+    "csDateLongTime": {
+      "date": {
+        "pattern": "d. LLLL yyyy HH:mm:ss",
+        "locale": "cs",
+        "zone": "Europe/Prague"
+      }
+    }
+  },
+  "format": [
+    {
+      "path": "meta.generatedAtIso",
+      "use": "isoDateTime"
+    },
+    {
+      "path": "meta.generatedAtEn",
+      "use": "enDateTime"
+    },
+    {
+      "path": "meta.generatedAtCsShort",
+      "use": "csDateShort"
+    },
+    {
+      "path": "meta.generatedAtCsLong",
+      "use": "csDateLong"
+    },
+    {
+      "path": "meta.generatedAtCsLongTime",
+      "use": "csDateLongTime"
+    },
+    {
+      "path": "models.*.coefficients.*.estimate",
+      "use": "coef4"
+    },
+    {
+      "path": "models.*.coefficients.*.stdError",
+      "use": "coef4"
+    },
+    {
+      "path": "models.*.coefficients.*.tStat",
+      "use": "coef3"
+    },
+    {
+      "path": "models.*.coefficients.*.pValue",
+      "use": "pValue"
+    },
+    {
+      "path": "models.*.coefficients.*.significance",
+      "use": "pValueStar"
+    },
+    {
+      "path": "models.*.metrics.r2",
+      "use": "percent2"
+    },
+    {
+      "path": "models.*.metrics.r2Adjusted",
+      "use": "percent2"
+    },
+    {
+      "path": "models.*.metrics.rmse",
+      "use": "coef3"
+    },
+    {
+      "path": "tables.descriptives.*.n",
+      "use": "integer"
+    },
+    {
+      "path": "tables.descriptives.*.mean",
+      "use": "coef3"
+    },
+    {
+      "path": "tables.descriptives.*.sd",
+      "use": "coef3"
+    },
+    {
+      "path": "tables.tests.*.pValue",
+      "use": "pValue"
+    },
+    {
+      "path": "tables.tests.*.significance",
+      "use": "pValueStar"
+    },
+    {
+      "path": "appendix.sensitivity.*.value",
+      "use": "scientific3"
+    }
+  ]
+}

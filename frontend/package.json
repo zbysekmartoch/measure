@@ -18,6 +18,7 @@
     "@tanstack/react-table": "^8.21.3",
     "ag-grid-community": "^34.1.1",
     "ag-grid-react": "^34.1.1",
+    "jsonc-parser": "^3.3.1",
     "katex": "^0.16.35",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

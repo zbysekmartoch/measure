@@ -14,6 +14,24 @@ const DEFAULT_LOCALE = "cs";
 const DEFAULT_ZONE = "Europe/Prague";
 const DEFAULT_PATTERN = "dd. MM. yyyy";
 
+const DEFAULT_REPORT_FORMAT = Object.freeze({
+    number: {
+        mode: "number",
+        minDecimals: 0,
+        maxDecimals: 2,
+        decimalSeparator: ",",
+        thousandSeparator: " ",
+        useGrouping: true,
+        prefix: "",
+        suffix: "",
+        nullText: "",
+        nanText: "",
+        infinityText: ""
+    }
+});
+
+const SUPPORTED_NUMBER_MODES = new Set(["number", "percent", "currency", "scientific", "star"]);
+
 // tokeny, které laikům dávají smysl a pokryjí datum+čas+jazyk
 const ALLOWED_TOKENS = new Set([
   "yyyy",
@@ -69,6 +87,110 @@ function loadEnvironment() {
         console.error(`Chyba při načítání environment.json: ${error.message}`);
         process.exit(1);
     }
+}
+
+function resolveDocConfigPath(fileName, { preferResultRoot = false } = {}) {
+    if (typeof fileName !== 'string' || !fileName.trim()) {
+        throw new Error('Nazev konfiguracniho souboru musi byt neprázdný string.');
+    }
+
+    if (path.isAbsolute(fileName)) {
+        return fileName;
+    }
+
+    const primaryRoot = preferResultRoot ? RESULT_ROOT : LAB_ROOT;
+    const secondaryRoot = preferResultRoot ? LAB_ROOT : RESULT_ROOT;
+    const primaryPath = path.resolve(primaryRoot, fileName);
+    if (fs.existsSync(primaryPath)) {
+        return primaryPath;
+    }
+
+    const secondaryPath = path.resolve(secondaryRoot, fileName);
+    if (fs.existsSync(secondaryPath)) {
+        return secondaryPath;
+    }
+
+    return primaryPath;
+}
+
+function loadDocFormatSettings(docConfig = {}) {
+    const formatFile = docConfig?.format;
+    if (formatFile === undefined || formatFile === null || formatFile === '') {
+        return { formatSettings: {}, formatPath: null, formatConfigError: null };
+    }
+
+    let formatPath;
+    try {
+        formatPath = resolveDocConfigPath(formatFile, {
+            preferResultRoot: Boolean(docConfig?.formatInResult)
+        });
+    } catch (error) {
+        return {
+            formatSettings: {},
+            formatPath: null,
+            formatConfigError: `Neplatna hodnota report.doc.format: ${error.message}`
+        };
+    }
+
+    if (!fs.existsSync(formatPath)) {
+        return {
+            formatSettings: {},
+            formatPath,
+            formatConfigError: `Format settings soubor nebyl nalezen: ${formatPath}`
+        };
+    }
+
+    let parsed;
+    try {
+        const content = fs.readFileSync(formatPath, 'utf-8');
+        parsed = JSON.parse(content);
+    } catch (error) {
+        return {
+            formatSettings: {},
+            formatPath,
+            formatConfigError: `Chyba pri nacitani format settings (${formatPath}): ${error.message}`
+        };
+    }
+
+    if (!isPlainObject(parsed)) {
+        return {
+            formatSettings: {},
+            formatPath,
+            formatConfigError: `Format settings v ${formatPath} musi byt JSON objekt.`
+        };
+    }
+
+    if (parsed.formatStyles !== undefined && !isPlainObject(parsed.formatStyles)) {
+        return {
+            formatSettings: {},
+            formatPath,
+            formatConfigError: `Format settings v ${formatPath}: formatStyles musi byt objekt.`
+        };
+    }
+
+    if (parsed.format !== undefined && !Array.isArray(parsed.format)) {
+        return {
+            formatSettings: {},
+            formatPath,
+            formatConfigError: `Format settings v ${formatPath}: format musi byt pole pravidel.`
+        };
+    }
+
+    return { formatSettings: parsed, formatPath, formatConfigError: null };
+}
+
+function normalizeDocGlobals(docConfig = {}) {
+    const rawGlobals = docConfig?.globals;
+    if (rawGlobals === undefined || rawGlobals === null) {
+        return {};
+    }
+
+    if (!isPlainObject(rawGlobals)) {
+        console.error('report.doc.globals musi byt objekt. Budu ignorovat globals pro tento dokument.');
+        return {};
+    }
+
+    return deepClone(rawGlobals);
 }
 
 
@@ -263,28 +385,40 @@ async function main() {
 
         gDocDefualts=docConfig.defaults||{}; // globální pro případ potřeby v customizeValue
         
-        console.log(`\nZpracovávám dokument:`);
-        console.log(`  šablona: ${templatePath}`);
-        console.log(`  data:    ${dataPath}`);
-        console.log(`  výstup:  ${outPath}`);
-        
         try {
+            const {
+                formatSettings,
+                formatPath,
+                formatConfigError
+            } = loadDocFormatSettings(docConfig);
+            const ignoreFormatErrors = Boolean(docConfig?.ignoreFormatErrors);
+            const docGlobals = normalizeDocGlobals(docConfig);
+
+            // přidáme do docGlobals proměnnou s aktuálním datem a časem pro případ, že by ji někdo chtěl použít v šabloně
+            docGlobals.renderedAt = (new Date()).toISOString();
+
+            console.log(`\nZpracovavam dokument:`);
+            console.log(`  sablona: ${templatePath}`);
+            console.log(`  data:    ${dataPath}`);
+            console.log(`  vystup:  ${outPath}`);
+            console.log(`  format:  ${formatPath ?? '(nenastaveno)'}`);
+            console.log(`  ignoreFormatErrors: ${ignoreFormatErrors}`);
+            console.log(`  globals: ${Object.keys(docGlobals).length}`);
+
             // Načti data pro tento dokument
             let reportData = {}; 
             if (dataRelPath) { // pokud je zadáno, načti data, jinak nech reportData prázdný (ne všechny dokumenty musí mít data)
                 reportData=loadData(dataPath);
             }
-/*
-            // Obrázky – podsložky v RESULT_ROOT/img
-            if (fs.existsSync(IMAGES_DIR)) {
-                let imgKeys = getSubfolders(IMAGES_DIR).map(e => 'img_' + e);
-                imgKeys.push('img_product');
-                if (reportData.products) {
-                    reportData.products = reportData.products.map(p => ({ ...p, ...makeObjectFromKeys(imgKeys, p.id) }));
-                }
-            }*/
+
             gData=reportData; // globální pro případ potřeby v customizeValue
-            let virtualData = createDeepIntrospectingGetLoggerProxy(reportData);
+            let virtualData = createDeepIntrospectingGetLoggerProxy(reportData, {
+                globals: docGlobals,
+                formatSettings,
+                ignoreFormatErrors,
+                formatConfigError,
+                formatErrorContext: `template=${templateRelPath}, renderTo=${outputRelPath}`
+            });
 
             if (!fs.existsSync(templatePath)) {
                 console.error(`Chyba: Šablona nebyla nalezena: ${templatePath}`);
@@ -353,30 +487,7 @@ function normalizeQuotes(str) {
   return str.replace(/[“”„‟«»‹›]/g, '"');
 }
 
-/*
-function normalizeProp(prop) {
-// Rozdělí prop na název a případné parametry ve formátu JSON objektu
-//   Vrací [propName, paramsObject|null]
-    
-    let params = null;
-    let paramStr;
-    if (typeof prop === "string") {
-        paramStr=prop.split('{').slice(1).join('{');
-        paramStr=normalizeQuotes(paramStr);
-    }
-    if (paramStr) {
-        try {
-            params = JSON.parse(`{${paramStr}`);
-        } catch (e) {
-            console.warn("Chyba při parsování parametrů ", paramStr);
-        }
-    }
-    if (paramStr) {
-        prop=prop.split('{')[0];
-    }   
-    return [prop, params];
-}
-*/
+
 
 function formatTemplateDate(iso, { dateFormat, locale, zone } = {}) {
     const usedFormat = dateFormat ?? DEFAULT_PATTERN;
@@ -384,6 +495,441 @@ function formatTemplateDate(iso, { dateFormat, locale, zone } = {}) {
     const usedZone = zone ?? DEFAULT_ZONE;
     
     return DateTime.fromSQL(iso, { zone: usedZone }).setLocale(usedLocale).toFormat(usedFormat);
+}
+
+function isPlainObject(value) {
+    return Object.prototype.toString.call(value) === '[object Object]';
+}
+
+function deepClone(value) {
+    if (Array.isArray(value)) {
+        return value.map(item => deepClone(item));
+    }
+    if (isPlainObject(value)) {
+        const out = {};
+        for (const [k, v] of Object.entries(value)) {
+            out[k] = deepClone(v);
+        }
+        return out;
+    }
+    return value;
+}
+
+function deepMergeReplaceArrays(target, source) {
+    const base = isPlainObject(target) ? deepClone(target) : {};
+    if (!isPlainObject(source)) {
+        return source === undefined ? base : deepClone(source);
+    }
+
+    for (const [key, value] of Object.entries(source)) {
+        if (Array.isArray(value)) {
+            base[key] = deepClone(value);
+            continue;
+        }
+
+        if (isPlainObject(value) && isPlainObject(base[key])) {
+            base[key] = deepMergeReplaceArrays(base[key], value);
+            continue;
+        }
+
+        if (isPlainObject(value)) {
+            base[key] = deepMergeReplaceArrays({}, value);
+            continue;
+        }
+
+        base[key] = value;
+    }
+
+    return base;
+}
+
+function normalizePathSegments(pathArr) {
+    if (Array.isArray(pathArr)) {
+        return pathArr.map(seg => typeof seg === 'symbol' ? seg.toString() : String(seg));
+    }
+
+    if (typeof pathArr === 'string') {
+        if (!pathArr.trim()) {
+            return [];
+        }
+        return pathArr.split('.').filter(Boolean);
+    }
+
+    throw new Error('Path musí být pole segmentů nebo string.');
+}
+
+function buildLocalFormatOverridesFromParams(params) {
+    if (!isPlainObject(params)) {
+        return null;
+    }
+
+    let hasOverrides = false;
+    let overrides = {};
+
+    if (isPlainObject(params.format)) {
+        overrides = deepMergeReplaceArrays(overrides, params.format);
+        hasOverrides = true;
+    }
+
+    const directUseStyles = normalizeUseStyles(params.use);
+    if (directUseStyles.length > 0) {
+        const existingUseStyles = normalizeUseStyles(overrides.use);
+        const mergedUseStyles = [...new Set([...existingUseStyles, ...directUseStyles])];
+        overrides = deepMergeReplaceArrays(overrides, { use: mergedUseStyles });
+        hasOverrides = true;
+    }
+
+    if (isPlainObject(params.date)) {
+        overrides = deepMergeReplaceArrays(overrides, { date: params.date });
+        hasOverrides = true;
+    }
+
+    if (isPlainObject(params.number)) {
+        overrides = deepMergeReplaceArrays(overrides, { number: params.number });
+        hasOverrides = true;
+    }
+
+    return hasOverrides ? overrides : null;
+}
+
+function parsePathPattern(pattern) {
+    if (typeof pattern !== 'string' || !pattern.trim()) {
+        throw new Error('Neplatný path pattern: pattern musí být neprázdný string.');
+    }
+
+    const segments = pattern.split('.');
+    for (const segment of segments) {
+        if (!segment) {
+            throw new Error(`Neplatný path pattern: ${pattern}`);
+        }
+
+        if (segment === '*' || segment === '**') {
+            continue;
+        }
+
+        if (segment.includes('*')) {
+            throw new Error(`Neplatný path pattern: ${pattern}`);
+        }
+    }
+
+    return segments;
+}
+
+function matchesPathSegments(patternSegments, pathSegments, patternIndex = 0, pathIndex = 0) {
+    while (patternIndex < patternSegments.length && pathIndex < pathSegments.length) {
+        const patternSegment = patternSegments[patternIndex];
+
+        if (patternSegment === '**') {
+            if (patternIndex === patternSegments.length - 1) {
+                return true;
+            }
+
+            for (let skip = pathIndex; skip <= pathSegments.length; skip += 1) {
+                if (matchesPathSegments(patternSegments, pathSegments, patternIndex + 1, skip)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (patternSegment !== '*' && patternSegment !== pathSegments[pathIndex]) {
+            return false;
+        }
+
+        patternIndex += 1;
+        pathIndex += 1;
+    }
+
+    while (patternIndex < patternSegments.length && patternSegments[patternIndex] === '**') {
+        patternIndex += 1;
+    }
+
+    return patternIndex === patternSegments.length && pathIndex === pathSegments.length;
+}
+
+function matchesPathPattern(pattern, pathArr) {
+    const patternSegments = parsePathPattern(pattern);
+    const pathSegments = normalizePathSegments(pathArr);
+    return matchesPathSegments(patternSegments, pathSegments);
+}
+
+function removeControlProperties(rule, controlProperties = ['path', 'use']) {
+    const out = {};
+
+    for (const [key, value] of Object.entries(rule)) {
+        if (controlProperties.includes(key)) {
+            continue;
+        }
+        out[key] = value;
+    }
+
+    return out;
+}
+
+function normalizeUseStyles(useValue) {
+    if (useValue === undefined || useValue === null) {
+        return [];
+    }
+
+    if (typeof useValue === 'string') {
+        return [useValue];
+    }
+
+    if (Array.isArray(useValue)) {
+        for (const styleName of useValue) {
+            if (typeof styleName !== 'string' || !styleName.trim()) {
+                throw new Error('"use" musí být string nebo pole stringů.');
+            }
+        }
+        return useValue;
+    }
+
+    throw new Error('"use" musí být string nebo pole stringů.');
+}
+
+function validateNumberFormat(numberFormat, context = 'number format') {
+    if (numberFormat === undefined || numberFormat === null) {
+        return;
+    }
+
+    if (!isPlainObject(numberFormat)) {
+        throw new Error(`${context}: number musí být objekt.`);
+    }
+
+    if (numberFormat.mode !== undefined && !SUPPORTED_NUMBER_MODES.has(numberFormat.mode)) {
+        throw new Error(`${context}: neznámý mode "${numberFormat.mode}".`);
+    }
+
+    const { minDecimals, maxDecimals } = numberFormat;
+    if (minDecimals !== undefined && (!Number.isInteger(minDecimals) || minDecimals < 0)) {
+        throw new Error(`${context}: minDecimals musí být celé číslo >= 0.`);
+    }
+
+    if (maxDecimals !== undefined && (!Number.isInteger(maxDecimals) || maxDecimals < 0)) {
+        throw new Error(`${context}: maxDecimals musí být celé číslo >= 0.`);
+    }
+
+    if (minDecimals !== undefined && maxDecimals !== undefined && minDecimals > maxDecimals) {
+        throw new Error(`${context}: musí platit 0 <= minDecimals <= maxDecimals.`);
+    }
+}
+
+function validateFormatRule(rule, index) {
+    if (!isPlainObject(rule)) {
+        throw new Error(`Neplatné format pravidlo na indexu ${index}: pravidlo musí být objekt.`);
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(rule, 'path')) {
+        throw new Error(`Neplatné format pravidlo na indexu ${index}: chybí path.`);
+    }
+
+    parsePathPattern(rule.path);
+    normalizeUseStyles(rule.use);
+    validateNumberFormat(rule.number, `Pravidlo ${index}`);
+}
+
+function getDefaultFormat() {
+    return deepMergeReplaceArrays({}, DEFAULT_REPORT_FORMAT);
+}
+
+function getFormatForPath(pathArr, formatSettings = {}, localOverrides = null) {
+    const rules = formatSettings?.format;
+    if (rules !== undefined && !Array.isArray(rules)) {
+        throw new Error('formatSettings.format musí být pole pravidel.');
+    }
+
+    const styles = formatSettings?.formatStyles ?? {};
+    let result = getDefaultFormat();
+
+    for (const [index, rule] of (rules ?? []).entries()) {
+        validateFormatRule(rule, index);
+
+        if (!matchesPathPattern(rule.path, pathArr)) {
+            continue;
+        }
+
+        let ruleFormat = {};
+
+        for (const styleName of normalizeUseStyles(rule.use)) {
+            const style = styles?.[styleName];
+            if (!style) {
+                throw new Error(`Unknown format style: ${styleName}`);
+            }
+            ruleFormat = deepMergeReplaceArrays(ruleFormat, style);
+        }
+
+        const inlineRuleFormat = removeControlProperties(rule, ['path', 'use']);
+        ruleFormat = deepMergeReplaceArrays(ruleFormat, inlineRuleFormat);
+        result = deepMergeReplaceArrays(result, ruleFormat);
+    }
+
+    if (localOverrides && isPlainObject(localOverrides)) {
+        let localFormat = {};
+
+        for (const styleName of normalizeUseStyles(localOverrides.use)) {
+            const style = styles?.[styleName];
+            if (!style) {
+                throw new Error(`Unknown format style: ${styleName}`);
+            }
+            localFormat = deepMergeReplaceArrays(localFormat, style);
+        }
+
+        const inlineLocalFormat = removeControlProperties(localOverrides, ['use', 'path']);
+        localFormat = deepMergeReplaceArrays(localFormat, inlineLocalFormat);
+        result = deepMergeReplaceArrays(result, localFormat);
+    }
+
+    validateNumberFormat(result.number, 'Výsledné formátování');
+    return result;
+}
+
+function formatNumberWithSettings(value, numberFormat = {}) {
+    const settings = deepMergeReplaceArrays(DEFAULT_REPORT_FORMAT.number, numberFormat);
+    validateNumberFormat(settings, 'Formátování čísla');
+
+    if (value === null || value === undefined) {
+        return settings.nullText ?? '';
+    }
+
+    if (typeof value !== 'number') {
+        return value;
+    }
+
+    if (Number.isNaN(value)) {
+        return settings.nanText ?? '';
+    }
+
+    if (!Number.isFinite(value)) {
+        const infinityText = settings.infinityText ?? '';
+        if (!infinityText) {
+            return String(value);
+        }
+        return value < 0 ? `-${infinityText}` : infinityText;
+    }
+
+    let sourceValue = value;
+    const mode = settings.mode ?? 'number';
+    if (mode === 'percent') {
+        const multiplier = typeof settings.multiplier === 'number' ? settings.multiplier : 100;
+        sourceValue *= multiplier;
+    }
+
+    if (mode === 'star') {
+        if (sourceValue >= 0 && sourceValue < 0.01) {
+            return '***';
+        }
+        if (sourceValue >= 0 && sourceValue < 0.05) {
+            return '**';
+        }
+        if (sourceValue >= 0 && sourceValue < 0.1) {
+            return '*';
+        }
+        return '';
+    }
+
+    if (mode === 'scientific') {
+        const scientificDecimals = settings.maxDecimals ?? settings.minDecimals ?? 2;
+        const scientificText = sourceValue.toExponential(scientificDecimals);
+        return `${settings.prefix ?? ''}${scientificText}${settings.suffix ?? ''}`;
+    }
+
+    const minDecimals = settings.minDecimals ?? 0;
+    const maxDecimals = settings.maxDecimals ?? minDecimals;
+    const decimalSeparator = settings.decimalSeparator ?? '.';
+    const thousandSeparator = settings.thousandSeparator ?? ',';
+    const useGrouping = settings.useGrouping !== false;
+
+    let fixed = sourceValue.toFixed(maxDecimals);
+    if (maxDecimals > minDecimals && fixed.includes('.')) {
+        const [intPart, fracPart] = fixed.split('.');
+        let trimmedFracPart = fracPart;
+        while (trimmedFracPart.length > minDecimals && trimmedFracPart.endsWith('0')) {
+            trimmedFracPart = trimmedFracPart.slice(0, -1);
+        }
+        fixed = trimmedFracPart ? `${intPart}.${trimmedFracPart}` : intPart;
+    }
+
+    let [integerPart, decimalPart = ''] = fixed.split('.');
+    if (useGrouping) {
+        const sign = integerPart.startsWith('-') ? '-' : '';
+        const unsigned = sign ? integerPart.slice(1) : integerPart;
+        integerPart = `${sign}${unsigned.replace(/\B(?=(\d{3})+(?!\d))/g, thousandSeparator)}`;
+    }
+
+    const valueText = decimalPart ? `${integerPart}${decimalSeparator}${decimalPart}` : integerPart;
+    return `${settings.prefix ?? ''}${valueText}${settings.suffix ?? ''}`;
+}
+
+function formatDateWithSettings(value, dateFormat = {}) {
+    if (value === null || value === undefined) {
+        return dateFormat.nullText ?? '';
+    }
+
+    const datePattern = dateFormat.pattern ?? dateFormat.dateFormat ?? DEFAULT_PATTERN;
+    const locale = dateFormat.locale ?? DEFAULT_LOCALE;
+    const zone = dateFormat.zone ?? DEFAULT_ZONE;
+
+    if (value instanceof Date) {
+        const dateTime = DateTime.fromJSDate(value, { zone });
+        return dateTime.isValid ? dateTime.setLocale(locale).toFormat(datePattern) : value;
+    }
+
+    if (typeof value === 'string') {
+        // Nejdřív zkus ISO (např. 2026-05-11T16:47:31.344Z), pak SQL formát.
+        const isoDateTime = DateTime.fromISO(value, { setZone: true });
+        if (isoDateTime.isValid) {
+            const zoned = zone ? isoDateTime.setZone(zone) : isoDateTime;
+            return zoned.setLocale(locale).toFormat(datePattern);
+        }
+
+        const sqlDateTime = DateTime.fromSQL(value, { zone });
+        return sqlDateTime.isValid ? sqlDateTime.setLocale(locale).toFormat(datePattern) : value;
+    }
+
+    return value;
+}
+
+function applyResolvedFormat(value, resolvedFormat = {}, context = {}) {
+    const pathArr = context.pathArr ?? [];
+    const dateLogSource = context.dateLogSource ?? 'unknown';
+
+    if (isPlainObject(resolvedFormat.number) && (typeof value === 'number' || value === null || value === undefined)) {
+        return formatNumberWithSettings(value, resolvedFormat.number);
+    }
+
+    if (isPlainObject(resolvedFormat.date) && (value instanceof Date || typeof value === 'string' || value === null || value === undefined)) {
+        /*if (dateLogSource === 'formatStyleOrRule') {
+            const pathText = normalizePathSegments(pathArr).join('.') || '<root>';
+            const pattern = resolvedFormat.date.pattern ?? resolvedFormat.date.dateFormat ?? DEFAULT_PATTERN;
+            console.log(`[FORMAT][DATE] path=${pathText} source=formatStyleOrRule pattern=${pattern} value=${String(value)}`);
+        }*/
+        return formatDateWithSettings(value, resolvedFormat.date);
+    }
+
+    return value;
+}
+
+function formatValueByPath(pathArr, value, formatSettings = {}, localOverrides = null) {
+    const resolvedFormat = getFormatForPath(pathArr, formatSettings, localOverrides);
+    const hasLocalDateOverride = isPlainObject(localOverrides) && isPlainObject(localOverrides.date);
+    const dateLogSource = hasLocalDateOverride ? 'localOverride' : 'formatStyleOrRule';
+    return applyResolvedFormat(value, resolvedFormat, { pathArr, dateLogSource });
+}
+
+function isFormatErrorRenderableValue(value) {
+    return value === null ||
+        value === undefined ||
+        typeof value === 'number' ||
+        typeof value === 'string' ||
+        typeof value === 'boolean' ||
+        typeof value === 'bigint' ||
+        value instanceof Date;
+}
+
+function buildFormatErrorText(message, pathArr) {
+    const pathText = normalizePathSegments(pathArr).join('.') || '<root>';
+    return `[FORMAT_ERROR path=${pathText}] ${message}`;
 }
 
 function formatNumber(value, {
@@ -401,18 +947,11 @@ function formatNumber(value, {
 
 function customizeValue(value, params, pathArr) {
     // Upraví value dle params (např. formátování data)
-    let ret;
-    if (params.dateFormat) {  // ok jde o formátování datumu
-        ret = formatTemplateDate(value, params);
-    }
+    let ret = value;
 
-    if (params.numFormat) {  // ok jde o formátování datumu
-        ret = formatNumber(value, params.numFormat);
-    }
-
-    if (params.orderBy && Array.isArray(value)) {
+    if (params.orderBy && Array.isArray(ret)) {
         //ret = [...value]; // clone
-        ret=value;
+        ret = value;
         // podporuje víceúrovňové řazení. params.orderby je string "key1,key2 desc,key3"
         const orderBys = params.orderBy.split(',').map(s => {
             const [key, dir] = s.trim().split(' ');
@@ -454,6 +993,11 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
   labelKeys = "KEYS",
   labelDesc = "DESC",
   logSymbols = true,
+    globals = {},
+    formatSettings = {},
+    ignoreFormatErrors = false,
+    formatConfigError = null,
+    formatErrorContext = "",
 } = {}) {
   if (rootObj === null || (typeof rootObj !== "object" && typeof rootObj !== "function")) {
     throw new TypeError("rootObj musí být objekt nebo funkce");
@@ -462,6 +1006,10 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
   const cacheByTargetAndPath = new WeakMap(); // target -> Map(pathString -> proxy)
 
   const isObjectLike = (v) => v !== null && (typeof v === "object" || typeof v === "function");
+    const hasGlobalFormatRules = Array.isArray(formatSettings?.format) && formatSettings.format.length > 0;
+    const formatErrorLogCache = new Set();
+    const globalsObject = isPlainObject(globals) ? globals : {};
+    const hasOwnGlobalProperty = (prop) => Object.prototype.hasOwnProperty.call(globalsObject, prop);
 
   const keyToString = (k) => {
     if (typeof k === "symbol") return logSymbols ? k.toString() : "[symbol]";
@@ -469,6 +1017,23 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
   };
 
   const pathToString = (pathArr) => pathArr.map(keyToString).join(".");
+
+    const reportFormatProblem = (pathArr, errorMessage, originalValue) => {
+        const pathText = pathToString(pathArr) || "<root>";
+        const composedMessage = formatErrorContext
+            ? `${formatErrorContext} :: ${errorMessage} (path: ${pathText})`
+            : `${errorMessage} (path: ${pathText})`;
+
+        if (ignoreFormatErrors || !isFormatErrorRenderableValue(originalValue)) {
+            if (!formatErrorLogCache.has(composedMessage)) {
+                formatErrorLogCache.add(composedMessage);
+                console.error(`[FORMAT] ${composedMessage}`);
+            }
+            return originalValue;
+        }
+
+        return buildFormatErrorText(errorMessage, pathArr);
+    };
 
   const getProxy = (target, pathArr) => {
     let map = cacheByTargetAndPath.get(target);
@@ -497,7 +1062,7 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
             [prop, params] = normalizeProp(prop);
         }
 
-        if (typeof prop === "string" && prop.includes(".")) {
+        if (!hasOwnGlobalProperty(prop) && typeof prop === "string" && prop.includes(".")) {
             const lastDot = prop.lastIndexOf(".");
             const parentPath = prop.slice(0, lastDot);
             const lastProp = prop.slice(lastDot + 1);
@@ -513,7 +1078,28 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
         const nextPath = pathArr.concat([prop]);
    //     console.log(`[${labelGet}]`, pathToString(nextPath));
 
-        let value = Reflect.get(t, prop, receiver);
+                let value = hasOwnGlobalProperty(prop)
+                    ? Reflect.get(globalsObject, prop)
+                    : Reflect.get(t, prop, receiver);
+        let localFormatOverrides = null;
+        if (params) {
+            try {
+                localFormatOverrides = buildLocalFormatOverridesFromParams(params);
+            } catch (error) {
+                value = reportFormatProblem(nextPath, `Neplatny lokalni format v tagu: ${error.message}`, value);
+            }
+        }
+
+        if (formatConfigError) {
+            value = reportFormatProblem(nextPath, formatConfigError, value);
+        } else if (hasGlobalFormatRules || localFormatOverrides) {
+            try {
+                value = formatValueByPath(nextPath, value, formatSettings, localFormatOverrides);
+            } catch (error) {
+                value = reportFormatProblem(nextPath, error.message, value);
+            }
+        }
+
         if (params) {
             value=customizeValue(value,params,nextPath);
         }
@@ -531,7 +1117,7 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
         // `prop in obj`
         const nextPath = pathArr.concat([prop]);
         //console.log(`[${labelHas}]`, pathToString(nextPath));
-        return Reflect.has(t, prop);
+                return hasOwnGlobalProperty(prop) || Reflect.has(t, prop);
       },
 
       ownKeys(t) {
@@ -577,7 +1163,7 @@ function normalizeProp(prop) {
 
        Vrací [propName, paramsObject|null]
     */
-    console.log(`normalizeProp: ${prop}`);
+   /// console.log(`normalizeProp: ${prop}`);
     if (typeof prop !== "string") {
         return [prop, null];
     }
