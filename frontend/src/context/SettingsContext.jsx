@@ -1,7 +1,6 @@
 /**
  * Settings Context Provider
  * Manages application-wide user preferences and settings.
- * Currently handles the advanced UI toggle for showing/hiding advanced features.
  * Settings are persisted to localStorage.
  */
 import React, { createContext, useContext, useState, useEffect } from 'react';
@@ -9,26 +8,42 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 const SettingsContext = createContext();
 
 export function SettingsProvider({ children }) {
-  const [showAdvancedUI, setShowAdvancedUI] = useState(() => {
-    const saved = localStorage.getItem('showAdvancedUI');
-    return saved ? JSON.parse(saved) : false;
-  });
-
   const [compactButtons, setCompactButtons] = useState(() => {
     const saved = localStorage.getItem('compactButtons');
-    return saved ? JSON.parse(saved) : false;
+    return saved ? JSON.parse(saved) : true;
   });
 
-  useEffect(() => {
-    localStorage.setItem('showAdvancedUI', JSON.stringify(showAdvancedUI));
-  }, [showAdvancedUI]);
+  const [doubleShiftActivation, setDoubleShiftActivation] = useState(() => {
+    const saved = localStorage.getItem('doubleShiftActivation');
+    return saved ? JSON.parse(saved) : true;
+  });
+
+  const [focusedMode, setFocusedMode] = useState(() => {
+    const saved = localStorage.getItem('focusedMode');
+    return saved ? JSON.parse(saved) : false;
+  });
 
   useEffect(() => {
     localStorage.setItem('compactButtons', JSON.stringify(compactButtons));
   }, [compactButtons]);
 
+  useEffect(() => {
+    localStorage.setItem('doubleShiftActivation', JSON.stringify(doubleShiftActivation));
+  }, [doubleShiftActivation]);
+
+  useEffect(() => {
+    localStorage.setItem('focusedMode', JSON.stringify(focusedMode));
+  }, [focusedMode]);
+
   return (
-    <SettingsContext.Provider value={{ showAdvancedUI, setShowAdvancedUI, compactButtons, setCompactButtons }}>
+    <SettingsContext.Provider value={{
+      compactButtons,
+      setCompactButtons,
+      doubleShiftActivation,
+      setDoubleShiftActivation,
+      focusedMode,
+      setFocusedMode,
+    }}>
       {children}
     </SettingsContext.Provider>
   );

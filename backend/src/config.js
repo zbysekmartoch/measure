@@ -22,6 +22,14 @@ const toNumber = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const toBool = (value, fallback) => {
+  if (value == null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+};
+
 const required = (key) => {
   if (!process.env[key]) {
     throw new Error(`Missing required env var: ${key}`);
@@ -29,15 +37,22 @@ const required = (key) => {
   return process.env[key];
 };
 
+const userStoreMode = String(process.env.USER_STORE_MODE || 'dual').trim().toLowerCase();
+if (!['sql', 'dual', 'file'].includes(userStoreMode)) {
+  throw new Error('Invalid USER_STORE_MODE. Expected one of: sql, dual, file');
+}
+
+const dbIsRequired = userStoreMode !== 'file';
+
 export const config = {
   env: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 3000),
   db: {
-    host: required('DB_HOST'),
+    host: dbIsRequired ? required('DB_HOST') : (process.env.DB_HOST || null),
     port: Number(process.env.DB_PORT || 3306),
-    user: required('DB_USER'),
-    password: required('DB_PASSWORD'),
-    database: required('DB_NAME')
+    user: dbIsRequired ? required('DB_USER') : (process.env.DB_USER || null),
+    password: dbIsRequired ? required('DB_PASSWORD') : (process.env.DB_PASSWORD || null),
+    database: dbIsRequired ? required('DB_NAME') : (process.env.DB_NAME || null)
   },
   corsOrigins: (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
   jwtSecret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
@@ -79,5 +94,13 @@ export const config = {
   },
   
   // Frontend URL for reset links
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173'
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+
+  userStore: {
+    mode: userStoreMode,
+    migrateOnStart: toBool(process.env.USER_STORE_MIGRATE_ON_START, true),
+    strictStartup: toBool(process.env.USER_STORE_STRICT_STARTUP, true),
+    filePath: process.env.USER_STORE_FILE_PATH || './data/users.json',
+    backupOnMigration: toBool(process.env.USER_STORE_BACKUP_ON_MIGRATION, true),
+  }
 };

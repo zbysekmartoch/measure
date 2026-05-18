@@ -18,13 +18,15 @@
  *   lab         – lab metadata object { id, name, description, … }
  *   onLabUpdate – callback(updatedLab) when settings change
  */
-import React, { useState, useRef, useCallback, useEffect, Suspense } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import LabScriptsPane from './LabScriptsPane.jsx';
 import LabResultsPane from './LabResultsPane.jsx';
 import LabSettingsPane from './LabSettingsPane.jsx';
 import LabChatPane from './LabChatPane.jsx';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
+import { useToast } from '../components/Toast';
+import { useSettings } from '../context/SettingsContext';
 import { useDebugSession } from '../debug/useDebugSession.js';
 import DebugPanel from '../debug/DebugPanel.jsx';
 import { shadow, debugModes as dmCfg } from '../lib/uiConfig.js';
@@ -50,10 +52,43 @@ const DEBUG_MODES = [
   { key: 'popup',  label: dmCfg.popup.label,  icon: dmCfg.popup.icon },
 ];
 
+const DEFAULT_KEYBOARD_MENU = {
+  activationKey: 'Escape',
+  activationMaxDelayMs: 500,
+  actions: {
+    toggleView: 'V',
+    saveAll: 'S',
+    unlockAll: 'U',
+    openScripts: 'C',
+    openDebug: 'D',
+    openChat: 'X',
+    runSelected: 'R',
+  },
+};
+
+function normalizeShortcutKey(value, fallback) {
+  const key = typeof value === 'string' ? value.trim() : '';
+  if (!key) return fallback;
+  if (key.length === 1) return key.toUpperCase();
+  if (key.toLowerCase() === 'esc') return 'Escape';
+  return key;
+}
+
+function isShortcutKeyMatch(eventKey, configuredKey) {
+  if (!eventKey || !configuredKey) return false;
+  if (configuredKey.length === 1) return eventKey.toUpperCase() === configuredKey.toUpperCase();
+  if (configuredKey.toLowerCase() === 'escape') return eventKey === 'Escape' || eventKey.toLowerCase() === 'esc';
+  return eventKey.toLowerCase() === configuredKey.toLowerCase();
+}
+
 export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible = true }) {
+  const toast = useToast();
+  const { doubleShiftActivation, focusedMode: isFocusedModeEnabled, setFocusedMode } = useSettings();
   const [activeTab, setActiveTab] = useState('scripts');
   const [debugMode, setDebugMode] = useState('hidden');
+  const [shortcutMenuOpen, setShortcutMenuOpen] = useState(false);
   const popupRef = useRef(null);
+  const lastActivationRef = useRef({ key: '', ts: 0 });
 
   // ---- Data Explorer sub-tabs ----
   const [openExplorers, setOpenExplorers] = useState([]);
@@ -82,6 +117,9 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
   // ---- Save-all ref (set by LabScriptsPane, called by LabResultsPane before Run/Debug) ----
   const saveAllRef = useRef(null);
 
+  // ---- Run-selected-result ref (set by LabResultsPane, used by keyboard shortcut menu) ----
+  const runResultRef = useRef(null);
+
   // ---- Lab Chat ----
   const chat = useLabChat(lab.id);
 
@@ -104,6 +142,60 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
     chat: popoutChat,
   };
 
+  const keyboardMenuConfig = useMemo(() => {
+    const source = appConfig?.keyboardMenu && typeof appConfig.keyboardMenu === 'object'
+      ? appConfig.keyboardMenu
+      : {};
+    const actionsSource = source.actions && typeof source.actions === 'object' ? source.actions : {};
+    const parsedDelay = Number(source.activationMaxDelayMs);
+    const configuredActivationKeys = Array.isArray(source.activationKeys)
+      ? source.activationKeys
+      : [source.activationKey];
+    const normalizedActivationKeys = configuredActivationKeys
+      .map((key) => normalizeShortcutKey(key, ''))
+      .filter(Boolean);
+    const activationKeys = [...new Set(
+      normalizedActivationKeys.length > 0
+        ? normalizedActivationKeys
+        : [DEFAULT_KEYBOARD_MENU.activationKey]
+    )];
+
+    if (doubleShiftActivation && !activationKeys.some((key) => key.toLowerCase() === 'shift')) {
+      activationKeys.push('Shift');
+    }
+
+    return {
+      activationKeys,
+      activationMaxDelayMs: Number.isFinite(parsedDelay) && parsedDelay > 0
+        ? parsedDelay
+        : DEFAULT_KEYBOARD_MENU.activationMaxDelayMs,
+      actions: {
+        toggleView: normalizeShortcutKey(actionsSource.toggleView, DEFAULT_KEYBOARD_MENU.actions.toggleView),
+        saveAll: normalizeShortcutKey(actionsSource.saveAll, DEFAULT_KEYBOARD_MENU.actions.saveAll),
+        unlockAll: normalizeShortcutKey(actionsSource.unlockAll, DEFAULT_KEYBOARD_MENU.actions.unlockAll),
+        openScripts: normalizeShortcutKey(actionsSource.openScripts, DEFAULT_KEYBOARD_MENU.actions.openScripts),
+        openDebug: normalizeShortcutKey(actionsSource.openDebug, DEFAULT_KEYBOARD_MENU.actions.openDebug),
+        openChat: normalizeShortcutKey(actionsSource.openChat, DEFAULT_KEYBOARD_MENU.actions.openChat),
+        runSelected: normalizeShortcutKey(actionsSource.runSelected, DEFAULT_KEYBOARD_MENU.actions.runSelected),
+      },
+    };
+  }, [appConfig, doubleShiftActivation]);
+
+  const keyboardActionItems = useMemo(() => ([
+    { id: 'toggleView', key: keyboardMenuConfig.actions.toggleView, label: 'View - toggle All/Focused' },
+    { id: 'openScripts', key: keyboardMenuConfig.actions.openScripts, label: 'Coding - go to Scripts tab' },
+    { id: 'openDebug', key: keyboardMenuConfig.actions.openDebug, label: 'Debugging - go to Debug tab' },
+    { id: 'runSelected', key: keyboardMenuConfig.actions.runSelected, label: 'Run - go to Debug and Run selected session' },
+    { id: 'openChat', key: keyboardMenuConfig.actions.openChat, label: 'Chat - go to Chat tab' },
+    { id: 'saveAll', key: keyboardMenuConfig.actions.saveAll, label: 'Save All' },
+    { id: 'unlockAll', key: keyboardMenuConfig.actions.unlockAll, label: 'Unlock all' },
+]), [keyboardMenuConfig.actions]);
+
+  const activationKeysLabel = useMemo(
+    () => keyboardMenuConfig.activationKeys.join(' / '),
+    [keyboardMenuConfig.activationKeys],
+  );
+
   // ---- Auto-show debug panel when debug workflow starts ----
   const showDebugPanel = useCallback(() => {
     if (debugMode === 'hidden') setDebugMode('right');
@@ -112,6 +204,102 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
   // ---- Keep fresh refs for keyboard handler ----
   const debugRef = useRef(debug);
   debugRef.current = debug;
+
+  const handleShortcutSaveAll = useCallback(async () => {
+    if (!saveAllRef.current) {
+      toast.info('Scripts pane is not ready yet.');
+      return;
+    }
+    try {
+      const saved = await saveAllRef.current();
+      if (saved.length > 0) {
+        toast.success(`Saved ${saved.length} file${saved.length > 1 ? 's' : ''}`);
+      } else {
+        toast.info('No unsaved files.');
+      }
+    } catch (e) {
+      toast.error(`Save all failed: ${e?.message || 'unknown error'}`);
+    }
+  }, [toast]);
+
+  const handleShortcutUnlockAll = useCallback(async () => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      toast.error('Missing auth token.');
+      return;
+    }
+
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+    const released = [];
+
+    for (const sub of ['scripts', 'results']) {
+      try {
+        const response = await fetch('/api/v1/locks/release-all-mine', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ apiBasePath: `/api/v1/labs/${lab.id}/${sub}` }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (data.released?.length) released.push(...data.released);
+      } catch {
+        // ignore and continue with the other path
+      }
+    }
+
+    if (released.length > 0) {
+      toast.success(`Unlocked ${released.length} file${released.length > 1 ? 's' : ''}`);
+    } else {
+      toast.info('No locks to release.');
+    }
+  }, [lab.id, toast]);
+
+  const handleShortcutRunSelected = useCallback(() => {
+    setActiveTab('results');
+    if (runResultRef.current) {
+      setTimeout(() => {
+        if (runResultRef.current) runResultRef.current();
+      }, 0);
+    }
+  }, []);
+
+  const handleShortcutToggleView = useCallback(() => {
+    setFocusedMode((previous) => {
+      const next = !previous;
+      toast.info(next ? 'Focused mode enabled' : 'Focused mode disabled');
+      return next;
+    });
+  }, [setFocusedMode, toast]);
+
+  const executeShortcutAction = useCallback(async (actionId) => {
+    switch (actionId) {
+      case 'toggleView':
+        handleShortcutToggleView();
+        break;
+      case 'saveAll':
+        await handleShortcutSaveAll();
+        break;
+      case 'unlockAll':
+        await handleShortcutUnlockAll();
+        break;
+      case 'openScripts':
+        setActiveTab('scripts');
+        break;
+      case 'openDebug':
+        setActiveTab('results');
+        break;
+      case 'openChat':
+        setActiveTab('chat');
+        break;
+      case 'runSelected':
+        handleShortcutRunSelected();
+        break;
+      default:
+        break;
+    }
+  }, [handleShortcutSaveAll, handleShortcutToggleView, handleShortcutUnlockAll, handleShortcutRunSelected]);
 
   // ---- Blinking state ----
   const [blinkScripts, setBlinkScripts] = useState(false);
@@ -125,9 +313,54 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
     }
   }, [debug.status, activeTab]);
 
+  useEffect(() => {
+    if (!isVisible) setShortcutMenuOpen(false);
+  }, [isVisible]);
+
   // ---- Global keyboard shortcuts ----
   useEffect(() => {
+    if (!isVisible) return undefined;
+
     const handler = (e) => {
+      if (e.repeat) return;
+
+      // The menu is modal while open: only menu shortcuts are handled.
+      if (shortcutMenuOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          setShortcutMenuOpen(false);
+          return;
+        }
+
+        const item = keyboardActionItems.find((action) => isShortcutKeyMatch(e.key, action.key));
+        if (item) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShortcutMenuOpen(false);
+          void executeShortcutAction(item.id);
+        }
+        return;
+      }
+
+      // Detect double-press activation key (default Escape, optionally Shift).
+      const matchedActivationKey = keyboardMenuConfig.activationKeys.find((key) => isShortcutKeyMatch(e.key, key));
+      if (matchedActivationKey) {
+        const now = Date.now();
+        const { key: previousKey, ts: previousTs } = lastActivationRef.current;
+        const delta = now - previousTs;
+        lastActivationRef.current = { key: matchedActivationKey, ts: now };
+        if (previousKey === matchedActivationKey && delta > 0 && delta <= keyboardMenuConfig.activationMaxDelayMs) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShortcutMenuOpen(true);
+        }
+        return;
+      }
+
+      // Reset activation sequence when a different key is pressed.
+      lastActivationRef.current = { key: '', ts: 0 };
+
       // Only handle F-keys we care about
       if (!['F8', 'F9', 'F10', 'F11'].includes(e.key)) return;
 
@@ -163,7 +396,14 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, []);
+  }, [
+    executeShortcutAction,
+    isVisible,
+    keyboardActionItems,
+    keyboardMenuConfig.activationKeys,
+    keyboardMenuConfig.activationMaxDelayMs,
+    shortcutMenuOpen,
+  ]);
 
   // ---- Popup window handling ----
   const [popupContainer, setPopupContainer] = useState(null);
@@ -292,7 +532,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Sub-tab bar */}
-      <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', marginTop: 2 }}>
+      <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', marginTop: isFocusedModeEnabled ? 0 : 2 }}>
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
           const blink = tab.key === 'scripts' && blinkScripts;
@@ -479,6 +719,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
               debug={debug}
               debugVisible={debugMode !== 'hidden'}
               runDebugRef={runDebugRef}
+              runResultRef={runResultRef}
               onAnalyze={openAnalyze}
               appConfig={appConfig}
               saveAllRef={saveAllRef}
@@ -602,6 +843,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
             debug={debug}
             debugVisible={debugMode !== 'hidden'}
             runDebugRef={runDebugRef}
+            runResultRef={runResultRef}
             onAnalyze={openAnalyze}
             appConfig={appConfig}
             saveAllRef={saveAllRef}
@@ -634,6 +876,71 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
         </div>,
         popoutChat.popoutContainer
       )}
+
+      {shortcutMenuOpen && (
+        <div
+          onClick={() => setShortcutMenuOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 2000,
+            background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(560px, 100%)',
+              borderRadius: 12,
+              border: '1px solid rgba(148, 163, 184, 0.9)',
+              background: 'rgba(255, 255, 255, 0.94)',
+              boxShadow: '0 18px 40px rgba(2, 6, 23, 0.35)',
+              backdropFilter: 'blur(6px)',
+              padding: '14px 16px',
+              color: '#0f172a',
+            }}
+          >
+            <div style={{ fontSize: 17, fontWeight: 700 }}>Keyboard Menu</div>
+            <div style={{ fontSize: 12, color: '#334155', marginTop: 4 }}>
+              Double-press {activationKeysLabel} within {keyboardMenuConfig.activationMaxDelayMs} ms, then press one key:
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '8px 10px', marginTop: 14 }}>
+              {keyboardActionItems.map((action) => (
+                <React.Fragment key={action.id}>
+                  <div style={{
+                    fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#1d4ed8',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: 6,
+                    background: '#eff6ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: 28,
+                  }}>
+                    {action.key}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#0f172a', display: 'flex', alignItems: 'center' }}>
+                    {action.label}
+                  </div>
+                </React.Fragment>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 11, color: '#475569', marginTop: 12 }}>
+              Press Escape or click outside to close this menu.
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes tabBlink {
           0%, 100% { background: #fef3c7; }

@@ -503,6 +503,8 @@ export default function useFileManager({
       toast.error('This file is read-only');
       return;
     }
+    // Keep Save behavior consistent with tab editors: only save when dirty.
+    if (fileContent === originalContent) return;
     try {
       setLoading(true);
       const r = await fetch(`${apiBasePath}/content`, {
@@ -523,7 +525,7 @@ export default function useFileManager({
     } catch {
       toast.error('Error saving file');
     } finally { setLoading(false); }
-  }, [selectedFile, fileContent, apiBasePath, readOnly, toast, releaseFileLock, isReadonlyFile]);
+  }, [selectedFile, fileContent, originalContent, apiBasePath, readOnly, toast, isReadonlyFile]);
 
   // ---- delete file ----
   const deleteFile = useCallback(async (filepath) => {

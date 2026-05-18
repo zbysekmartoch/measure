@@ -61,8 +61,10 @@ const en = {
   czech: 'Czech',
   english: 'English',
   slovak: 'Slovak',
-  showAdvancedUI: 'Show advanced interface',
-  showAdvancedUIDescription: 'Enables access to advanced features',
+  compactButtonsSetting: 'Compact file buttons',
+  compactButtonsSettingDescription: 'Show file action buttons only on hover',
+  doubleShiftActivation: 'Enable double Shift keyboard menu trigger',
+  doubleShiftActivationDescription: 'When enabled, pressing Shift twice quickly opens the keyboard menu',
 
   // Analyses
   analyses: 'Analyses',
@@ -164,6 +166,9 @@ const en = {
 
   // Debug Tab
   runAndDebug: 'Re-run and Debug',
+  loadCurrentOutputHere: 'Load Current Output Here',
+  currentOutputLoaded: 'Current output loaded into selected session',
+  errorLoadingCurrentOutput: 'Error loading current output',
   selectResultToDebug: 'Select a session to view files and debug',
   selectResultPlaceholder: '— Select session —',
   lastCompleted: 'Last completed',
@@ -225,9 +230,5 @@ const en = {
 };
 
 export const translations = {
-  // All language keys point to the same English object.
-  // To re-enable localization, replace cz/sk with translated copies.
-  cz: { ...en },
   en,
-  sk: { ...en },
 };

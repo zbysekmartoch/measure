@@ -15,6 +15,7 @@ import { attachDapProxy } from './debug/dap-proxy.js';
 import { attachChatWs } from './chat/chat-ws.js';
 import { startBackupScheduler, stopBackupScheduler } from './utils/backup-scheduler.js';
 import { performanceMetricsMiddleware } from './utils/performance-metrics.js';
+import { initUserStore, userStoreNeedsSql } from './users/index.js';
 
 const app = express();
 
@@ -135,29 +136,46 @@ app.get('*', (req, res, next) => {
 app.use(notFound);
 app.use(errorHandler);
 
-// Start
-const server = app.listen(config.port, async () => {
-  // Verify DB connection on startup
-  await getPool().query('SELECT 1');
-  console.log(`API listening on http://localhost:${config.port} env=${config.env}`);
+let server = null;
 
-  // Start background backup scheduler
-  startBackupScheduler();
+async function bootstrap() {
+  await initUserStore();
+
+  if (userStoreNeedsSql()) {
+    // Verify SQL connectivity for modes that still depend on SQL-backed users.
+    await getPool().query('SELECT 1');
+  }
+
+  server = app.listen(config.port, () => {
+    console.log(`API listening on http://localhost:${config.port} env=${config.env}`);
+    startBackupScheduler();
+  });
+
+  // Attach DAP WebSocket proxy for debugger
+  attachDapProxy(server);
+
+  // Attach Chat WebSocket server
+  attachChatWs(server);
+}
+
+bootstrap().catch((err) => {
+  console.error('Startup failed:', err);
+  process.exit(1);
 });
-
-// Attach DAP WebSocket proxy for debugger
-attachDapProxy(server);
-
-// Attach Chat WebSocket server
-attachChatWs(server);
 
 // Graceful shutdown
 function shutdown(signal) {
   console.log(`\n${signal} received. Shutting down...`);
   stopBackupScheduler();
+  if (!server) {
+    process.exit(0);
+    return;
+  }
   server.close(async () => {
     try {
-      await getPool().end();
+      if (userStoreNeedsSql()) {
+        await getPool().end();
+      }
     } finally {
       process.exit(0);
     }

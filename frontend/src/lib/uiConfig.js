@@ -77,6 +77,12 @@ export const resultButtons = {
     disabledBg: '#9ca3af',
     label: 'Debug',
   },
+  loadCurrentOutput: {
+    icon: '⬇',
+    bg: '#0f766e',
+    disabledBg: '#9ca3af',
+    label: 'Load Current Output Here',
+  },
   reset: {
     icon: '⏹',
     bg: '#92400e',

@@ -47,12 +47,55 @@ router.get('/health', async (req, res) => {
     let outputsFolderName = 'Outputs';
     let csvPreviewMaxRows = 100;
     let previewMaxFileSize = 1048576; // 1MB default
+    let keyboardMenu = {
+      activationKey: 'Escape',
+      activationKeys: ['Escape'],
+      activationMaxDelayMs: 500,
+      actions: {
+        toggleView: 'V',
+        saveAll: 'S',
+        unlockAll: 'U',
+        openScripts: 'C',
+        openDebug: 'D',
+        openChat: 'X',
+        runSelected: 'R',
+      },
+    };
     try {
       const configJsonPath = path.join(__dirname, '../../config.json');
       const configData = JSON.parse(await fs.readFile(configJsonPath, 'utf8'));
       if (configData.outputsFolderName) outputsFolderName = configData.outputsFolderName;
       if (configData.csvPreviewMaxRows != null) csvPreviewMaxRows = configData.csvPreviewMaxRows;
       if (configData.previewMaxFileSize != null) previewMaxFileSize = configData.previewMaxFileSize;
+      if (configData.keyboardMenu && typeof configData.keyboardMenu === 'object') {
+        const km = configData.keyboardMenu;
+        const actions = km.actions && typeof km.actions === 'object' ? km.actions : {};
+        const defaultActions = keyboardMenu.actions;
+        const parsedDelay = Number(km.activationMaxDelayMs);
+        const activationKeys = Array.isArray(km.activationKeys)
+          ? km.activationKeys.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim())
+          : keyboardMenu.activationKeys;
+        keyboardMenu = {
+          activationKey: typeof km.activationKey === 'string' && km.activationKey.trim()
+            ? km.activationKey.trim()
+            : keyboardMenu.activationKey,
+          activationKeys: activationKeys.length > 0
+            ? [...new Set(activationKeys)]
+            : keyboardMenu.activationKeys,
+          activationMaxDelayMs: Number.isFinite(parsedDelay) && parsedDelay > 0
+            ? parsedDelay
+            : keyboardMenu.activationMaxDelayMs,
+          actions: {
+            toggleView: typeof actions.toggleView === 'string' && actions.toggleView.trim() ? actions.toggleView.trim() : defaultActions.toggleView,
+            saveAll: typeof actions.saveAll === 'string' && actions.saveAll.trim() ? actions.saveAll.trim() : defaultActions.saveAll,
+            unlockAll: typeof actions.unlockAll === 'string' && actions.unlockAll.trim() ? actions.unlockAll.trim() : defaultActions.unlockAll,
+            openScripts: typeof actions.openScripts === 'string' && actions.openScripts.trim() ? actions.openScripts.trim() : defaultActions.openScripts,
+            openDebug: typeof actions.openDebug === 'string' && actions.openDebug.trim() ? actions.openDebug.trim() : defaultActions.openDebug,
+            openChat: typeof actions.openChat === 'string' && actions.openChat.trim() ? actions.openChat.trim() : defaultActions.openChat,
+            runSelected: typeof actions.runSelected === 'string' && actions.runSelected.trim() ? actions.runSelected.trim() : defaultActions.runSelected,
+          },
+        };
+      }
     } catch { /* use default */ }
 
     res.json({ 
@@ -77,6 +120,7 @@ router.get('/health', async (req, res) => {
         outputsFolderName,
         csvPreviewMaxRows,
         previewMaxFileSize,
+        keyboardMenu,
       },
       timestamp: new Date().toISOString()
     });
@@ -108,7 +152,7 @@ router.get('/whatsnew', async (req, res) => {
       })
     );
     res.json(entries);
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Failed to load whatsnew entries' });
   }
 });

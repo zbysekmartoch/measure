@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { query } from '../db.js';
+import { getUserStore } from '../users/index.js';
 import {
   acquireLock,
   releaseLock,
@@ -28,13 +28,10 @@ const router = Router();
 
 /** Helper: get user info from DB by userId. */
 async function getUserInfo(userId) {
-  const rows = await query(
-    'SELECT id, first_name, last_name, email FROM usr WHERE id = ?',
-    [userId],
-  );
-  if (!rows.length) return { id: userId, email: '', firstName: '', lastName: '' };
-  const r = rows[0];
-  return { id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name };
+  const userStore = getUserStore();
+  const user = await userStore.findById(userId);
+  if (!user) return { id: userId, email: '', firstName: '', lastName: '' };
+  return { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName };
 }
 
 /** Read lab.json to check ownership. Returns ownerId or null. */

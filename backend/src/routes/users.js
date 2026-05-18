@@ -1,18 +1,17 @@
 import { Router } from 'express';
-import { query } from '../db.js';
+import { getUserStore } from '../users/index.js';
 
 const router = Router();
 
 router.get('/', async (req, res, next) => {
   try {
-    const rows = await query(
-      'SELECT id, first_name, last_name, email FROM usr ORDER BY id'
-    );
+    const userStore = getUserStore();
+    const rows = await userStore.list();
     const items = rows.map(r => ({
       id: r.id,
-      firstName: r.first_name,
-      lastName: r.last_name,
-      email: r.email
+      firstName: r.firstName,
+      lastName: r.lastName,
+      email: r.email,
     }));
     res.json({ items });
   } catch (e) {

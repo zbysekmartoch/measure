@@ -24,8 +24,8 @@
 import { WebSocketServer } from 'ws';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
-import { query } from '../db.js';
 import { addMessage, editMessage, deleteMessage, getMessages, toggleReaction } from './chat-store.js';
+import { getUserStore } from '../users/index.js';
 
 /** Map<labId, Set<{ ws, userId, userName }>> */
 const rooms = new Map();
@@ -144,9 +144,10 @@ export function attachChatWs(server) {
 
     // Look up user name
     try {
-      const rows = await query('SELECT first_name, last_name FROM usr WHERE id = ?', [userId]);
-      if (rows.length) {
-        userName = `${rows[0].first_name} ${rows[0].last_name}`;
+      const userStore = getUserStore();
+      const user = await userStore.findById(userId);
+      if (user) {
+        userName = `${user.firstName} ${user.lastName}`;
       }
       wsLog(`[chat-ws] User resolved: userId=${userId} userName="${userName}"`);
     } catch (err) {

@@ -8,7 +8,7 @@ import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth, copy
 import { isReadonlyPath } from '../utils/file-locks.js';
 import { getDebugStatus, endDebugSession } from '../debug/debug-engine.js';
 import { startWorkflowRun, abortWorkflowRun } from '../workflow/workflow-runner.js';
-import { query } from '../db.js';
+import { getUserStore } from '../users/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -346,6 +346,7 @@ router.post('/:id/clone', async (req, res, next) => {
 // Fetch lab metadata (owner/shared access). Also records a visit.
 router.get('/:id', async (req, res, next) => {
   try {
+    const userStore = getUserStore();
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
     if (!hasAccess(lab, req.userId)) {
@@ -355,10 +356,9 @@ router.get('/:id', async (req, res, next) => {
     await fs.mkdir(getLabCurrentOutputRoot(req.params.id), { recursive: true });
     // Record visit (best-effort, non-blocking)
     try {
-      const userRows = await query('SELECT id, first_name, last_name, email FROM usr WHERE id = ?', [req.userId]);
-      if (userRows.length > 0) {
-        const u = userRows[0];
-        await recordVisit(req.params.id, { id: u.id, email: u.email, firstName: u.first_name, lastName: u.last_name });
+      const user = await userStore.findById(req.userId);
+      if (user) {
+        await recordVisit(req.params.id, { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName });
       }
     } catch { /* visit logging is best-effort */ }
     res.json(lab);
@@ -1321,12 +1321,13 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       workflowSteps = [workflowFile];
     }
 
-    // Lookup user info (firstName, lastName) from the database
+    // Lookup user info for workflow metadata (author field)
     let userName = '';
     try {
-      const rows = await query('SELECT first_name, last_name FROM usr WHERE id = ?', [req.userId]);
-      if (rows.length > 0) {
-        userName = `${rows[0].first_name} ${rows[0].last_name}`;
+      const userStore = getUserStore();
+      const user = await userStore.findById(req.userId);
+      if (user) {
+        userName = `${user.firstName} ${user.lastName}`;
       }
     } catch { /* ignore */ }
 
@@ -1859,6 +1860,49 @@ router.post('/:id/results/:resultId/publish', async (req, res, next) => {
     res.json({ success: true, message: `Published "${itemPath}" to current_output` });
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'File or folder not found' });
+    next(e);
+  }
+});
+
+/**
+ * POST /api/v1/labs/:id/results/:resultId/load-current-output
+ *
+ * Copies all items from lab current_output (scripts/Outputs) into
+ * the selected result directory. Existing files are overwritten.
+ */
+router.post('/:id/results/:resultId/load-current-output', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const resultsRoot = getLabResultsRoot(req.params.id);
+    const resultDir = getSecurePath(resultsRoot, req.params.resultId);
+    if (!resultDir) return res.status(400).json({ error: 'Invalid result id' });
+
+    const resultStat = await fs.stat(resultDir);
+    if (!resultStat.isDirectory()) return res.status(400).json({ error: 'Result is not a directory' });
+
+    const outputRoot = getLabCurrentOutputRoot(req.params.id);
+    await fs.mkdir(outputRoot, { recursive: true });
+
+    const outputEntries = await fs.readdir(outputRoot, { withFileTypes: true });
+    for (const entry of outputEntries) {
+      await copyRecursive(
+        path.join(outputRoot, entry.name),
+        path.join(resultDir, entry.name),
+      );
+    }
+
+    res.json({
+      success: true,
+      copiedCount: outputEntries.length,
+      copied: outputEntries.map((entry) => entry.name),
+    });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Result not found' });
     next(e);
   }
 });

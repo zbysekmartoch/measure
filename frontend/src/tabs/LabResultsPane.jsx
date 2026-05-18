@@ -40,6 +40,7 @@ export default function LabResultsPane({
   debug,
   debugVisible = false,
   runDebugRef,
+  runResultRef,
   onAnalyze,
   appConfig,
   saveAllRef,
@@ -372,6 +373,31 @@ export default function LabResultsPane({
     }
   }, [selectedResult, lab.id, t, toast, loadResults, stopOnFailure, debug, saveAllRef]);
 
+  // ---- Load current_output into selected result ----
+  const handleLoadCurrentOutput = useCallback(async () => {
+    if (!selectedResult) return;
+    try {
+      const data = await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResult.id}/load-current-output`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      setRefreshTrigger((p) => p + 1);
+      refreshOpenFileTabs();
+
+      const copiedCount = Number.isFinite(data?.copiedCount) ? data.copiedCount : null;
+      if (copiedCount === 0) {
+        toast.success(`${t('currentOutputLoaded') || 'Current output loaded into selected session'} (0 items)`);
+      } else if (copiedCount != null) {
+        toast.success(`${t('currentOutputLoaded') || 'Current output loaded into selected session'} (${copiedCount} ${copiedCount === 1 ? 'item' : 'items'})`);
+      } else {
+        toast.success(t('currentOutputLoaded') || 'Current output loaded into selected session');
+      }
+    } catch (err) {
+      toast.error(`${t('errorLoadingCurrentOutput') || 'Error loading current output'}: ${err.message || err}`);
+    }
+  }, [selectedResult, lab.id, t, toast, refreshOpenFileTabs]);
+
   // ---- Reset (abort) a running/pending result ----
   const handleReset = useCallback(async () => {
     if (!selectedResult) return;
@@ -401,6 +427,12 @@ export default function LabResultsPane({
     if (runDebugRef) runDebugRef.current = handleRunDebug;
     return () => { if (runDebugRef) runDebugRef.current = null; };
   }, [handleRunDebug, runDebugRef]);
+
+  // Expose plain "Run" (without forcing debug) for keyboard menu action.
+  useEffect(() => {
+    if (runResultRef) runResultRef.current = handleRun;
+    return () => { if (runResultRef) runResultRef.current = null; };
+  }, [handleRun, runResultRef]);
 
   // ---- Formatting helpers ----
   const formatDT = (s) => {
@@ -565,6 +597,26 @@ export default function LabResultsPane({
               title="Debug workflow"
             >
               {rbtn.debug.icon} {rbtn.debug.label}
+            </button>
+
+            {/* Load current output into selected result */}
+            <button
+              onClick={handleLoadCurrentOutput}
+              disabled={!canRun}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                background: canRun ? rbtn.loadCurrentOutput.bg : rbtn.loadCurrentOutput.disabledBg,
+                color: 'white', border: 'none', borderRadius: 6,
+                cursor: canRun ? 'pointer' : 'not-allowed',
+                fontWeight: 500, fontSize: 13,
+                boxShadow: canRun ? shadow.normal : 'none',
+                transition: 'box-shadow 0.15s, transform 0.15s',
+              }}
+              onMouseEnter={(e) => { if (canRun) { e.currentTarget.style.boxShadow = shadow.hover; e.currentTarget.style.transform = 'translateY(-1px)'; } }}
+              onMouseLeave={(e) => { e.currentTarget.style.boxShadow = canRun ? shadow.normal : 'none'; e.currentTarget.style.transform = ''; }}
+              title={t('loadCurrentOutputHere') || rbtn.loadCurrentOutput.label}
+            >
+              {rbtn.loadCurrentOutput.icon} {t('loadCurrentOutputHere') || rbtn.loadCurrentOutput.label}
             </button>
           </>
         )}

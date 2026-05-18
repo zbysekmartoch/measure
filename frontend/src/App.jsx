@@ -13,7 +13,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
-import { SettingsProvider } from './context/SettingsContext';
+import { SettingsProvider, useSettings } from './context/SettingsContext';
 import AuthPage from './components/AuthPage';
 import { ToastProvider, useToast } from './components/Toast';
 import { FileClipboardProvider } from './components/file-manager/ClipboardContext.jsx';
@@ -64,6 +64,7 @@ function AppContent() {
   const [tab, setTab] = useState('mine');
   const [healthInfo, setHealthInfo] = useState(null);
   const { user, logout } = useAuth();
+  const { focusedMode } = useSettings();
   const { t } = useLanguage();
   const toast = useToast();
 
@@ -290,6 +291,8 @@ function AppContent() {
     })
     : [];
   const showList = tab === 'mine' || tab === 'shared';
+  const isLabTabActive = tab.startsWith('lab:');
+  const isFocusedLabView = focusedMode && isLabTabActive;
 
   // Reusable tab button component
   const TabButton = ({ id, children, style: extraStyle }) => (
@@ -318,179 +321,194 @@ function AppContent() {
   );
 
   return (
-    <div style={{ height: '100vh', width: '100vw', boxSizing: 'border-box', padding: 12, background: '#fff' }}>
+    <div style={{
+      height: '100vh',
+      width: '100vw',
+      boxSizing: 'border-box',
+      padding: isFocusedLabView ? 0 : 12,
+      background: '#fff',
+    }}>
       {/* Global lock request notifications */}
       <LockRequestNotifications
         lockRequests={globalLockRequests}
         onRelease={handleLockRelease}
         onDismiss={handleLockDismiss}
       />
-      {/* Header with app title, health info, and user controls */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <img
-          src="/measure-logo.png"
-          alt={t('appTitle')}
-          style={{ height: 28, width: 'auto', display: 'block' }}
-        />
-          {healthInfo && (
-            <div style={{ fontSize: 11, color: '#6b7280', display: 'flex', gap: 12 }}>
-              <span title="Backend Server">
-                🖥️ {healthInfo.server?.host}:{healthInfo.server?.port}
-              </span>
-              <span title="Database">
-                🗄️ {healthInfo.database?.host} / {healthInfo.database?.name}
-              </span>
-              <span title="Version">
-                📦 v{healthInfo.version}
-              </span>
+      {!isFocusedLabView && (
+        <>
+          {/* Header with app title, health info, and user controls */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <img
+              src="/measure-logo.png"
+              alt={t('appTitle')}
+              style={{ height: 28, width: 'auto', display: 'block' }}
+            />
+              {healthInfo && (
+                <div style={{ fontSize: 11, color: '#6b7280', display: 'flex', gap: 12 }}>
+                  <span title="Backend Server">
+                    🖥️ {healthInfo.server?.host}:{healthInfo.server?.port}
+                  </span>
+                  <span title="Database">
+                    🗄️ {healthInfo.database?.host} / {healthInfo.database?.name}
+                  </span>
+                  <span title="Version">
+                    📦 v{healthInfo.version}
+                  </span>
+                </div>
+              )}        
+            
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>{t('loggedInAs')} {user.firstName} {user.lastName}</span>
+                {openLabs.length > 0 && (
+                  <button
+                    className="btn"
+                    title="Save all open files and release all file locks"
+                    style={{background: '#059669', color: '#fff', cursor: 'pointer' }}
+                    onClick={async () => {
+                      // Release all my locks for each open lab
+                      const token = localStorage.getItem('authToken');
+                      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+                      const released = [];
+                      for (const lab of openLabs) {
+                        for (const sub of ['scripts', 'results']) {
+                          try {
+                            const r = await fetch('/api/v1/locks/release-all-mine', {
+                              method: 'POST', headers,
+                              body: JSON.stringify({ apiBasePath: `/api/v1/labs/${lab.id}/${sub}` }),
+                            });
+                            const data = await r.json();
+                            if (data.released?.length) released.push(...data.released);
+                          } catch { /* ignore */ }
+                        }
+                      }
+                      toast.success(released.length > 0
+                        ? `Unlocked ${released.length} file${released.length > 1 ? 's' : ''}`
+                        : 'No locks to release');
+                    }}
+                  >
+                    Save All &amp; Unlock
+                  </button>
+                )}
+                <button
+                  className="btn btn-logout"
+                  onClick={logout}
+                >
+                  {t('logout')}
+                </button>
+              </div>
             </div>
-          )}        
-        
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>{t('loggedInAs')} {user.firstName} {user.lastName}</span>
-            {openLabs.length > 0 && (
-              <button
-                className="btn"
-                title="Save all open files and release all file locks"
-                style={{background: '#059669', color: '#fff', cursor: 'pointer' }}
-                onClick={async () => {
-                  // Release all my locks for each open lab
-                  const token = localStorage.getItem('authToken');
-                  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-                  const released = [];
-                  for (const lab of openLabs) {
-                    for (const sub of ['scripts', 'results']) {
-                      try {
-                        const r = await fetch('/api/v1/locks/release-all-mine', {
-                          method: 'POST', headers,
-                          body: JSON.stringify({ apiBasePath: `/api/v1/labs/${lab.id}/${sub}` }),
-                        });
-                        const data = await r.json();
-                        if (data.released?.length) released.push(...data.released);
-                      } catch { /* ignore */ }
-                    }
-                  }
-                  toast.success(released.length > 0
-                    ? `Unlocked ${released.length} file${released.length > 1 ? 's' : ''}`
-                    : 'No locks to release');
-                }}
-              >
-                Save All &amp; Unlock
-              </button>
-            )}
-            <button
-              className="btn btn-logout"
-              onClick={logout}
-            >
-              {t('logout')}
-            </button>
           </div>
-        </div>
-      </div>
+          {/* Tab navigation bar */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <TabButton id="mine">My labs</TabButton>
+            <TabButton id="shared">Shared labs</TabButton>
 
-      {/* Tab navigation bar */}
-      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <TabButton id="mine">My labs</TabButton>
-        <TabButton id="shared">Shared labs</TabButton>
+            {/* Open lab workspace tabs */}
+            {openLabs.map((lab) => {
+              const isActive = tab === `lab:${lab.id}`;
+              return (
+                <span
+                  key={lab.id}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'stretch',
+                    marginBottom: isActive ? -1 : 0,
+                    zIndex: isActive ? 1 : 0,
+                  }}
+                >
+                  <button
+                    onClick={() => setTab(`lab:${lab.id}`)}
+                    title={lab.name}
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid #012345',
+                      borderBottom: 'none',
+                      borderRight: 'none',
+                      borderRadius: '8px 0 0 0',
+                      background: isActive ? '#fff' : '#f3f4f6',
+                      fontWeight: isActive ? 600 : 400,
+                      color: '#111827',
+                      maxWidth: 180,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      cursor: 'pointer',
+                      fontSize: 'inherit',
+                      outline: 'none',
+                    }}
+                  >
+                    🔬 {lab.name}
+                  </button>
+                  <button
+                    onClick={() => popOutLab(lab.id)}
+                    title="Open in a separate window"
+                    style={{
+                      padding: '4px 6px',
+                      border: '1px solid #012345',
+                      borderBottom: 'none',
+                      borderLeft: 'none',
+                      borderRight: 'none',
+                      borderRadius: 0,
+                      background: isActive ? '#fff' : '#f3f4f6',
+                      cursor: 'pointer',
+                      color: tabIcons.popOut.color,
+                      fontSize: 11,
+                      display: 'flex',
+                      alignItems: 'center',
+                      outline: 'none',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = tabIcons.popOut.hoverColor; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = tabIcons.popOut.color; }}
+                  >
+                    {icons.popOut}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (hasDirtyFilesForLab(lab.id) && !confirm(`Lab "${lab.name}" has unsaved changes. Close anyway?`)) return;
+                      closeLab(lab.id);
+                    }}
+                    title="Close"
+                    style={{
+                      padding: '4px 6px',
+                      border: '1px solid #012345',
+                      borderBottom: 'none',
+                      borderLeft: 'none',
+                      borderRadius: '0 8px 0 0',
+                      background: isActive ? '#fff' : '#f3f4f6',
+                      cursor: 'pointer',
+                      color: tabIcons.close.color,
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      outline: 'none',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = tabIcons.close.hoverColor; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = tabIcons.close.color; }}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
 
-        {/* Open lab workspace tabs */}
-        {openLabs.map((lab) => {
-          const isActive = tab === `lab:${lab.id}`;
-          return (
-            <span
-              key={lab.id}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'stretch',
-                marginBottom: isActive ? -1 : 0,
-                zIndex: isActive ? 1 : 0,
-              }}
-            >
-              <button
-                onClick={() => setTab(`lab:${lab.id}`)}
-                title={lab.name}
-                style={{
-                  padding: '8px 12px',
-                  border: '1px solid #012345',
-                  borderBottom: 'none',
-                  borderRight: 'none',
-                  borderRadius: '8px 0 0 0',
-                  background: isActive ? '#fff' : '#f3f4f6',
-                  fontWeight: isActive ? 600 : 400,
-                  color: '#111827',
-                  maxWidth: 180,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  cursor: 'pointer',
-                  fontSize: 'inherit',
-                  outline: 'none',
-                }}
-              >
-                🔬 {lab.name}
-              </button>
-              <button
-                onClick={() => popOutLab(lab.id)}
-                title="Open in a separate window"
-                style={{
-                  padding: '4px 6px',
-                  border: '1px solid #012345',
-                  borderBottom: 'none',
-                  borderLeft: 'none',
-                  borderRight: 'none',
-                  borderRadius: 0,
-                  background: isActive ? '#fff' : '#f3f4f6',
-                  cursor: 'pointer',
-                  color: tabIcons.popOut.color,
-                  fontSize: 11,
-                  display: 'flex',
-                  alignItems: 'center',
-                  outline: 'none',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = tabIcons.popOut.hoverColor; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = tabIcons.popOut.color; }}
-              >
-                {icons.popOut}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (hasDirtyFilesForLab(lab.id) && !confirm(`Lab "${lab.name}" has unsaved changes. Close anyway?`)) return;
-                  closeLab(lab.id);
-                }}
-                title="Close"
-                style={{
-                  padding: '4px 6px',
-                  border: '1px solid #012345',
-                  borderBottom: 'none',
-                  borderLeft: 'none',
-                  borderRadius: '0 8px 0 0',
-                  background: isActive ? '#fff' : '#f3f4f6',
-                  cursor: 'pointer',
-                  color: tabIcons.close.color,
-                  fontSize: 13,
-                  display: 'flex',
-                  alignItems: 'center',
-                  outline: 'none',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = tabIcons.close.hoverColor; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = tabIcons.close.color; }}
-              >
-                ×
-              </button>
-            </span>
-          );
-        })}
-
-        <div style={{ marginLeft: 'auto', display: 'flex' }}>
-          <TabButton style={{marginRight:4}} id="performance">{t('tabPerformance') || 'Performance'}</TabButton>
-          <TabButton id="settings">{t('tabSettings')}</TabButton>
-        </div>
-      </div>
+            <div style={{ marginLeft: 'auto', display: 'flex' }}>
+              <TabButton style={{marginRight:4}} id="performance">{t('tabPerformance') || 'Performance'}</TabButton>
+              <TabButton id="settings">{t('tabSettings')}</TabButton>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Content area */}
-      <div style={{ border: '1px solid #012345', padding: 3, background: '#fff', height: 'calc(100vh - 100px)', position: 'relative' }}>
+      <div style={{
+        border: isFocusedLabView ? 'none' : '1px solid #012345',
+        padding: isFocusedLabView ? 0 : 3,
+        background: '#fff',
+        height: isFocusedLabView ? '100vh' : 'calc(100vh - 100px)',
+        position: 'relative',
+      }}>
 
         {/* My labs / Shared labs browser */}
         {showList && (
@@ -689,7 +707,7 @@ function AppContent() {
             style={{
               display: tab === `lab:${lab.id}` ? 'block' : 'none',
               height: '100%',
-              padding: 4,
+              padding: isFocusedLabView ? 0 : 4,
             }}
           >
             <LabWorkspaceTab

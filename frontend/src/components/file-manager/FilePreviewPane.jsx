@@ -21,6 +21,7 @@ export default function FilePreviewPane({
   pdfBlobUrl,
   imageBlobUrl,
   isEditing,
+  isDirty = false,
   loading,
   readOnly,
   editorTheme,
@@ -195,8 +196,18 @@ export default function FilePreviewPane({
               <button
                 className="btn"
                 onClick={onSave}
-                disabled={loading}
-                style={{ padding: '4px 10px', background: fpBtn.save.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+                disabled={loading || !isDirty}
+                style={{
+                  padding: '4px 10px',
+                  background: fpBtn.save.bg,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: loading || !isDirty ? 'not-allowed' : 'pointer',
+                  opacity: loading || !isDirty ? 0.65 : 1,
+                  fontSize: 12,
+                  boxShadow: shadow.small,
+                }}
               >
                 {fpBtn.save.icon} {fpBtn.save.label}
               </button>
@@ -408,7 +419,7 @@ export default function FilePreviewPane({
               theme={editorTheme}
               readOnly={editorReadOnly}
               onChange={editorReadOnly ? undefined : (value) => onContentChange(value || '')}
-              onSave={onSave}
+              onSave={isDirty ? onSave : undefined}
             />
           </div>
           )}

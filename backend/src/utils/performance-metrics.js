@@ -2,7 +2,7 @@ import os from 'os';
 import { performance as nodePerformance } from 'perf_hooks';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
-import { query } from '../db.js';
+import { getUserStore } from '../users/index.js';
 
 const RATE_WINDOW_MS = 60_000;
 const USER_ACTIVITY_WINDOW_MS = Number(process.env.PERF_ACTIVE_USER_TTL_MS || 30_000);
@@ -177,12 +177,12 @@ function ensureUserNameLoaded(userId) {
   if (userProfileCache.has(id) || userProfilePending.has(id)) return;
   userProfilePending.add(id);
 
-  query('SELECT first_name, last_name FROM usr WHERE id = ?', [id])
-    .then((rows) => {
-      if (rows.length > 0) {
-        const row = rows[0];
-        const first = String(row.first_name || '').trim();
-        const last = String(row.last_name || '').trim();
+  const userStore = getUserStore();
+  userStore.findById(id)
+    .then((user) => {
+      if (user) {
+        const first = String(user.firstName || '').trim();
+        const last = String(user.lastName || '').trim();
         const userName = `${first} ${last}`.trim() || `User #${id}`;
         userProfileCache.set(id, userName);
       } else {

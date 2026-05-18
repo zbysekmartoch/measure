@@ -55,6 +55,19 @@
     "defaultDepth": 0,
     "hiddenFilePrefixes": [".","_","node_modules"]
   },
+  "keyboardMenu": {
+    "activationKey": "Escape",
+    "activationMaxDelayMs": 500,
+    "actions": {
+      "toggleView": "V",
+      "saveAll": "S",
+      "unlockAll": "U",
+      "openScripts": "C",
+      "openDebug": "D",
+      "openChat": "X",
+      "runSelected": "R"
+    }
+  },
   "outputsFolderName": "Outputs",
   "csvPreviewMaxRows": 100,
   "previewMaxFileSize": 1048576

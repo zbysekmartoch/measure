@@ -56,6 +56,7 @@ export default function FileManagerEditor({
     previewMaxFileSize,
     pollingEnabled,
   });
+  const isCurrentFileDirty = fm.fileContent !== fm.originalContent;
 
   const handleThemeChange = useCallback((theme) => {
     setEditorTheme(theme);
@@ -81,17 +82,50 @@ export default function FileManagerEditor({
 <body><div id="c"><div id="t"><span>📄 ${fm.selectedFile}</span><span class="b">${getLanguageFromFilename(fm.selectedFile)}</span>
 <select id="ts"><option value="vs">Light</option><option value="vs-dark" selected>Dark</option><option value="hc-black">High Contrast</option></select>
 ${!readOnly ? '<button class="s" id="sv">💾 Save</button>' : ''}
+<span id="st" style="margin-left:auto;color:#9ca3af;font-size:12px;"></span>
 <button class="x" onclick="window.close()">✕ Close</button></div><div id="e"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"><` + `/script>
 <script>require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'}});
-require(['vs/editor/editor.main'],function(){const ed=monaco.editor.create(document.getElementById('e'),{
-value:${JSON.stringify(fm.fileContent)},language:'${getLanguageFromFilename(fm.selectedFile)}',
-theme:'vs-dark',fontSize:13,minimap:{enabled:true},automaticLayout:true,wordWrap:'on',tabSize:2,readOnly:${readOnly}});
-document.getElementById('ts').addEventListener('change',e=>monaco.editor.setTheme(e.target.value));
-${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{try{const r=await fetch('${apiBasePath}/content',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer ${localStorage.getItem('authToken')}'},body:JSON.stringify({file:'${fm.selectedFile}',content:ed.getValue()})});if(!r.ok)throw 0;alert('Saved!');}catch{alert('Error saving');}});` : ''}});<` + `/script></body></html>`;
+require(['vs/editor/editor.main'],function(){
+const filePath=${JSON.stringify(fm.selectedFile)};
+const apiBase=${JSON.stringify(apiBasePath)};
+const authToken=${JSON.stringify(localStorage.getItem('authToken') || '')};
+const initialContent=${JSON.stringify(fm.fileContent)};
+let originalContent=initialContent;
+const saveBtn=document.getElementById('sv');
+const statusEl=document.getElementById('st');
+const setStatus=(text,color)=>{if(!statusEl)return;statusEl.textContent=text||'';statusEl.style.color=color||'#9ca3af';};
+const ed=monaco.editor.create(document.getElementById('e'),{
+value:initialContent,language:'${getLanguageFromFilename(fm.selectedFile)}',
+theme:${JSON.stringify(editorTheme || 'vs-dark')},fontSize:13,minimap:{enabled:true},automaticLayout:true,wordWrap:'on',tabSize:2,readOnly:${readOnly}});
+const themeSelect=document.getElementById('ts');
+if(themeSelect){themeSelect.value=${JSON.stringify(editorTheme || 'vs-dark')};themeSelect.addEventListener('change',e=>monaco.editor.setTheme(e.target.value));}
+const updateDirtyState=()=>{if(!saveBtn)return;const dirty=ed.getValue()!==originalContent;saveBtn.disabled=!dirty;saveBtn.style.opacity=dirty?'1':'0.6';saveBtn.style.cursor=dirty?'pointer':'not-allowed';};
+if(saveBtn){
+saveBtn.addEventListener('click',async()=>{
+const nextContent=ed.getValue();
+if(nextContent===originalContent)return;
+try{
+saveBtn.disabled=true;
+setStatus('Saving...','#93c5fd');
+const r=await fetch(apiBase+'/content',{method:'PUT',headers:{'Content-Type':'application/json','Authorization':authToken?('Bearer '+authToken):''},body:JSON.stringify({file:filePath,content:nextContent})});
+if(!r.ok)throw 0;
+originalContent=nextContent;
+setStatus('Saved','#22c55e');
+}catch{
+setStatus('Save failed','#f87171');
+}finally{
+updateDirtyState();
+}
+});
+}
+ed.onDidChangeModelContent(()=>{updateDirtyState();});
+ed.addAction({id:'popup-save',label:'Save',keybindings:[monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS],run:()=>{if(saveBtn&&!saveBtn.disabled)saveBtn.click();}});
+updateDirtyState();
+});<` + `/script></body></html>`;
     w.document.write(html);
     w.document.close();
-  }, [fm.selectedFile, fm.selectedFileInfo, fm.fileContent, apiBasePath, readOnly]);
+  }, [fm.selectedFile, fm.selectedFileInfo, fm.fileContent, apiBasePath, readOnly, editorTheme]);
 
   // ---- Splitter drag handling ----
   const onSplitterMouseDown = useCallback((e) => {
@@ -242,6 +276,7 @@ ${!readOnly ? `document.getElementById('sv').addEventListener('click',async()=>{
           pdfBlobUrl={fm.pdfBlobUrl}
           imageBlobUrl={fm.imageBlobUrl}
           isEditing={fm.isEditing}
+          isDirty={isCurrentFileDirty}
           loading={fm.loading}
           readOnly={readOnly}
           editorTheme={editorTheme}
