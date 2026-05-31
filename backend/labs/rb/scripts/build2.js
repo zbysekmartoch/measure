@@ -41,7 +41,7 @@ const ALLOWED_TOKENS = new Set([
   "HH", "mm", "ss",
   "ccc", "cccc",     // den v týdnu (krátký / dlouhý)
   "LLL", "LLLL"      // měsíc textem (krátký / dlouhý)
-]);
+]); 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

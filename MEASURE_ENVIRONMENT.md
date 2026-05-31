@@ -1,82 +1,82 @@
 # Measure Environment
 
-Tento dokument popisuje, jak v Measure funguje kaskádová konfigurace běhového prostředí.
+This document describes how cascading runtime environment configuration works in Measure.
 
-## 1. Přehled
+## 1. Overview
 
-Measure používá dvě vrstvy konfigurace:
+Measure uses two configuration layers:
 
-1. Zdrojové soubory `environment.json`
-2. Vygenerovaný runtime soubor (`runtime.env` nebo `*.env`)
+1. Source `environment.json` files
+2. A generated runtime file (`runtime.env` or `*.env`)
 
-Skript při běhu nečte přímo všechny zdrojové soubory. Dostane už hotový runtime JSON jako druhý argument.
+At runtime, a script does not read all source files directly. It receives a ready-to-use runtime JSON as the second argument.
 
-## 2. Kde se runtime soubor vytváří
+## 2. Where the runtime file is created
 
-### 2.1 Spuštění ze záložky Scripts (`Run`)
+### 2.1 Running from the Scripts tab (`Run`)
 
-Při spuštění `.workflow` nebo jednoho skriptu se vedle spouštěného souboru vytvoří:
+When running a `.workflow` or a single script, a file is created next to the executed file:
 
 - `full_analysis.workflow.env`
 - `draw_plots.py.env`
 - `prepare_data.js.env`
 
-Soubor se při každém spuštění přepíše.
+The file is overwritten on every run.
 
 ### 2.2 Create debugging session
 
-Při vytvoření debug session se v resultu vytvoří:
+When creating a debug session, the following file is created in the result:
 
 - `results/<id>/runtime.env`
 
-Soubor se použije při následném spuštění resultu (Run/Debug z Results).
-V nově vytvořených debug results se už nevytváří `results/<id>/environment.json`.
+This file is used for subsequent result execution (Run/Debug from Results).
+In newly created debug results, `results/<id>/environment.json` is no longer created.
 
-## 3. Odkud se runtime obsah bere
+## 3. Where runtime content comes from
 
-Runtime JSON vznikne hlubokým merge všech `environment.json` po cestě:
+The runtime JSON is created by deep-merging all `environment.json` files along the path:
 
-- od kořene `backend/labs`
-- až do složky, kde leží spouštěný soubor
+- from the root `backend/labs`
+- down to the folder where the executed file is located
 
-Příklad pro spuštění souboru:
+Example for running this file:
 
 - `backend/labs/4/scripts/analyzy/full_analysis.workflow`
 
-Systém postupně vezme (pokud existují):
+The system takes these files in order (if they exist):
 
 1. `backend/labs/environment.json`
 2. `backend/labs/4/environment.json`
 3. `backend/labs/4/scripts/environment.json`
 4. `backend/labs/4/scripts/analyzy/environment.json`
 
-A sloučí je do výsledného runtime JSON.
+It then merges them into the final runtime JSON.
 
-## 4. Pravidla merge
+## 4. Merge rules
 
-### 4.1 Objekty
+### 4.1 Objects
 
-Objekty se mergují rekurzivně.
+Objects are merged recursively.
 
-Pokud má stejný klíč více souborů, bližší soubor (níž ve stromu) má prioritu.
+If the same key appears in multiple files, the closer file (deeper in the tree) has priority.
 
-### 4.2 Pole
+### 4.2 Arrays
 
-Pokud je stejný klíč pole v obou vrstvách, pole se spojí (`concat`).
+If the same key is an array in both layers, the arrays are combined (`concat`).
 
-### 4.3 Skalární hodnoty
+### 4.3 Scalar values
 
-String/number/boolean/null se přepisují hodnotou z bližší vrstvy.
+String/number/boolean/null values are overwritten by the value from the closer layer.
 
-## 5. Co skript dostane v argumentech
+## 5. What a script receives in arguments
 
-Každý skript spuštěný workflow enginem dostává:
+Every script executed by the workflow engine receives:
 
 1. `RESULT_ROOT` (argument 1)
 2. `RUNTIME_ENV_PATH` (argument 2)
 3. `LAB_ROOT` (argument 3)
 
-Python příklad:
+Python example:
 
 ```python
 import sys
@@ -86,7 +86,7 @@ runtime_env_path = sys.argv[2]
 lab_root = sys.argv[3]
 ```
 
-Node.js příklad:
+Node.js example:
 
 ```js
 const resultRoot = process.argv[2];
@@ -94,7 +94,7 @@ const runtimeEnvPath = process.argv[3];
 const labRoot = process.argv[4];
 ```
 
-R příklad:
+R example:
 
 ```r
 args <- commandArgs(trailingOnly = TRUE)
@@ -103,56 +103,54 @@ runtime_env_path <- args[2]
 lab_root <- args[3]
 ```
 
-## 6. Klíč `run` v runtime env
+## 6. `run` key in runtime env
 
-Po vytvoření debug session i po produkčním spuštění (`Run`) obsahuje runtime env klíč `run`.
+After creating a debug session and after production execution (`Run`), the runtime env contains the `run` key.
 
-`run` obsahuje mimo jiné:
+`run` contains, among other fields:
 
-- `run.workflow` (zdroj kroků, ze kterého se workflow opravdu spouští)
-- `run.mode` (`debug` nebo `production`)
+- `run.workflow` (the source of steps the workflow is actually executed from)
+- `run.mode` (`debug` or `production`)
 - `run.workflowFile`, `run.name`, `run.author`
-- interní metadata (`_usr_id`, `_workflowRoot`, `_scriptsRoot`, `_created`)
+- internal metadata (`_usr_id`, `_workflowRoot`, `_scriptsRoot`, `_created`)
 
-Spouštění workflow používá `run.workflow` z runtime env souboru.
+Workflow execution uses `run.workflow` from the runtime env file.
 
-## 7. Doporučená struktura konfigurace
+## 7. Recommended configuration structure
 
-Typická praxe:
+Typical practice:
 
-- `backend/labs/<lab>/scripts/environment.json`: společné nastavení celé laboratoře
-- `backend/labs/<lab>/scripts/<workflow-dir>/environment.json`: přepsání pro konkrétní workflow skupinu
-- `backend/labs/<lab>/scripts/<workflow-dir>/<nested>/environment.json`: jemné doladění
+- `backend/labs/<lab>/scripts/environment.json`: shared settings for the entire lab
+- `backend/labs/<lab>/scripts/<workflow-dir>/environment.json`: overrides for a specific workflow group
+- `backend/labs/<lab>/scripts/<workflow-dir>/<nested>/environment.json`: fine tuning
 
-Tak lze držet globální defaulty nahoře a specifika níž.
+This lets you keep global defaults higher and specific settings lower.
 
-## 8. Vztah k result `environment.json`
+## 8. Relationship to result `environment.json`
 
-U nových debug results se `environment.json` už nevytváří.
+For new debug results, `environment.json` is no longer created.
 
-Legacy/historické výsledky mohou `environment.json` ještě obsahovat.
+Legacy/historical results may still contain `environment.json`.
 
-Nové runtime chování ale používá pro běh vždy runtime soubor:
+However, the new runtime behavior always uses a runtime file for execution:
 
-- `results/<id>/runtime.env` pro result běhy
-- `*.env` vedle spouštěného souboru pro Scripts Run
+- `results/<id>/runtime.env` for result runs
+- `*.env` next to the executed file for Scripts Run
 
-## 9. Časté chyby
+## 9. Common mistakes
 
-- Neplatný JSON v některém `environment.json`.
-	Runtime soubor se nevytvoří a běh skončí chybou.
+- Invalid JSON in one of the `environment.json` files.
+  The runtime file is not created and execution ends with an error.
 
+- Expecting arrays to be overwritten.
+  Arrays are not overwritten; they are concatenated.
 
-- Očekávání, že pole se přepisují.
-	Pole se nepřepisují, ale concatenují.
+- Configuration stored too high in the tree.
+  If a value is general, put it higher; if it should apply only to a specific workflow, place it closer to the executed file.
 
+## 10. Practical checklist
 
-- Konfigurace uložená moc vysoko.
-	Pokud je hodnota obecná, dej ji výš; pokud má platit jen pro konkrétní workflow, dej ji blíž ke spouštěnému souboru.
-
-## 10. Praktický checklist
-
-- Je `environment.json` validní JSON objekt?
-- Je konfigurace umístěná ve správné složce (správná priorita)?
-- Obsahuje runtime soubor očekávané klíče?
-- Nezpůsobuje concat polí nechtěné duplicity?
+- Is `environment.json` a valid JSON object?
+- Is the configuration placed in the correct folder (correct priority)?
+- Does the runtime file contain the expected keys?
+- Is array concatenation causing unwanted duplicates?
