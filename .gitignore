@@ -4,3 +4,8 @@ node_modules/
 *.kate-swp
 co dal.txt
 edit_history.csv
+
+# Lokální R knihovna - necommitovat instalované R balíčky
+backend/labs/lib/R/*
+!backend/labs/lib/R/measure/
+!backend/labs/lib/R/measure/**
