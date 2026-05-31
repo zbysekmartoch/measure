@@ -33,6 +33,41 @@ export const fileBrowserButtons = {
   upload:       { icon: '⬆',  bg: '#005ae2', label: '' },
 };
 
+// ─── File browser extension grouping visuals ───────────────────────────────
+
+export const fileBrowserGrouping = {
+  borderLeftWidth: 5,
+  borderColor: '#e5e7eb',
+  categoryColors: {
+    source: '#f81717', 
+    json: '#0488d4',   
+    data: '#6b7280',   
+    env: '#bb51c9',   
+    doc: '#ff7300',    // purple
+    markdown: '#ebe70f', // emerald
+    log: '#0f766e',    // teal
+    err: '#ff3c00',    // red
+    latex: '#7a0fac', // amber
+    other: '#111827',  // black
+    workflow: '#16a34a', // pink
+  },
+  categoryExtensions: {
+    source: [
+      'py', 'js', 'cjs', 'jsx', 'ts', 'tsx', 'r', 'sh', 'bash',
+      'sql', 'html', 'htm', 'css', 'scss', 'less', 'xml', 'yaml', 'yml'
+    ],
+    json: ['json'],
+    data: ['csv', 'tsv', 'xls', 'xlsx', 'parquet', 'dat'],
+    doc: ['doc', 'docx'],
+    latex: ['tex', 'mexpr'],
+    markdown: ['md'],
+    workflow: ['workflow'],
+    env: ['env'],
+    log: ['log'],
+    err: ['err'],
+  },
+};
+
 // ─── File browser item (row) buttons ────────────────────────────────────────
 
 export const fileItemButtons = {

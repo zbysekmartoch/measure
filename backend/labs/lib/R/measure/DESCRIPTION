@@ -1,0 +1,12 @@
+Package: measure
+Type: Package
+Title: Measure Runtime Environment Helpers
+Version: 0.1.0
+Authors@R: person("Measure", "System", role = c("aut", "cre"), email = "noreply@example.com")
+Description: Helper functions for reading runtime paths passed to R scripts.
+License: MIT
+Encoding: UTF-8
+LazyData: true
+Author: Measure System [aut, cre]
+Maintainer: Measure System <noreply@example.com>
+Built: R 4.3.3; ; 2026-04-15 14:55:48 UTC; unix

@@ -33,9 +33,7 @@ except Exception:
 
 PALETTES = {
     "default": [
-        "#D70C0F", "#00469B", "#F8C2B9", "#9EC8E9",
-        "#006538", "#B7E5B7", "#FFAA00", "#FFCF8C",
-        "#462E73", "#B1A3CB", "#00998F", "#A1E5E0",
+        "#D70C0F", "#00469B", "#F8C2B9", "#9EC8E9", "#FFAA00", "#FFCF8C", "#006538", "#B7E5B7", "#462E73", "#B1A3CB", "#00998F", "#A1E5E0",
     ],
     "colorblind": [
         "#D70C0F", "#00469B", "#006538",
@@ -47,24 +45,39 @@ PALETTES = {
     ],
     "reds": ["#680526", "#D70C0F", "#F8C2B9", "#888B95", "#D9DAE4"],
     "blues": ["#0C1838", "#00469B", "#9EC8E9", "#888B95", "#D9DAE4"],
+    "secret": ["#D70C0F", "#D70C0F", "#D70C0F", "#D70C0F", "#D70C0F", "#D70C0F", "#D70C0F"],
 }
 
 
 def _build_rc(theme: str) -> dict:
     is_dark = theme == "dark"
 
-    fg = "#FFFFFF" if is_dark else "#888B95"
-    edge = "#FFFFFF" if is_dark else "#A7A9B4"
-    grid_color = "#FFFFFF" if is_dark else "#A7A9B4"
+    fg = "#FFFFFF" if is_dark else "#888B95" # barva popisků (labels, title)
+    edge = "#FFFFFF" if is_dark else "#888B95" # barva osy a ticků
+    grid_color = "#FFFFFF" if is_dark else "#A7A9B4" # barva gridu
+
+    global SPINE_COLOR
+    SPINE_COLOR = edge
 
     return {
-        "font.family": "CzechiaSans",
-        "font.size": 10,
-        "axes.titlesize": 10,
+        "font.family": "Czechia Sans",
+        "font.size": 9,
+        "axes.titlesize": 9,
         "axes.labelsize": 9,
         "legend.fontsize": 9,
         "xtick.labelsize": 9,
         "ytick.labelsize": 9,
+
+        
+        "xtick.major.size": 4,
+        "xtick.major.width": 0.5,
+        "xtick.minor.size": 2,
+        "xtick.minor.width": 0.5,
+
+        "ytick.major.size": 4,
+        "ytick.major.width": 0.5,
+        "ytick.minor.size": 2,
+        "ytick.minor.width": 0.5,
 
         "figure.facecolor": "none",
         "axes.facecolor": "none",
@@ -72,17 +85,22 @@ def _build_rc(theme: str) -> dict:
 
         "text.color": fg,
         "axes.edgecolor": edge,
-        "axes.labelcolor": fg,
+        "axes.labelcolor": edge,
         "axes.titlecolor": fg,
         "xtick.color": fg,
         "ytick.color": fg,
 
+        "patch.edgecolor": "none",
+        "patch.force_edgecolor": False,
+        
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+                
         "axes.linewidth": 0.5,
-
         "grid.color": grid_color,
-        "grid.linestyle": "-",
+        "grid.linestyle": ":",
         "grid.linewidth": 0.5,
-        "grid.alpha": 1.0,
+        "grid.alpha": 0.5,
 
         "legend.frameon": False,
         "legend.framealpha": 0.0,
@@ -143,7 +161,7 @@ def use_palette(name: str = "default", n: int | None = None) -> list[str]:
     return colors
 
 
-def set_figure(dpi: int = 120, size: tuple[float, float] = (6.3, 2.8)) -> None:
+def set_figure(dpi: int = 120, size: tuple[float, float] = (4.3, 2.6)) -> None:
     """
     Nastaví výchozí DPI a velikost všech nově vytvářených figur.
     """
@@ -160,6 +178,7 @@ def subplots(*args, grid_on: bool = False, grid_kwargs: dict | None = None, **kw
     Příklad:
         fig, ax = subplots(figsize=(6, 3), grid_on=True)
     """
+
     fig, ax = plt.subplots(*args, **kwargs)
 
     if grid_on:
@@ -171,6 +190,8 @@ def subplots(*args, grid_on: bool = False, grid_kwargs: dict | None = None, **kw
             ax.grid(True, **grid_kwargs)
 
     return fig, ax
+
+
 
 
 def legend(loc: str = "best", ax=None, frameon: bool | None = None, **kwargs):
@@ -193,7 +214,7 @@ def legend(loc: str = "best", ax=None, frameon: bool | None = None, **kwargs):
     return ax.legend(loc=loc, **defaults)
 
 
-def grid(which: str = "major", axis: str = "both", enable: bool = True, ax=None, **kwargs) -> None:
+def grid(which: str = "major", axis="y", enable: bool = True, ax=None, **kwargs) -> None:
     """
     Zapne nebo vypne mřížku na zadané nebo aktuální ose.
     """
@@ -206,6 +227,9 @@ def grid(which: str = "major", axis: str = "both", enable: bool = True, ax=None,
         "color": mpl.rcParams.get("grid.color", "#A7A9B4"),
     }
     params.update(kwargs)
+
+    # Nejprve vypnout grid na obou osách
+    ax.grid(False, axis="both")
 
     ax.grid(enable, which=which, axis=axis, **params)
 

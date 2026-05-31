@@ -80,7 +80,8 @@ export class WorkflowRun extends EventEmitter {
    * @param {string[]} opts.steps — script paths (relative to scriptsRoot)
    * @param {string} opts.resultDir — absolute path to result directory
    * @param {string} opts.scriptsRoot — absolute path to lab scripts directory
-   * @param {string} opts.workflowRoot — relative directory of the .workflow file within scripts
+  * @param {string} opts.workflowRoot — relative directory of the .workflow file within scripts (metadata only)
+  * @param {string} opts.runtimeEnvPath — absolute path to runtime env JSON passed to scripts
    * @param {string} opts.pythonCmd — python executable
    * @param {boolean} opts.debugVisible — whether debug mode is active
    * @param {Set<string>} opts.debugScripts — scripts that should be debugged
@@ -102,6 +103,7 @@ export class WorkflowRun extends EventEmitter {
     this.resultDir = opts.resultDir;
     this.scriptsRoot = opts.scriptsRoot;
     this.workflowRoot = opts.workflowRoot || '';
+    this.runtimeEnvPath = opts.runtimeEnvPath || '';
     this.pythonCmd = opts.pythonCmd;
     this.debugVisible = opts.debugVisible;
     this.debugScripts = opts.debugScripts || new Set();
@@ -262,7 +264,7 @@ export class WorkflowRun extends EventEmitter {
               scriptPath: stepName,
               cwd: this.resultDir,
               pythonCommand: this.pythonCmd,
-              args: [this.resultDir, this.workflowRoot, this.scriptsRoot],
+              args: [this.resultDir, this.runtimeEnvPath, this.scriptsRoot],
               labId: this.labId,
               resultId: this.resultId,
               stepIndex: i,
@@ -462,7 +464,7 @@ export class WorkflowRun extends EventEmitter {
       if (command === this.pythonCmd) {
         env.PYTHONPATH = this.libScriptsPath + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : '');
       }
-      const child = spawn(command, [scriptAbsPath, this.resultDir, this.workflowRoot, this.scriptsRoot], {
+      const child = spawn(command, [scriptAbsPath, this.resultDir, this.runtimeEnvPath, this.scriptsRoot], {
         cwd: this.resultDir,
         env,
       });

@@ -5,7 +5,9 @@ import { execFile, execFileSync } from 'child_process';
 //import mysql from 'mysql2/promise';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import ImageModule from 'docxtemplater-image-module-free';
+//import ImageModule from 'docxtemplater-image-module-free';
+//import ImageModule from '@slosarek/docxtemplater-image-module-free';
+import ImageModule from 'measure-docxtemplater-image-module';
 import { DateTime } from "luxon";
 import {  imageSize  } from 'image-size';
 import os from 'os';
@@ -46,16 +48,20 @@ const __dirname = path.dirname(__filename);
 let gData; // globální pro případ potřeby v customizeValue
 let IMAGES_DIR;
 // --- Načtení parametrů ---
-// argv[2] = RESULT_ROOT, argv[3] = WORKFLOW_ROOT (ignorován), argv[4] = LAB_ROOT
+// argv[2] = RESULT_ROOT, argv[3] = RUNTIME_ENV_PATH, argv[4] = LAB_ROOT
 // Pokud nejsou zadány, použije se složka skriptu (pro testování)
 const RESULT_ROOT = process.argv[2] || __dirname;
-const WORKFLOW_ROOT = process.argv[3] || __dirname;
+const runtimeEnvArgProvided = Boolean(process.argv[3]);
+const RUNTIME_ENV_PATH = process.argv[3] || path.join(RESULT_ROOT, 'runtime.env');
 const LAB_ROOT = process.argv[4] || __dirname;
+const LABS_ROOT = path.resolve(LAB_ROOT, '..', '..');
+const LAB_ALIASES_PATH = path.join(LABS_ROOT, 'aliases.json');
 
 ///console.log(`RESULT_ROOT: ${RESULT_ROOT}`);
 ///console.log(`LAB_ROOT:    ${LAB_ROOT}`);
 
 let gImgParams=[]; // globální pole parametrů obrázků
+let gLabAliasesCache = null;
 
 
 let formulaCache = new Map();
@@ -79,14 +85,107 @@ function loadData(dataFilePath) {
 }
 
 function loadEnvironment() {
-    const envPath = path.join(RESULT_ROOT, 'environment.json');
-    try {
-        const content = fs.readFileSync(envPath, 'utf-8');
-        return JSON.parse(content);
-    } catch (error) {
-        console.error(`Chyba při načítání environment.json: ${error.message}`);
-        process.exit(1);
+    const candidatePaths = runtimeEnvArgProvided
+        ? [RUNTIME_ENV_PATH]
+        : [RUNTIME_ENV_PATH, path.join(RESULT_ROOT, 'environment.json')];
+
+    for (const envPath of candidatePaths) {
+        try {
+            const content = fs.readFileSync(envPath, 'utf-8');
+            return JSON.parse(content);
+        } catch (error) {
+            // Pokud soubor neexistuje, zkus další fallback cestu.
+            if (error.code === 'ENOENT') {
+                continue;
+            }
+            console.error(`Chyba při načítání runtime env souboru ${envPath}: ${error.message}`);
+            process.exit(1);
+        }
     }
+
+    console.error(`Chyba při načítání runtime env: soubor nebyl nalezen. Zkoušel jsem: ${candidatePaths.join(', ')}`);
+    process.exit(1);
+}
+
+function loadLabAliases() {
+    if (gLabAliasesCache !== null) {
+        return gLabAliasesCache;
+    }
+
+    if (!fs.existsSync(LAB_ALIASES_PATH)) {
+        gLabAliasesCache = {};
+        return gLabAliasesCache;
+    }
+
+    try {
+        const content = fs.readFileSync(LAB_ALIASES_PATH, 'utf-8');
+        const parsed = JSON.parse(content);
+        if (!isPlainObject(parsed)) {
+            throw new Error('soubor aliases.json musí obsahovat JSON objekt aliasů');
+        }
+        gLabAliasesCache = parsed;
+        return gLabAliasesCache;
+    } catch (error) {
+        throw new Error(`Chyba při načítání aliases.json (${LAB_ALIASES_PATH}): ${error.message}`);
+    }
+}
+
+function getAliasTarget(aliases, aliasName) {
+    if (Object.prototype.hasOwnProperty.call(aliases, aliasName)) {
+        return aliases[aliasName];
+    }
+
+    const upper = aliasName.toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(aliases, upper)) {
+        return aliases[upper];
+    }
+
+    return undefined;
+}
+
+function resolveAliasPathIfPresent(fileName) {
+    if (typeof fileName !== 'string') {
+        return null;
+    }
+
+    const normalizedFileName = fileName.trim();
+    const aliasMatch = normalizedFileName.match(/^<([^<>]+)>(?:[\\/](.*))?$/);
+    if (!aliasMatch) {
+        return null;
+    }
+
+    const aliasName = aliasMatch[1].trim();
+    if (!aliasName) {
+        throw new Error(`Neplatná alias cesta "${fileName}": alias je prázdný.`);
+    }
+
+    const aliases = loadLabAliases();
+    const aliasTarget = getAliasTarget(aliases, aliasName);
+    if (aliasTarget === undefined || aliasTarget === null || String(aliasTarget).trim() === '') {
+        throw new Error(`Neznámý alias laboratoře "${aliasName}" v cestě "${fileName}".`);
+    }
+
+    const aliasScriptsRoot = path.resolve(LABS_ROOT, String(aliasTarget), 'scripts');
+    const relativeTail = (aliasMatch[2] ?? '').replace(/\\/g, '/');
+    return relativeTail ? path.resolve(aliasScriptsRoot, relativeTail) : aliasScriptsRoot;
+}
+
+function resolveReportPath(fileName, defaultRoot, valueLabel = 'path') {
+    if (typeof fileName !== 'string' || !fileName.trim()) {
+        throw new Error(`Neplatná hodnota ${valueLabel}: očekávám neprázdný string.`);
+    }
+
+    const normalizedFileName = fileName.trim();
+    if (path.isAbsolute(normalizedFileName)) {
+        return normalizedFileName;
+    }
+
+    const aliasResolved = resolveAliasPathIfPresent(normalizedFileName);
+    if (aliasResolved) {
+        return aliasResolved;
+    }
+
+    return path.resolve(defaultRoot, normalizedFileName);
 }
 
 function resolveDocConfigPath(fileName, { preferResultRoot = false } = {}) {
@@ -94,18 +193,25 @@ function resolveDocConfigPath(fileName, { preferResultRoot = false } = {}) {
         throw new Error('Nazev konfiguracniho souboru musi byt neprázdný string.');
     }
 
-    if (path.isAbsolute(fileName)) {
-        return fileName;
+    const normalizedFileName = fileName.trim();
+
+    if (path.isAbsolute(normalizedFileName)) {
+        return normalizedFileName;
+    }
+
+    const aliasResolved = resolveAliasPathIfPresent(normalizedFileName);
+    if (aliasResolved) {
+        return aliasResolved;
     }
 
     const primaryRoot = preferResultRoot ? RESULT_ROOT : LAB_ROOT;
     const secondaryRoot = preferResultRoot ? LAB_ROOT : RESULT_ROOT;
-    const primaryPath = path.resolve(primaryRoot, fileName);
+    const primaryPath = path.resolve(primaryRoot, normalizedFileName);
     if (fs.existsSync(primaryPath)) {
         return primaryPath;
     }
 
-    const secondaryPath = path.resolve(secondaryRoot, fileName);
+    const secondaryPath = path.resolve(secondaryRoot, normalizedFileName);
     if (fs.existsSync(secondaryPath)) {
         return secondaryPath;
     }
@@ -348,7 +454,7 @@ var environment={};
 var gDocDefualts={}; // globální pro případ potřeby v customizeValue
 async function main() {
 
-    // 1) Načti konfiguraci z environment.json
+    // 1) Načti konfiguraci z runtime env JSON souboru
     environment = loadEnvironment();
 
     IMAGES_DIR = path.join(RESULT_ROOT, 'img');
@@ -358,10 +464,10 @@ async function main() {
     
     if (environment.report && environment.report.doc && Array.isArray(environment.report.doc)) {
         docConfigs = environment.report.doc;
-        console.log(`Nalezeno ${docConfigs.length} konfigurací dokumentů v environment.json`);
+        console.log(`Nalezeno ${docConfigs.length} konfigurací dokumentů v runtime env souboru`);
     } else {
         // Fallback na výchozí konfiguraci pro zpětnou kompatibilitu
-        console.log('Konfigurace report.doc nenalezena, použiji výchozí template.docx');
+        console.log('Konfigurace report.doc nenalezena v runtime env souboru, použiji výchozí template.docx');
         docConfigs = [{
             template: 'template.docx',
             renderTo: 'report.docx'
@@ -376,16 +482,16 @@ async function main() {
         gImgParams = []; // reset pro každý dokument
         gImgParams.push({params:{},pathArr:[]}); // rezervuj index 0 pro případ, že by nějaký tag měl přímo buffer/cestu
         
-        // Cesty: template relativní k LAB_ROOT a output relativní k RESULT_ROOT
-        // data pokud není, tak data nepotřebuje, pokud je v docConfig nastaven atribut dataInResult tak hledáme data relativně k RESULT_ROOT, jinak relativně k LAB_ROOT   
-
-        const templatePath = path.resolve(LAB_ROOT, templateRelPath);
-        const dataPath = dataRelPath ? path.resolve(docConfig.dataInResult ? RESULT_ROOT : LAB_ROOT, dataRelPath) : null;  
-        const outPath = path.resolve(RESULT_ROOT, outputRelPath);
-
         gDocDefualts=docConfig.defaults||{}; // globální pro případ potřeby v customizeValue
         
         try {
+            // Cesty: podporují i alias syntaxi <ALIAS>/a/b/c, která míří na LAB_ROOT/../../<alias>/scripts/a/b/c
+            const templatePath = resolveReportPath(templateRelPath, LAB_ROOT, 'template');
+            const dataPath = dataRelPath
+                ? resolveReportPath(dataRelPath, docConfig.dataInResult ? RESULT_ROOT : LAB_ROOT, 'data')
+                : null;
+            const outPath = resolveReportPath(outputRelPath, RESULT_ROOT, 'renderTo');
+
             const {
                 formatSettings,
                 formatPath,

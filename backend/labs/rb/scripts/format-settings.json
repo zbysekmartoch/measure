@@ -1,0 +1,106 @@
+{
+  "formatStyles": {
+    "coef3": {
+      "number": {
+        "minDecimals": 3,
+        "maxDecimals": 3,
+        "decimalSeparator": ",",
+        "thousandSeparator": " ",
+        "useGrouping": true
+      }
+    },
+    "coef4": {
+      "number": {
+        "minDecimals": 4,
+        "maxDecimals": 4,
+        "decimalSeparator": ",",
+        "thousandSeparator": " ",
+        "useGrouping": true
+      }
+    },
+    "pValue": {
+      "number": {
+        "minDecimals": 4,
+        "maxDecimals": 4,
+        "decimalSeparator": ",",
+        "thousandSeparator": " ",
+        "nullText": "n/a"
+      }
+    },
+    "czDateTime": {
+      "date": {
+        "pattern": "dd. MM. yyyy hh:mm:ss uuu",
+        "locale": "cs",
+        "zone": "Europe/Prague"
+      }
+    },
+    "reportDate": {
+      "date": {
+        "pattern": "dd. MM. yyyy",
+        "locale": "cs",
+        "zone": "Europe/Prague"
+      }
+    }
+  },
+  "format": [
+    {
+      "path": "regressions.*.meta.estimatedAt",
+      "use": "reportDate"
+    },
+    {
+      "path": "regressions.*.coefficients.*.estimate",
+      "use": "coef4"
+    },
+    {
+      "path": "regressions.*.coefficients.*.stdError",
+      "use": "coef4"
+    },
+    {
+      "path": "regressions.*.coefficients.*.tStat",
+      "use": "coef3"
+    },
+    {
+      "path": "regressions.*.coefficients.*.pValue",
+      "use": "pValue"
+    },
+    {
+      "path": "regressions.*.coefficients.*.pValue",
+      "number": {
+        "mode": "star"
+      }
+    },
+    {
+      "path": "models.ols.metrics.r2",
+      "number": {
+        "mode": "percent",
+        "minDecimals": 1,
+        "maxDecimals": 1,
+        "suffix": " %"
+      }
+    },
+    {
+      "path": "models.ols.metrics.r2_adjusted",
+      "number": {
+        "mode": "percent",
+        "minDecimals": 1,
+        "maxDecimals": 1,
+        "suffix": " %"
+      }
+    },
+    {
+      "path": "models.ols.metrics.aic",
+      "use": "coef3"
+    },
+    {
+      "path": "models.ols.metrics.bic",
+      "use": "coef3"
+    },
+    {
+      "path": "**.lag",
+      "number": {
+        "minDecimals": 0,
+        "maxDecimals": 0
+      }
+    }
+  ]
+}

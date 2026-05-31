@@ -5,7 +5,9 @@ Tento dokument popisuje, jak funguje formátování hodnot v reportech generovan
 ## 1) Kde se formát nastaví
 
 Format settings jsou uložené v samostatném JSON souboru.
-Název tohoto souboru se uvede v "environment.json" v sekci "report.doc" pod klíčem "format".
+Název tohoto souboru se uvede v runtime env JSONu v sekci "report.doc" pod klíčem "format".
+
+Runtime env JSON vzniká kaskádovým sloučením zdrojových `environment.json` souborů.
 
 Volitelně lze zapnout i "ignoreFormatErrors":
 

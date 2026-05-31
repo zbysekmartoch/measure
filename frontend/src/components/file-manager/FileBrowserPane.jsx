@@ -9,11 +9,19 @@
  *   - Copy / Paste buttons on files and folders (cross-instance via ClipboardContext)
  *   - Drag-and-drop upload into any folder
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSettings } from '../../context/SettingsContext';
 import { formatFileSize, fileIcon } from './fileUtils.js';
 import { useFileClipboard } from './ClipboardContext.jsx';
-import { shadow, fileBrowserButtons as fbBtn, fileItemButtons as fiBtn, fileLocking as lockCfg } from '../../lib/uiConfig.js';
+import { useToast } from '../Toast';
+import { useDialog } from '../Dialog.jsx';
+import {
+  shadow,
+  fileBrowserButtons as fbBtn,
+  fileItemButtons as fiBtn,
+  fileLocking as lockCfg,
+  fileBrowserGrouping as groupCfg,
+} from '../../lib/uiConfig.js';
 
 /* ── tiny icon-button helper ────────────────────────────────────────────────── */
 const IBtn = ({ title, onClick, bg = '#6b7280', children, disabled, style: extra }) => (
@@ -36,6 +44,63 @@ const IBtn = ({ title, onClick, bg = '#6b7280', children, disabled, style: extra
   >{children}</button>
 );
 
+/* ── file grouping helpers ─────────────────────────────────────────────────── */
+const compareByName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+function extensionKey(filename) {
+  if (!filename) return '';
+  const lastDot = filename.lastIndexOf('.');
+  if (lastDot <= 0 || lastDot === filename.length - 1) return '';
+  return filename.slice(lastDot + 1).toLowerCase();
+}
+
+function buildExtensionGroups(fileNodes) {
+  const byExt = new Map();
+
+  for (const f of fileNodes) {
+    const ext = extensionKey(f.name);
+    if (!byExt.has(ext)) byExt.set(ext, []);
+    byExt.get(ext).push(f);
+  }
+
+  const groups = [...byExt.entries()].map(([ext, groupFiles]) => ({
+    ext,
+    files: [...groupFiles].sort(compareByName),
+  }));
+
+  groups.sort((a, b) => {
+    if (a.ext === b.ext) return 0;
+    // Files without extension are shown last.
+    if (!a.ext) return 1;
+    if (!b.ext) return -1;
+    return a.ext.localeCompare(b.ext, undefined, { numeric: true, sensitivity: 'base' });
+  });
+
+  return groups;
+}
+
+const extensionCategoryMap = (() => {
+  const map = new Map();
+  const categories = groupCfg.categoryExtensions || {};
+
+  for (const [categoryName, extensions] of Object.entries(categories)) {
+    if (!Array.isArray(extensions)) continue;
+    for (const ext of extensions) {
+      const key = String(ext || '').toLowerCase().trim();
+      if (!key) continue;
+      map.set(key, categoryName);
+    }
+  }
+
+  return map;
+})();
+
+function groupColorForExtension(ext) {
+  const key = (ext || '').toLowerCase();
+  const categoryName = extensionCategoryMap.get(key) || 'other';
+  return groupCfg.categoryColors?.[categoryName] || groupCfg.categoryColors?.other || '#111827';
+}
+
 /* ── recursive tree node (folder) ───────────────────────────────────────────── */
 function FolderNode({
   node, depth, expandedFolders, selectedFile, dragOverFolder,
@@ -48,10 +113,12 @@ function FolderNode({
   onDebugWorkflow, onRunWorkflow, onRename, changedFiles,
   onPublish, onCreateSync,
   isRoot,
+  groupByExtension,
   specialFolders,
   compactButtons,
   fileLocks, isReadonlyFile, onRequestLock,
   onUnlockFile, onUnlockFolder, labOwnerId, currentUserId,
+  onPrompt,
 }) {
   const [hovered, setHovered] = useState(false);
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
@@ -105,18 +172,32 @@ function FolderNode({
           )}
           <IBtn
             title={fiBtn.newFile.label}
-            onClick={() => {
+            onClick={async () => {
               const prefix = isRoot ? '' : (node.path + '/');
-              const name = prompt('New file name:', '');
+              const name = await onPrompt({
+                title: 'Create file',
+                message: 'New file name:',
+                defaultValue: '',
+                placeholder: 'file.txt',
+                confirmText: 'Create',
+                cancelText: 'Cancel',
+              });
               if (name) onCreateNewFile(prefix + name);
             }}
             bg={fiBtn.newFile.bg} disabled={loading}
           >{fiBtn.newFile.icon}</IBtn>
           <IBtn
             title={fiBtn.newFolder.label}
-            onClick={() => {
+            onClick={async () => {
               const prefix = isRoot ? '' : (node.path + '/');
-              const name = prompt('New folder name:', '');
+              const name = await onPrompt({
+                title: 'Create folder',
+                message: 'New folder name:',
+                defaultValue: '',
+                placeholder: 'new-folder',
+                confirmText: 'Create',
+                cancelText: 'Cancel',
+              });
               if (name) onCreateNewFolder(prefix + name);
             }}
             bg={fiBtn.newFolder.bg} disabled={loading}
@@ -130,8 +211,14 @@ function FolderNode({
           )}
           <IBtn title={fiBtn.downloadZip.label} onClick={() => onDownloadFolderZip(isRoot ? '.' : node.path)} bg={fiBtn.downloadZip.bg} disabled={loading}>{fiBtn.downloadZip.icon}</IBtn>
           {!isRoot && (
-            <IBtn title={fiBtn.renameFolder.label} onClick={() => {
-              const newName = prompt('New name:', node.name);
+            <IBtn title={fiBtn.renameFolder.label} onClick={async () => {
+              const newName = await onPrompt({
+                title: 'Rename folder',
+                message: 'New name:',
+                defaultValue: node.name,
+                confirmText: 'Rename',
+                cancelText: 'Cancel',
+              });
               if (newName && newName !== node.name) {
                 const parts = node.path.split('/');
                 parts[parts.length - 1] = newName;
@@ -167,62 +254,19 @@ function FolderNode({
         </div>
       </div>
 
-      {/* Children — files first, then subdirectories */}
-      {isExpanded && [...(node.children || [])]
-        .sort((a, b) => {
-          if (a.type === b.type) return a.name.localeCompare(b.name);
-          return a.type === 'file' ? -1 : 1;
-        })
-        .map((child) =>
-        child.type === 'directory' ? (
-          <FolderNode
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            expandedFolders={expandedFolders}
-            selectedFile={selectedFile}
-            dragOverFolder={dragOverFolder}
-            showUpload={showUpload}
-            showDelete={showDelete}
-            showModificationDate={showModificationDate}
-            loading={loading}
-            onToggleFolder={onToggleFolder}
-            onFileClick={onFileClick}
-            onFileDoubleClick={onFileDoubleClick}
-            onCreateNewFile={onCreateNewFile}
-            onCreateNewFolder={onCreateNewFolder}
-            onTriggerFolderUpload={onTriggerFolderUpload}
-            onDownloadFolderZip={onDownloadFolderZip}
-            onDeleteFolder={onDeleteFolder}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onCopyFile={onCopyFile}
-            onCopyFolder={onCopyFolder}
-            onPasteInto={onPasteInto}
-            clipboard={clipboard}
-            apiBasePath={apiBasePath}
-            onDebugWorkflow={onDebugWorkflow}
-            onRunWorkflow={onRunWorkflow}
-            onRename={onRename}
-            changedFiles={changedFiles}
-            onPublish={onPublish}
-            onCreateSync={onCreateSync}
-            specialFolders={specialFolders}
-            compactButtons={compactButtons}
-            fileLocks={fileLocks}
-            isReadonlyFile={isReadonlyFile}
-            onRequestLock={onRequestLock}
-            onUnlockFile={onUnlockFile}
-            onUnlockFolder={onUnlockFolder}
-            labOwnerId={labOwnerId}
-            currentUserId={currentUserId}
-          />
-        ) : (
+      {/* Children — files first (optionally grouped by extension), then subdirectories */}
+      {isExpanded && (() => {
+        const children = [...(node.children || [])];
+        const fileChildren = children.filter((c) => c.type === 'file').sort(compareByName);
+        const dirChildren = children.filter((c) => c.type === 'directory').sort(compareByName);
+        const groupInset = depth * 16 + 10;
+
+        const renderFileRow = (child, indentForGroup = 0) => (
           <FileRow
             key={child.path}
             file={child}
             depth={depth + 1}
+            indentOffset={indentForGroup}
             isSelected={selectedFile === child.path}
             showModificationDate={showModificationDate}
             onClick={onFileClick}
@@ -240,26 +284,103 @@ function FolderNode({
             onUnlockFile={onUnlockFile}
             labOwnerId={labOwnerId}
             currentUserId={currentUserId}
+            onPrompt={onPrompt}
           />
-        ),
-      )}
+        );
+
+        return (
+          <>
+            {groupByExtension
+              ? buildExtensionGroups(fileChildren).map((group, idx) => (
+                <div
+                  key={`${node.path || '__root__'}::${group.ext || '__noext__'}`}
+                  style={{
+                    marginTop: idx === 0 ? 3 : 7,
+                    marginBottom: 2,
+                    marginLeft: groupInset,
+                    border: `1px solid ${groupCfg.borderColor || '#e5e7eb'}`,
+                    borderLeft: `${groupCfg.borderLeftWidth || 5}px solid ${groupColorForExtension(group.ext)}`,
+                    borderRadius: 6,
+                    background: 'transparent',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {group.files.map((f) => renderFileRow(f, groupInset))}
+                </div>
+              ))
+              : fileChildren.map(renderFileRow)}
+
+            {dirChildren.map((child) => (
+              <FolderNode
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                expandedFolders={expandedFolders}
+                selectedFile={selectedFile}
+                dragOverFolder={dragOverFolder}
+                showUpload={showUpload}
+                showDelete={showDelete}
+                showModificationDate={showModificationDate}
+                loading={loading}
+                onToggleFolder={onToggleFolder}
+                onFileClick={onFileClick}
+                onFileDoubleClick={onFileDoubleClick}
+                onCreateNewFile={onCreateNewFile}
+                onCreateNewFolder={onCreateNewFolder}
+                onTriggerFolderUpload={onTriggerFolderUpload}
+                onDownloadFolderZip={onDownloadFolderZip}
+                onDeleteFolder={onDeleteFolder}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onCopyFile={onCopyFile}
+                onCopyFolder={onCopyFolder}
+                onPasteInto={onPasteInto}
+                clipboard={clipboard}
+                apiBasePath={apiBasePath}
+                onDebugWorkflow={onDebugWorkflow}
+                onRunWorkflow={onRunWorkflow}
+                onRename={onRename}
+                changedFiles={changedFiles}
+                onPublish={onPublish}
+                onCreateSync={onCreateSync}
+                groupByExtension={groupByExtension}
+                specialFolders={specialFolders}
+                compactButtons={compactButtons}
+                fileLocks={fileLocks}
+                isReadonlyFile={isReadonlyFile}
+                onRequestLock={onRequestLock}
+                onUnlockFile={onUnlockFile}
+                onUnlockFolder={onUnlockFolder}
+                labOwnerId={labOwnerId}
+                currentUserId={currentUserId}
+                onPrompt={onPrompt}
+              />
+            ))}
+          </>
+        );
+      })()}
     </div>
   );
 }
 
 /* ── file row ───────────────────────────────────────────────────────────────── */
-function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRunWorkflow, onRename, isChanged, onPublish, compactButtons, lockInfo, isReadonly, onRequestLock, onUnlockFile, labOwnerId, currentUserId }) {
+function FileRow({ file, depth, indentOffset = 0, isSelected, showModificationDate, onClick, onDoubleClick, onCopy, onDebugWorkflow, onRunWorkflow, onRename, isChanged, onPublish, compactButtons, lockInfo, isReadonly, onRequestLock, onUnlockFile, labOwnerId, currentUserId, onPrompt }) {
   const [hovered, setHovered] = useState(false);
-  const indent = depth * 16 + 12;
+  const indent = Math.max(4, depth * 16 + 12 - indentOffset);
+  const isEnvironmentJson = file.name?.toLowerCase() === 'environment.json';
   const isWorkflow = file.name?.endsWith('.workflow');
   const isRunnableScript = /\.(py|js|cjs|r)$/i.test(file.name);
   const isDebuggable = isWorkflow || isRunnableScript;
   const isLockedByOther = lockInfo && !lockInfo.isMe;
   const isLockedByMe = lockInfo && lockInfo.isMe;
   const changedBg = '#fef9c3';  // light yellow for changed files
+//  const environmentBg = '#ffedd5';
+//  const environmentHoverBg = '#fed7aa';
   const baseBg = isSelected ? '#dbeafe'
     : isReadonly ? lockCfg.readonlyBg
     : isLockedByOther ? lockCfg.lockedRowBg
+  //  : isEnvironmentJson ? environmentBg
     : isChanged ? changedBg
     : 'transparent';
   return (
@@ -272,6 +393,7 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         borderLeft: isReadonly ? `3px solid ${lockCfg.readonlyColor}`
           : isLockedByOther ? `3px solid ${lockCfg.lockedRowBorder}`
           : isLockedByMe ? '3px solid #f59e0b'
+    //      : isEnvironmentJson ? '3px solid #ea580c'
           : isChanged ? '3px solid #eab308'
           : '3px solid transparent',
         cursor: 'pointer', fontSize: 12,
@@ -279,12 +401,36 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
       }}
       onClick={() => onClick(file)}
       onDoubleClick={() => onDoubleClick?.(file)}
-      onMouseEnter={(e) => { setHovered(true); if (!isSelected) e.currentTarget.style.background = isChanged ? '#fef08a' : '#f5f7fa'; }}
+      onMouseEnter={(e) => {
+        setHovered(true);
+        if (!isSelected) {
+          e.currentTarget.style.background = isChanged
+            ? '#fef08a'
+ //           : isEnvironmentJson
+ //             ? environmentHoverBg
+              : '#f5f7fa';
+        }
+      }}
       onMouseLeave={(e) => { setHovered(false); e.currentTarget.style.background = baseBg; }}
     >
       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span>{fileIcon(file.name)}</span>
-        <span title={file.path || file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isReadonly ? lockCfg.readonlyColor : undefined }}>{file.name}</span>
+        <span
+          title={file.path || file.name}
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: isReadonly
+              ? lockCfg.readonlyColor
+              : isEnvironmentJson
+                ? '#134da3'
+                : undefined,
+            fontWeight: isEnvironmentJson ? 700 : undefined,
+          }}
+        >
+          {file.name}
+        </span>
         {isReadonly && (
           <span title="Read-only" style={{ fontSize: 10, flexShrink: 0, cursor: 'default' }}>{lockCfg.readonlyIcon}</span>
         )}
@@ -311,8 +457,14 @@ function FileRow({ file, depth, isSelected, showModificationDate, onClick, onDou
         {(isWorkflow || isRunnableScript) && onRunWorkflow && (
           <IBtn title={fiBtn.runWorkflow.label} onClick={() => onRunWorkflow(file.path)} bg={fiBtn.runWorkflow.bg}>{fiBtn.runWorkflow.icon}</IBtn>
         )}
-        <IBtn title={fiBtn.renameFile.label} onClick={() => {
-          const newName = prompt('New name:', file.name);
+        <IBtn title={fiBtn.renameFile.label} onClick={async () => {
+          const newName = await onPrompt({
+            title: 'Rename file',
+            message: 'New name:',
+            defaultValue: file.name,
+            confirmText: 'Rename',
+            cancelText: 'Cancel',
+          });
           if (newName && newName !== file.name) {
             const parts = file.path.split('/');
             parts[parts.length - 1] = newName;
@@ -398,7 +550,27 @@ export default function FileBrowserPane({
   currentUserId,
 }) {
   const { compactButtons, setCompactButtons } = useSettings();
+  const toast = useToast();
+  const dialog = useDialog();
   const { clipboard, copyFile, copyFolder, refreshFromServer } = useFileClipboard();
+  const [groupByExtension, setGroupByExtension] = useState(() => {
+    try {
+      const saved = localStorage.getItem('fileBrowserGroupByExtension');
+      return saved !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fileBrowserGroupByExtension', groupByExtension ? 'true' : 'false');
+    } catch {
+      // ignore storage errors
+    }
+  }, [groupByExtension]);
+
+  const askPrompt = useCallback((options) => dialog.prompt(options), [dialog]);
 
   // Create sync config for a folder (only for scripts-based file managers)
   const handleCreateSync = useCallback(async (folderPath) => {
@@ -417,11 +589,11 @@ export default function FileBrowserPane({
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       if (typeof onRefresh === 'function') onRefresh();
-      alert('Sync config created. Download sync.json to your PC.');
+      toast.success('Sync config created. Download sync.json to your PC.');
     } catch {
-      alert('Error creating sync config');
+      toast.error('Error creating sync config');
     }
-  }, [apiBasePath, onRefresh]);
+  }, [apiBasePath, onRefresh, toast]);
 
   const handleCopyFile = useCallback((filePath) => {
     copyFile(filePath, apiBasePath);
@@ -491,6 +663,16 @@ export default function FileBrowserPane({
           >👁</IBtn>
           <IBtn title={fbBtn.refresh.label} onClick={onRefresh} bg={fbBtn.refresh.bg} disabled={loading}>{fbBtn.refresh.icon}</IBtn>
           <IBtn
+            title={groupByExtension ? 'Disable extension groups' : 'Enable extension groups'}
+            onClick={() => setGroupByExtension((v) => !v)}
+            bg="#ffffff"
+            style={{
+              color: '#000000',
+              border: '1px solid #d1d5db',
+              fontWeight: 700,
+            }}
+          >□</IBtn>
+          <IBtn
             title={showPreview ? fbBtn.previewHide.label : fbBtn.preview.label}
             onClick={onTogglePreview}
             bg={showPreview ? fbBtn.previewHide.bg : fbBtn.preview.bg}
@@ -538,6 +720,7 @@ export default function FileBrowserPane({
         changedFiles={changedFiles}
         onPublish={onPublish}
         onCreateSync={apiBasePath.includes('/scripts') ? handleCreateSync : undefined}
+        groupByExtension={groupByExtension}
         specialFolders={specialFolders}
         isRoot
         compactButtons={compactButtons}
@@ -548,6 +731,7 @@ export default function FileBrowserPane({
         onUnlockFolder={onUnlockFolder}
         labOwnerId={labOwnerId}
         currentUserId={currentUserId}
+        onPrompt={askPrompt}
       />
 
       {files.length === 0 && !loading && (

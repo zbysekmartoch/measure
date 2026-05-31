@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
 import archiver from 'archiver';
 import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth, copyRecursive } from '../utils/file-manager.js';
+import { writeRuntimeEnvironmentFile } from '../utils/runtime-environment.js';
 import { isReadonlyPath } from '../utils/file-locks.js';
 import { getDebugStatus, endDebugSession } from '../debug/debug-engine.js';
 import { startWorkflowRun, abortWorkflowRun } from '../workflow/workflow-runner.js';
@@ -673,6 +674,60 @@ function getLabCurrentOutputRoot(labId) {
   return path.join(getLabPath(labId), 'scripts', 'Outputs');
 }
 
+async function readJsonFile(jsonPath, { allowMissing = false } = {}) {
+  try {
+    const raw = await fs.readFile(jsonPath, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    if (allowMissing && err.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+async function writeJsonFile(jsonPath, data) {
+  await fs.writeFile(jsonPath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+async function buildRunMetadata({
+  userId,
+  workflowFile,
+  isWorkflow,
+  workflowSteps,
+  scriptsRoot,
+  mode,
+}) {
+  let userName = '';
+  try {
+    const userStore = getUserStore();
+    const user = await userStore.findById(userId);
+    if (user) {
+      userName = `${user.firstName} ${user.lastName}`;
+    }
+  } catch { /* ignore */ }
+
+  const workflowRoot = path.dirname(workflowFile);
+  const relativeScriptsRoot = path.relative(LABS_ROOT, scriptsRoot);
+  const wfBaseName = path.basename(workflowFile, path.extname(workflowFile));
+  const now = new Date().toISOString();
+
+  return {
+    now,
+    run: {
+      workflowFile: isWorkflow ? workflowFile : null, // null for single-script runs
+      workflow: workflowSteps,
+      name: wfBaseName,
+      author: userName,
+      private: true,
+      mode, // "debug" | "production"
+      _: 'Do not manualy overwrite keys starting with _',
+      _usr_id: userId,
+      _workflowRoot: workflowRoot === '.' ? '' : workflowRoot,
+      _scriptsRoot: relativeScriptsRoot,
+      _created: now,
+    },
+  };
+}
+
 // ─── Lab Results ──────────────────────────────────────────────────────────────
 
 // List result subfolders inside a lab (each subfolder = one result run).
@@ -707,13 +762,17 @@ router.get('/:id/results', async (req, res, next) => {
         progress = JSON.parse(raw);
       } catch { /* no progress.json — that's fine */ }
 
-      // Try to read environment.json for run metadata
+      // Try to read runtime.env for run metadata (legacy fallback: environment.json)
       let run = null;
       try {
-        const raw = await fs.readFile(path.join(dirPath, 'environment.json'), 'utf-8');
-        const envJson = JSON.parse(raw);
-        if (envJson.run) run = envJson.run;
-      } catch { /* no environment.json or no run key — that's fine */ }
+        const envJson = await readJsonFile(path.join(dirPath, 'runtime.env'));
+        if (envJson?.run) run = envJson.run;
+      } catch {
+        try {
+          const legacyEnvJson = await readJsonFile(path.join(dirPath, 'environment.json'));
+          if (legacyEnvJson?.run) run = legacyEnvJson.run;
+        } catch { /* no runtime/env metadata — that's fine */ }
+      }
 
       items.push({
         id: entry.name,
@@ -1028,7 +1087,7 @@ router.post('/:id/results/:resultId/abort', async (req, res, next) => {
  * POST /api/v1/labs/:id/results/:resultId/debug
  * Body: { debugVisible?: boolean, stopOnFailure?: boolean }
  *
- * Reads the workflow from result's environment.json (key "workflow": string or string[]).
+ * Reads the workflow from result's runtime.env (key "run.workflow": string or string[]).
  *   - string → path to a .workflow file (relative to lab scripts), read its lines as steps
  *   - string[] → direct list of script paths (relative to lab scripts)
  *
@@ -1036,7 +1095,7 @@ router.post('/:id/results/:resultId/abort', async (req, res, next) => {
  * Python scripts with debugVisible=true are spawned via debugpy --wait-for-client.
  *
  * Execution is delegated to WorkflowRunner which emits real-time SSE events.
- * Each script receives the result dir as its first argument.
+ * Each script receives arguments: RESULT_ROOT, RUNTIME_ENV_PATH, LAB_ROOT.
  * stdout → output.log, stderr → output.err, debug comms → debuger.log (all in result dir).
  */
 router.post('/:id/results/:resultId/debug', async (req, res, next) => {
@@ -1057,18 +1116,76 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
     const debugVisible = req.body?.debugVisible === true;
     const stopOnFailure = req.body?.stopOnFailure !== false; // default true
 
-    // Read environment.json from result to get workflow
-    let dataJson;
+    const runtimeEnvPath = path.join(resultDir, 'runtime.env');
+
+    // Read runtime.env from result to get run workflow.
+    // Legacy fallback: if runtime.env is missing, migrate from environment.json once.
+    let dataJson = null;
     try {
-      const raw = await fs.readFile(path.join(resultDir, 'environment.json'), 'utf-8');
-      dataJson = JSON.parse(raw);
-    } catch {
-      return res.status(400).json({ error: 'Cannot read environment.json in result folder' });
+      dataJson = await readJsonFile(runtimeEnvPath);
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        return res.status(400).json({ error: 'Cannot read runtime.env in result folder' });
+      }
+
+      // Legacy migration path for old results that still only have environment.json.
+      let legacyDataJson = null;
+      try {
+        legacyDataJson = await readJsonFile(path.join(resultDir, 'environment.json'));
+      } catch {
+        return res.status(400).json({ error: 'Cannot read runtime.env in result folder' });
+      }
+
+      const legacyScriptsRoot = legacyDataJson?.run?._scriptsRoot
+        ? path.resolve(LABS_ROOT, legacyDataJson.run._scriptsRoot)
+        : getLabScriptsRoot(labId);
+
+      const sourceRelPath = legacyDataJson?.run?.workflowFile
+        || (Array.isArray(legacyDataJson?.run?.workflow) && legacyDataJson.run.workflow.length === 1
+          ? legacyDataJson.run.workflow[0]
+          : null);
+
+      if (!sourceRelPath) {
+        return res.status(400).json({ error: 'Cannot build runtime.env for legacy result: missing run metadata' });
+      }
+
+      const sourceAbsPath = getSecurePath(legacyScriptsRoot, sourceRelPath);
+      if (!sourceAbsPath) {
+        return res.status(400).json({ error: 'Cannot build runtime.env for legacy result: invalid source path' });
+      }
+
+      try {
+        await writeRuntimeEnvironmentFile({
+          sourceFilePath: sourceAbsPath,
+          labsRoot: LABS_ROOT,
+          outputFilePath: runtimeEnvPath,
+        });
+      } catch (buildErr) {
+        return res.status(400).json({ error: `Cannot build runtime.env for legacy result: ${buildErr.message}` });
+      }
+
+      try {
+        dataJson = await readJsonFile(runtimeEnvPath);
+      } catch {
+        return res.status(400).json({ error: 'Cannot read runtime.env in result folder' });
+      }
+
+      // Preserve legacy run metadata if runtime merge does not include it.
+      if ((!dataJson || !dataJson.run) && legacyDataJson?.run) {
+        const mergedLegacy = (dataJson && typeof dataJson === 'object' && !Array.isArray(dataJson)) ? dataJson : {};
+        mergedLegacy.run = legacyDataJson.run;
+        dataJson = mergedLegacy;
+        await writeJsonFile(runtimeEnvPath, dataJson);
+      }
     }
 
-    const workflow = dataJson.run?.workflow || dataJson.workflow;
+    if (!dataJson || typeof dataJson !== 'object' || Array.isArray(dataJson)) {
+      return res.status(400).json({ error: 'Invalid runtime.env: expected JSON object' });
+    }
+
+    const workflow = dataJson.run?.workflow;
     if (!workflow) {
-      return res.status(400).json({ error: 'No workflow found in environment.json (run.workflow or workflow key)' });
+      return res.status(400).json({ error: 'No run.workflow found in runtime.env' });
     }
 
     // Resolve workflowRoot from run metadata (directory of .workflow file relative to scripts)
@@ -1078,6 +1195,7 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
     const scriptsRoot = dataJson.run?._scriptsRoot
       ? path.resolve(LABS_ROOT, dataJson.run._scriptsRoot)
       : getLabScriptsRoot(labId);
+
     let activeSteps;
     let commentedSteps = []; // steps starting with # (skipped)
 
@@ -1101,11 +1219,11 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       activeSteps = allItems.filter(s => !s.startsWith('#'));
       commentedSteps = allItems.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
     } else {
-      return res.status(400).json({ error: '"workflow" must be a string (path to .workflow file) or an array of script paths' });
+      return res.status(400).json({ error: '"run.workflow" must be a string (path to .workflow file) or an array of script paths' });
     }
 
     if (activeSteps.length === 0) {
-      return res.status(400).json({ error: 'Workflow has no active steps' });
+      return res.status(400).json({ error: 'run.workflow has no active steps' });
     }
 
     // Resolve <ALIAS>/path references to absolute script paths from other labs
@@ -1180,6 +1298,7 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       resultDir,
       scriptsRoot,
       workflowRoot,
+      runtimeEnvPath,
       pythonCmd,
       debugVisible,
       debugScripts: scriptsWithBreakpoints,
@@ -1214,11 +1333,11 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
  * Body: { workflowFile: "path/to/workflow.workflow" }
  *
  * Creates a new sequentially numbered result subfolder inside the lab's results/,
- * copies environment.json from the same folder as the workflow file (if it exists) or creates {}.
+ * creates runtime.env in the result folder from merged environment.json hierarchy,
  * Copies contents of "outputs/" folder from the workflow directory into the result (if it exists).
- * Adds a "run" key with workflow metadata, user info, and paths.
+ * Adds a "run" key with workflow metadata, user info, and paths into runtime.env.
  *
- * Returns: { resultId, resultPath, environmentJsonCopied }
+ * Returns: { resultId, resultPath, runtimeEnvPath, progress }
  */
 router.post('/:id/scripts/debug', async (req, res, next) => {
   try {
@@ -1269,20 +1388,18 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
     const resultDir = path.join(resultsRoot, String(nextId));
     await fs.mkdir(resultDir, { recursive: true });
 
-    // Copy environment.json from the SAME folder as the workflow file (or create empty {})
-    let environmentJsonCopied = false;
     const wfDir = path.dirname(wfPath);
-    const srcEnvJson = path.join(wfDir, 'environment.json');
-    const dstEnvJson = path.join(resultDir, 'environment.json');
-    let dataJson = {};
+
+    // Build runtime.env in the result directory from merged environment.json files.
+    const runtimeEnvPath = path.join(resultDir, 'runtime.env');
     try {
-      await fs.access(srcEnvJson);
-      const raw = await fs.readFile(srcEnvJson, 'utf-8');
-      dataJson = JSON.parse(raw);
-      environmentJsonCopied = true;
-    } catch {
-      // environment.json doesn't exist — create with defaults
-      dataJson = {};
+      await writeRuntimeEnvironmentFile({
+        sourceFilePath: wfPath,
+        labsRoot: LABS_ROOT,
+        outputFilePath: runtimeEnvPath,
+      });
+    } catch (err) {
+      return res.status(400).json({ error: `Cannot build runtime.env: ${err.message}` });
     }
 
     // Copy outputs folder contents from the workflow directory into the result (if it exists)
@@ -1321,41 +1438,21 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       workflowSteps = [workflowFile];
     }
 
-    // Lookup user info for workflow metadata (author field)
-    let userName = '';
-    try {
-      const userStore = getUserStore();
-      const user = await userStore.findById(req.userId);
-      if (user) {
-        userName = `${user.firstName} ${user.lastName}`;
-      }
-    } catch { /* ignore */ }
+    const { now, run } = await buildRunMetadata({
+      userId: req.userId,
+      workflowFile,
+      isWorkflow,
+      workflowSteps,
+      scriptsRoot,
+      mode: 'debug',
+    });
 
-    // Workflow root: the directory of the .workflow file relative to scripts root
-    const workflowRoot = path.dirname(workflowFile);
-
-    // Relative scriptsRoot from LABS_ROOT (e.g. "5/scripts")
-    const relativeScriptsRoot = path.relative(LABS_ROOT, scriptsRoot);
-
-    // Default run name = workflow filename without extension
-    const wfBaseName = path.basename(workflowFile, path.extname(workflowFile));
-
-    // Build the "run" key
-    const now = new Date().toISOString();
-    dataJson.run = {
-      workflowFile: isWorkflow ? workflowFile : null,  // null for single-script debug sessions
-      workflow: workflowSteps,         // array of script paths
-      name: wfBaseName,                // filename without extension
-      author: userName,                // "firstName lastName"
-      private: true,
-      _: 'Do not manualy overwrite keys starting with _',
-      _usr_id: req.userId,             // user id
-      _workflowRoot: workflowRoot === '.' ? '' : workflowRoot,
-      _scriptsRoot: relativeScriptsRoot,
-      _created: now,
-    };
-
-    await fs.writeFile(dstEnvJson, JSON.stringify(dataJson, null, 2), 'utf-8');
+    let runtimeData = await readJsonFile(runtimeEnvPath, { allowMissing: true });
+    if (!runtimeData || typeof runtimeData !== 'object' || Array.isArray(runtimeData)) {
+      runtimeData = {};
+    }
+    runtimeData.run = run;
+    await writeJsonFile(runtimeEnvPath, runtimeData);
 
     // Write initial progress.json
     const progress = {
@@ -1376,7 +1473,7 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
       resultId: String(nextId),
       resultPath: `results/${nextId}`,
       workflowFile,
-      environmentJsonCopied,
+      runtimeEnvPath: `results/${nextId}/runtime.env`,
       progress,
     });
   } catch (e) {
@@ -1395,6 +1492,9 @@ router.post('/:id/scripts/debug', async (req, res, next) => {
  * Uses a virtual resultId "_output" for workflow tracking / SSE events.
  *
  * The first script argument (RESULT_ROOT) is set to the Outputs folder path.
+ * The second argument is a runtime env JSON path next to the launched file:
+ *   - *.workflow.env for workflows
+ *   - *.py.env / *.js.env / *.cjs.env / *.r.env for single scripts
  */
 router.post('/:id/scripts/run', async (req, res, next) => {
   try {
@@ -1441,6 +1541,7 @@ router.post('/:id/scripts/run', async (req, res, next) => {
 
     const wfExt = path.extname(workflowFile).toLowerCase();
     const isSingleScript = ['.py', '.js', '.cjs', '.r'].includes(wfExt);
+    const isWorkflow = !isSingleScript;
 
     if (isSingleScript) {
       // Single script — treat as a one-step workflow
@@ -1454,6 +1555,68 @@ router.post('/:id/scripts/run', async (req, res, next) => {
 
     if (activeSteps.length === 0) {
       return res.status(400).json({ error: 'Workflow has no active steps' });
+    }
+
+    // Build runtime env next to the launched file and always overwrite it.
+    const runtimeEnvPath = `${wfPath}.env`;
+    try {
+      await writeRuntimeEnvironmentFile({
+        sourceFilePath: wfPath,
+        labsRoot: LABS_ROOT,
+        outputFilePath: runtimeEnvPath,
+      });
+    } catch (err) {
+      return res.status(400).json({ error: `Cannot build runtime env file: ${err.message}` });
+    }
+
+    const { run } = await buildRunMetadata({
+      userId: req.userId,
+      workflowFile,
+      isWorkflow,
+      workflowSteps: activeSteps,
+      scriptsRoot,
+      mode: 'production',
+    });
+
+    let runtimeData = await readJsonFile(runtimeEnvPath, { allowMissing: true });
+    if (!runtimeData || typeof runtimeData !== 'object' || Array.isArray(runtimeData)) {
+      runtimeData = {};
+    }
+    runtimeData.run = run;
+    await writeJsonFile(runtimeEnvPath, runtimeData);
+
+    // Execute strictly from run.workflow in runtime env.
+    const runtimeDataFresh = await readJsonFile(runtimeEnvPath);
+    const runtimeWorkflow = runtimeDataFresh?.run?.workflow;
+    if (!runtimeWorkflow) {
+      return res.status(400).json({ error: 'No run.workflow found in runtime env file' });
+    }
+
+    if (typeof runtimeWorkflow === 'string') {
+      const wfRuntimePath = getSecurePath(scriptsRoot, runtimeWorkflow);
+      if (!wfRuntimePath) return res.status(400).json({ error: 'Invalid workflow file path in run.workflow' });
+
+      let wfRuntimeContent;
+      try {
+        wfRuntimeContent = await fs.readFile(wfRuntimePath, 'utf-8');
+      } catch (e) {
+        if (e.code === 'ENOENT') return res.status(404).json({ error: `Workflow file not found: ${runtimeWorkflow}` });
+        throw e;
+      }
+
+      const allLines = wfRuntimeContent.split('\n').map(s => s.trim()).filter(s => s);
+      activeSteps = allLines.filter(s => !s.startsWith('#'));
+      commentedSteps = allLines.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
+    } else if (Array.isArray(runtimeWorkflow)) {
+      const allItems = runtimeWorkflow.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim());
+      activeSteps = allItems.filter(s => !s.startsWith('#'));
+      commentedSteps = allItems.filter(s => s.startsWith('#')).map(s => s.replace(/^#+\s*/, ''));
+    } else {
+      return res.status(400).json({ error: '"run.workflow" must be a string (path to .workflow file) or an array of script paths' });
+    }
+
+    if (activeSteps.length === 0) {
+      return res.status(400).json({ error: 'run.workflow has no active steps' });
     }
 
     // Resolve <ALIAS>/path references
@@ -1478,7 +1641,7 @@ router.post('/:id/scripts/run', async (req, res, next) => {
     }
 
     // Workflow root: directory of the .workflow file relative to scripts root
-    const workflowRoot = path.relative(scriptsRoot, path.dirname(wfPath)) || '';
+    const workflowRoot = run._workflowRoot || '';
 
     // Determine python command from config
     let pythonCmd = 'python';
@@ -1508,6 +1671,7 @@ router.post('/:id/scripts/run', async (req, res, next) => {
       resultDir: outputDir,
       scriptsRoot,
       workflowRoot,
+      runtimeEnvPath,
       pythonCmd,
       debugVisible: false,
       debugScripts: new Set(),
@@ -1524,6 +1688,7 @@ router.post('/:id/scripts/run', async (req, res, next) => {
       message: 'Workflow execution started (output mode)',
       steps: activeSteps,
       resultId,
+      runtimeEnvPath: `${workflowFile}.env`,
       stopOnFailure,
     });
   } catch (e) {

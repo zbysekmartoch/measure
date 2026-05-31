@@ -1,0 +1,4 @@
+Debugger attached.
+Chyba při načítání environment.json: ENOENT: no such file or directory, open '/home/u1/projects/uohs/measure/backend/labs/rb/scripts/Outputs/environment.json'
+Waiting for the debugger to disconnect...
+Step build2.js failed

@@ -17,6 +17,7 @@ import CodeEditor from '../components/CodeEditor.jsx';
 import DebugEditor from '../debug/DebugEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
 import { useToast } from '../components/Toast';
+import { useDialog } from '../components/Dialog.jsx';
 import ZoomableImage from '../components/ZoomableImage.jsx';
 import { fileLocking as lockCfg } from '../lib/uiConfig.js';
 import { setDirtyCount, removeDirtyCount } from '../lib/dirtyRegistry.js';
@@ -26,6 +27,7 @@ import { useWorkflowEvents } from '../hooks/useWorkflowEvents.js';
 
 export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveAllRef, pollingEnabled = true }) {
   const toast = useToast();
+  const dialog = useDialog();
   const apiBasePath = `/api/v1/labs/${lab.id}/scripts`;
 
   const [activeTab, setActiveTab] = useState('browser');
@@ -367,16 +369,25 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
     }
   }, [openFiles, apiBasePath, toast, acquireTabLock, releaseTabLock, isReadonlyFile]);
 
-  const handleFileClose = useCallback((filePath) => {
+  const handleFileClose = useCallback(async (filePath) => {
     const file = openFiles.find((f) => f.path === filePath);
-    if (file?.dirty && !confirm(`File "${file.name}" has unsaved changes. Close anyway?`)) return;
+    if (file?.dirty) {
+      const shouldClose = await dialog.confirm({
+        title: 'Unsaved changes',
+        message: `File "${file.name}" has unsaved changes. Close anyway?`,
+        confirmText: 'Close',
+        cancelText: 'Cancel',
+        tone: 'warning',
+      });
+      if (!shouldClose) return;
+    }
     // Release lock when closing tab
     if (file?.isText && !isReadonlyFile(filePath)) {
       releaseTabLock(filePath);
     }
     setOpenFiles((prev) => prev.filter((f) => f.path !== filePath));
     setActiveTab((prev) => (prev === `file:${filePath}` ? 'browser' : prev));
-  }, [openFiles, releaseTabLock, isReadonlyFile]);
+  }, [openFiles, releaseTabLock, isReadonlyFile, dialog]);
 
   const updateFileContent = useCallback((filePath, newContent) => {
     setOpenFiles((prev) =>

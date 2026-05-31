@@ -6,11 +6,12 @@ measure_init <- function(args = NULL) {
   }
 
   if (length(args) < 3) {
-    stop("Usage: script.R <resultDir> <workflowRoot> <scriptsRoot>", call. = FALSE)
+    stop("Usage: script.R <resultDir> <runtimeEnvPath> <scriptsRoot>", call. = FALSE)
   }
 
   .measure_env$paths <- list(
     RESULT_ROOT = normalizePath(args[1], winslash = "/", mustWork = FALSE),
+    RUNTIME_ENV_PATH = normalizePath(args[2], winslash = "/", mustWork = FALSE),
     WORKFLOW_ROOT = normalizePath(args[2], winslash = "/", mustWork = FALSE),
     LAB_ROOT = normalizePath(args[3], winslash = "/", mustWork = FALSE)
   )
@@ -27,6 +28,10 @@ measure_paths <- function() {
 
 RESULT_ROOT <- function() {
   measure_paths()$RESULT_ROOT
+}
+
+RUNTIME_ENV_PATH <- function() {
+  measure_paths()$RUNTIME_ENV_PATH
 }
 
 WORKFLOW_ROOT <- function() {

@@ -311,7 +311,10 @@ export default function FilePreviewPane({
       ) : isText ? (
         showMarkdownPreview ? (
           /* Rendered Markdown preview */
-          <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'auto', background: '#fff', padding: '20px 28px', lineHeight: 1.7, fontSize: 14 }}>
+          <div
+            className="markdown-preview-pane"
+            style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'auto', background: '#fff', padding: '20px 28px', lineHeight: 1.7, fontSize: 14 }}
+          >
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeRaw, rehypeKatex]}

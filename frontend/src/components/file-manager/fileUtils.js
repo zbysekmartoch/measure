@@ -8,6 +8,8 @@ import { fileIcons } from '../../lib/uiConfig.js';
 /** Map file extension → Monaco Editor language id */
 export const getLanguageFromFilename = (filename) => {
   if (!filename) return 'plaintext';
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.env')) return 'json';
   const ext = filename.split('.').pop()?.toLowerCase();
   const languageMap = {
     py: 'python', python: 'python',
@@ -55,6 +57,8 @@ export const isLatexFile = (filename) => {
 /** Text-editable file? */
 export const isTextFile = (filename) => {
   if (!filename) return false;
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.env')) return true;
   const ext = filename.split('.').pop()?.toLowerCase();
   const textExts = [
     'log','err','txt','json','xml','yaml','yml','md','tex',
@@ -90,6 +94,9 @@ export const formatModifiedDate = (dateStr) => {
 /** Pick icon for a file based on its extension (configurable via uiConfig.fileIcons) */
 export const fileIcon = (filename) => {
   if (!filename) return fileIcons._default || '📦';
+  const lower = filename.toLowerCase();
+  if (lower === 'environment.json') return '🔧';
+  if (lower.endsWith('.env')) return '🛰️';
   // Special named files
   if (filename === 'sync.json') return fileIcons.sync || '🔄';
   const ext = filename.split('.').pop()?.toLowerCase();

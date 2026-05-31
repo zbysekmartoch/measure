@@ -1,5 +1,6 @@
 export(measure_init)
 export(measure_paths)
 export(RESULT_ROOT)
+export(RUNTIME_ENV_PATH)
 export(WORKFLOW_ROOT)
 export(LAB_ROOT)

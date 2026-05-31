@@ -20,6 +20,7 @@ import { fetchJSON } from '../lib/fetchJSON.js';
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
+import { useDialog } from '../components/Dialog.jsx';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
 import CodeEditor from '../components/CodeEditor.jsx';
@@ -50,6 +51,7 @@ export default function LabResultsPane({
   const { t } = useLanguage();
   const { user } = useAuth();
   const toast = useToast();
+  const dialog = useDialog();
 
   const [results, setResults] = useState([]);
   const [selectedResultId, setSelectedResultId] = useState('');
@@ -211,7 +213,14 @@ export default function LabResultsPane({
   // ---- Remove result ----
   const handleRemoveResult = useCallback(async () => {
     if (!selectedResult) return;
-    if (!confirm(`Remove debug session "${getResultLabel(selectedResult)}"?`)) return;
+    const shouldRemove = await dialog.confirm({
+      title: 'Remove debug session',
+      message: `Remove debug session "${getResultLabel(selectedResult)}"?`,
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+      tone: 'danger',
+    });
+    if (!shouldRemove) return;
     try {
       await fetchJSON(`/api/v1/labs/${lab.id}/results/${selectedResult.id}`, { method: 'DELETE' });
       toast.success(`Debug session ${selectedResult.id} removed`);
@@ -221,7 +230,7 @@ export default function LabResultsPane({
     } catch (err) {
       toast.error(`Remove failed: ${err.message || err}`);
     }
-  }, [selectedResult, lab.id, toast, loadResults]);
+  }, [selectedResult, lab.id, toast, loadResults, dialog]);
 
   // ---- Polling for running results ----
   const isPending = selectedResult?.status === 'pending' || selectedResult?.status === 'running';

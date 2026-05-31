@@ -61,6 +61,7 @@ mysql -u root -p < backend/sql/create.sql
 |----------|-------------|
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Architecture, modules, data flow, conventions |
 | [LABS.md](LABS.md) | Labs feature spec & API reference |
+| [MEASURE_ENVIRONMENT.md](MEASURE_ENVIRONMENT.md) | Cascading runtime environment configuration (`environment.json` -> runtime env) |
 | [backend/README.md](backend/README.md) | Backend setup & configuration |
 | [backend/API.md](backend/API.md) | Complete API reference |
 | [backend/EMAIL_TESTING.md](backend/EMAIL_TESTING.md) | Email / password-reset setup |

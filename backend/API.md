@@ -58,7 +58,7 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/labs/:id/scripts` | Yes | List files (tree) |
+| GET | `/labs/:id/scripts` | Yes | List files (tree, supports `?subdir=...`) |
 | GET | `/labs/:id/scripts/content?file=…` | Yes | Read file content |
 | PUT | `/labs/:id/scripts/content` | Yes | Save `{file, content}` |
 | POST | `/labs/:id/scripts/upload` | Yes | Upload (multipart) |
@@ -68,14 +68,24 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 | GET | `/labs/:id/scripts/download?file=…` | Yes | Download (`&inline=1` for in-browser) |
 | GET | `/labs/:id/scripts/folder/zip?path=…` | Yes | Download folder as ZIP |
 | POST | `/labs/:id/scripts/rename` | Yes | Rename file/folder `{oldPath, newPath}` |
-| POST | `/labs/:id/scripts/debug` | Yes | Create result run `{workflowFile}` |
+| POST | `/labs/:id/scripts/debug` | Yes | Create result run from workflow or single script `{workflowFile}`; creates `results/<id>/runtime.env` and stores run metadata in `run` |
+| POST | `/labs/:id/scripts/run` | Yes | Run workflow or single script to `Outputs` `{workflowFile, stopOnFailure?}`; creates `<workflowFile>.env` next to launched file and stores run metadata in `run` |
+
+Notes:
+- `GET /labs/:id/scripts` returns a recursive tree. Recursion depth is controlled by backend config `fileManager.defaultDepth` (`0` means unlimited depth).
+- Both `scripts/debug` and `scripts/run` accept `workflowFile` as either a `.workflow` file or a single script (`.py`, `.js`, `.cjs`, `.r`).
+- `scripts/run` response includes `runtimeEnvPath` (relative path like `analysis.workflow.env`).
+- `scripts/debug` response includes `runtimeEnvPath` (relative path like `results/7/runtime.env`).
+- Runtime env JSON is built by cascading merge of all `environment.json` files from `backend/labs` down to the launched file directory.
+- Runtime env file includes `run` metadata (`run.workflow`, `run.mode`, author, user, roots, timestamps).
+- New debug results created by `scripts/debug` no longer create `results/<id>/environment.json`.
 
 ### Results
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/labs/:id/results` | Yes | List results |
-| POST | `/labs/:id/results/:rid/debug` | Yes | Execute/re-run `{debugVisible}` |
+| POST | `/labs/:id/results/:rid/debug` | Yes | Execute/re-run `{debugVisible}` using `results/:rid/runtime.env` and `run.workflow` |
 | POST | `/labs/:id/results/:rid/abort` | Yes | Abort running result |
 | GET | `/labs/:id/results/:rid/files` | Yes | List result files |
 | GET | `/labs/:id/results/:rid/files/content?file=…` | Yes | Read file |

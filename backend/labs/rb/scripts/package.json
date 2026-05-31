@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "type": "module",
   "description": "",
-  "main": "build.js",
+  "main": "build2.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "measure-docxtemplater-image-module": "file:./measure-docxtemplater-image-module",
     "docxtemplater": "^3.65.3",
-    "docxtemplater-image-module-free": "^1.1.1",
     "image-size": "^2.0.2",
     "luxon": "^3.7.2",
     "mysql2": "^3.14.3",

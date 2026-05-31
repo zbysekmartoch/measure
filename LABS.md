@@ -85,7 +85,8 @@ All endpoints require JWT authentication. Access requires ownership or shared ac
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/labs/:id/scripts/debug` | Create new result run from workflow |
+| POST | `/api/v1/labs/:id/scripts/debug` | Create new result run from workflow or single script; creates `results/<id>/runtime.env` |
+| POST | `/api/v1/labs/:id/scripts/run` | Run workflow or single script to Outputs; creates `<workflowFile>.env` next to launched file |
 
 ### Results
 

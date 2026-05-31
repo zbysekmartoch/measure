@@ -16,6 +16,7 @@ import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import AuthPage from './components/AuthPage';
 import { ToastProvider, useToast } from './components/Toast';
+import { DialogProvider, useDialog } from './components/Dialog.jsx';
 import { FileClipboardProvider } from './components/file-manager/ClipboardContext.jsx';
 import LockRequestNotifications from './components/file-manager/LockRequestNotifications.jsx';
 import SettingsTab from './tabs/SettingsTab';
@@ -67,6 +68,7 @@ function AppContent() {
   const { focusedMode } = useSettings();
   const { t } = useLanguage();
   const toast = useToast();
+  const dialog = useDialog();
 
   // ---- Lab data ----
   const [openLabs, setOpenLabs] = useState([]);
@@ -238,7 +240,14 @@ function AppContent() {
 
   const handleRemove = async () => {
     if (!selectedLab) return;
-    if (!confirm(`Delete lab "${selectedLab.name}"?`)) return;
+    const shouldDelete = await dialog.confirm({
+      title: 'Delete lab',
+      message: `Delete lab "${selectedLab.name}"?`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      tone: 'danger',
+    });
+    if (!shouldDelete) return;
     try {
       await fetchJSON(`/api/v1/labs/${selectedLab.id}`, { method: 'DELETE' });
       toast.success(`Lab "${selectedLab.name}" deleted`);
@@ -464,9 +473,18 @@ function AppContent() {
                     {icons.popOut}
                   </button>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      if (hasDirtyFilesForLab(lab.id) && !confirm(`Lab "${lab.name}" has unsaved changes. Close anyway?`)) return;
+                      if (hasDirtyFilesForLab(lab.id)) {
+                        const shouldClose = await dialog.confirm({
+                          title: 'Unsaved changes',
+                          message: `Lab "${lab.name}" has unsaved changes. Close anyway?`,
+                          confirmText: 'Close',
+                          cancelText: 'Cancel',
+                          tone: 'warning',
+                        });
+                        if (!shouldClose) return;
+                      }
                       closeLab(lab.id);
                     }}
                     title="Close"
@@ -742,9 +760,11 @@ export default function App() {
       <SettingsProvider>
         <AuthProvider>
           <ToastProvider>
-            <FileClipboardProvider>
-              <AuthApp />
-            </FileClipboardProvider>
+            <DialogProvider>
+              <FileClipboardProvider>
+                <AuthApp />
+              </FileClipboardProvider>
+            </DialogProvider>
           </ToastProvider>
         </AuthProvider>
       </SettingsProvider>

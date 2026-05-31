@@ -246,6 +246,23 @@ button:focus-visible {
   background-color: #fde68a !important;
 }
 
+/* KaTeX in markdown preview: avoid internal scrollbars around fractions. */
+.markdown-preview-pane .katex-display {
+  overflow: visible !important;
+  max-width: 100%;
+  margin: 0.6em 0;
+}
+
+.markdown-preview-pane .katex-display > .katex {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.markdown-preview-pane .katex,
+.markdown-preview-pane .katex-html {
+  overflow: visible;
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;

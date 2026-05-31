@@ -1,0 +1,22 @@
+{
+  "name": "measure-docxtemplater-image-module",
+  "version": "1.0.0",
+  "description": "Docxtemplater image module — fork with inline-image text-preservation fix",
+  "type": "commonjs",
+  "main": "js/index.js",
+  "scripts": {
+    "test": "mocha test/test.js"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "^0.8.10"
+  },
+  "peerDependencies": {
+    "docxtemplater": "^3.44.0"
+  },
+  "devDependencies": {
+    "docxtemplater": "^3.44.0",
+    "mocha": "^10.3.0",
+    "pizzip": "^3.1.6"
+  },
+  "license": "MIT"
+}

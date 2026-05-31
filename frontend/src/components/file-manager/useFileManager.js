@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJSON } from '../../lib/fetchJSON.js';
 import { useToast } from '../Toast';
+import { useDialog } from '../Dialog.jsx';
 import { extractFiles, isImageFile, isPdfFile, isTextFile } from './fileUtils.js';
 
 export default function useFileManager({
@@ -30,6 +31,7 @@ export default function useFileManager({
   pollingEnabled = true,
 }) {
   const toast = useToast();
+  const dialog = useDialog();
 
   const [tree, setTree] = useState([]);           // raw tree from API
   const [selectedFile, setSelectedFile] = useState(null);
@@ -48,6 +50,10 @@ export default function useFileManager({
   // Track file modification times for change detection
   const prevMtimesRef = useRef(new Map());
   const [changedFiles, setChangedFiles] = useState(new Set());
+  const changedFilesClearTimeoutRef = useRef(null);
+  const mtimeScopeRef = useRef(apiBasePath);
+  const activeApiBasePathRef = useRef(apiBasePath);
+  const loadFilesRequestIdRef = useRef(0);
   // Counter incremented each time the preview is auto-refreshed (drives flash animation)
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
 
@@ -182,6 +188,18 @@ export default function useFileManager({
     return () => clearInterval(id);
   }, [loadLocks, pollingEnabled]);
 
+  // Track latest scope so stale async responses (from previous apiBasePath) can be ignored.
+  useEffect(() => {
+    activeApiBasePathRef.current = apiBasePath;
+  }, [apiBasePath]);
+
+  // Cleanup deferred highlight clearing when unmounting.
+  useEffect(() => () => {
+    if (changedFilesClearTimeoutRef.current) {
+      clearTimeout(changedFilesClearTimeoutRef.current);
+    }
+  }, []);
+
   // Heartbeat: while editing, periodically refresh the lock
   useEffect(() => {
     if (isEditing && selectedFile) {
@@ -195,9 +213,13 @@ export default function useFileManager({
 
   // ---- load files (keeps tree) ----
   const loadFiles = useCallback(async (silent = false) => {
+    const requestId = ++loadFilesRequestIdRef.current;
     try {
       if (!silent) setLoading(true);
       const data = await fetchJSON(apiBasePath);
+      if (requestId !== loadFilesRequestIdRef.current) return;
+      if (activeApiBasePathRef.current !== apiBasePath) return;
+
       const newItems = data.items || [];
       setTree(newItems);
 
@@ -212,7 +234,18 @@ export default function useFileManager({
       collectMtimes(newItems);
 
       const prev = prevMtimesRef.current;
-      if (prev.size > 0) {
+      const isScopeChanged = mtimeScopeRef.current !== apiBasePath;
+
+      if (isScopeChanged) {
+        // Switched to a different file-root (e.g. another debug session):
+        // treat current snapshot as baseline, not as "external file changes".
+        mtimeScopeRef.current = apiBasePath;
+        if (changedFilesClearTimeoutRef.current) {
+          clearTimeout(changedFilesClearTimeoutRef.current);
+          changedFilesClearTimeoutRef.current = null;
+        }
+        setChangedFiles(new Set());
+      } else if (prev.size > 0) {
         const changed = new Set();
         for (const [path, mtime] of newMtimes) {
           const prevMtime = prev.get(path);
@@ -226,15 +259,25 @@ export default function useFileManager({
         }
         if (changed.size > 0) {
           setChangedFiles(changed);
+          if (changedFilesClearTimeoutRef.current) {
+            clearTimeout(changedFilesClearTimeoutRef.current);
+          }
           // Auto-clear highlights after 15 seconds
-          setTimeout(() => setChangedFiles(new Set()), 15000);
+          changedFilesClearTimeoutRef.current = setTimeout(() => {
+            setChangedFiles(new Set());
+            changedFilesClearTimeoutRef.current = null;
+          }, 15000);
         }
       }
       prevMtimesRef.current = newMtimes;
     } catch {
-      setTree([]);
+      if (activeApiBasePathRef.current === apiBasePath) {
+        setTree([]);
+      }
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && requestId === loadFilesRequestIdRef.current && activeApiBasePathRef.current === apiBasePath) {
+        setLoading(false);
+      }
     }
   }, [apiBasePath]);
 
@@ -273,9 +316,15 @@ export default function useFileManager({
     const isCurrentRequest = () => previewRequestIdRef.current === requestId;
 
     if (!forceLoad && isEditing && fileContent !== originalContent && selectedFile && selectedFile !== file.path) {
-      const msg =
-        `File "${selectedFile}" has unsaved changes. Do you want to save them?\n\nSave = OK, Discard = Cancel`;
-      if (confirm(msg)) {
+      const shouldSave = await dialog.confirm({
+        title: 'Unsaved changes',
+        message: `File "${selectedFile}" has unsaved changes. Do you want to save them?`,
+        confirmText: 'Save',
+        cancelText: 'Discard',
+        tone: 'warning',
+      });
+
+      if (shouldSave) {
         try {
           const r = await fetch(`${apiBasePath}/content`, {
             method: 'PUT',
@@ -390,6 +439,7 @@ export default function useFileManager({
     apiBasePath,
     onFileSelect,
     toast,
+    dialog,
     isEditing,
     fileContent,
     originalContent,
@@ -530,7 +580,14 @@ export default function useFileManager({
   // ---- delete file ----
   const deleteFile = useCallback(async (filepath) => {
     if (!showDelete) return;
-    if (!confirm(`Are you sure you want to delete file "${filepath}"?`)) return;
+    const shouldDelete = await dialog.confirm({
+      title: 'Delete file',
+      message: `Are you sure you want to delete file "${filepath}"?`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      tone: 'danger',
+    });
+    if (!shouldDelete) return;
     try {
       setLoading(true);
       await fetch(`${apiBasePath}?file=${encodeURIComponent(filepath)}`, {
@@ -543,7 +600,7 @@ export default function useFileManager({
     } catch {
       toast.error('Error deleting file');
     } finally { setLoading(false); }
-  }, [selectedFile, loadFiles, apiBasePath, showDelete, toast]);
+  }, [selectedFile, loadFiles, apiBasePath, showDelete, toast, dialog]);
 
   // ---- download file ----
   const downloadFile = useCallback(async (filepath) => {
@@ -648,7 +705,14 @@ export default function useFileManager({
   // ---- delete folder recursively ----
   const deleteFolderRecursive = useCallback(async (folder) => {
     if (!showDelete) return;
-    if (!confirm(`Are you sure you want to delete folder "${folder}" and all its contents?`)) return;
+    const shouldDelete = await dialog.confirm({
+      title: 'Delete folder',
+      message: `Are you sure you want to delete folder "${folder}" and all its contents?`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      tone: 'danger',
+    });
+    if (!shouldDelete) return;
     try {
       setLoading(true);
       await fetch(`${apiBasePath}/folder?path=${encodeURIComponent(folder)}`, {
@@ -663,7 +727,7 @@ export default function useFileManager({
     } catch {
       toast.error('Error deleting folder');
     } finally { setLoading(false); }
-  }, [apiBasePath, showDelete, selectedFile, loadFiles, toast]);
+  }, [apiBasePath, showDelete, selectedFile, loadFiles, toast, dialog]);
 
   // ---- download folder as zip ----
   const downloadFolderZip = useCallback(async (folder) => {
@@ -716,7 +780,14 @@ export default function useFileManager({
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const folder = prompt('Enter folder path (empty for root):', '');
+    const folder = await dialog.prompt({
+      title: 'Upload destination',
+      message: 'Enter folder path (empty for root):',
+      defaultValue: '',
+      placeholder: 'folder/subfolder',
+      confirmText: 'Upload',
+      cancelText: 'Cancel',
+    });
     if (folder === null) return;
     const formData = new FormData();
     if (folder) formData.append('targetPath', folder);
@@ -733,7 +804,7 @@ export default function useFileManager({
     } catch {
       toast.error('Error uploading file');
     } finally { setLoading(false); }
-  }, [loadFiles, apiBasePath, showUpload, toast]);
+  }, [loadFiles, apiBasePath, showUpload, toast, dialog]);
 
   const handleFolderUpload = useCallback(async (event) => {
     if (!showUpload) return;
