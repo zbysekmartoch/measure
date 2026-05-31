@@ -289,6 +289,7 @@ updateDirtyState();
           onThemeChange={handleThemeChange}
           onOpenInNewWindow={openInNewWindow}
           onDownloadFile={fm.downloadFile}
+          onUnpackArchive={fm.unpackArchive}
           onDeleteFile={fm.deleteFile}
           onAnalyze={onAnalyze}
           csvPreviewMaxRows={csvPreviewMaxRows}

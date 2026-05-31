@@ -347,8 +347,15 @@ function buildImageModule() {
             if (filename && filename.startsWith('.')) {
                 filename=getValueFromData(filename, tagValue);
             }
-
-            let imgPath = path.join(`${RESULT_ROOT}/${filename}`);
+            let imgPath;
+            // pokud filename začíná řetězcem "LAB_ROOT" nebo "/" tak je relativní v LAB_ROOT, poku ne nebo začíná "RESULT_ROOT" tak je relativní v RESULT_ROOT
+            if (filename && (filename.startsWith("LAB_ROOT/") || filename.startsWith("/"))) {    
+                   //odstraní případný prefix "LAB_ROOT/" nebo "/" a zbytek spojí s LAB_ROOT
+                   imgPath = path.join(LAB_ROOT, filename.replace(/^LAB_ROOT[\\/]/, '').replace(/^[\\/]/, ''));
+                } else if (filename) {  
+                    // jinak je relativní k RESULT_ROOT. odstraní případný prefix "RESULT_ROOT/" a zbytek spojí s RESULT_ROOT
+                    imgPath = path.join(RESULT_ROOT, filename.replace(/^RESULT_ROOT[\\/]/, ''));
+            }
             let buffer;
             let params=gImgParams[tagValue]?.params||{}
             let settingsType="img";

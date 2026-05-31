@@ -623,6 +623,56 @@ export default function useFileManager({
     }
   }, [apiBasePath, toast]);
 
+  const isUnpackableArchive = useCallback((filepath) => {
+    return /\.(zip|gz|gzip|tgz)$/i.test(filepath || '');
+  }, []);
+
+  // ---- unpack ZIP/GZIP archive in place ----
+  const unpackArchive = useCallback(async (filepath) => {
+    if (!filepath || readOnly) return;
+    if (!isUnpackableArchive(filepath)) {
+      toast.error('Only ZIP/GZIP archives can be unpacked');
+      return;
+    }
+
+    const shouldUnpack = await dialog.confirm({
+      title: 'Unpack archive',
+      message: `Unpack "${filepath}" here? Existing files may be overwritten.`,
+      confirmText: 'Unpack',
+      cancelText: 'Cancel',
+      tone: 'warning',
+    });
+    if (!shouldUnpack) return;
+
+    try {
+      setLoading(true);
+      const r = await fetch(`${apiBasePath}/unpack`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('authToken')}`,
+        },
+        body: JSON.stringify({ file: filepath }),
+      });
+
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        throw new Error(data.error || `HTTP ${r.status}`);
+      }
+
+      await loadFiles();
+
+      const extractedCount = Number.isFinite(data.extractedCount) ? data.extractedCount : 0;
+      const skippedUnsafeCount = Number.isFinite(data.skippedUnsafeCount) ? data.skippedUnsafeCount : 0;
+      const skippedSuffix = skippedUnsafeCount > 0 ? `, skipped ${skippedUnsafeCount} unsafe entr${skippedUnsafeCount === 1 ? 'y' : 'ies'}` : '';
+      toast.success(`Unpacked ${extractedCount} item${extractedCount === 1 ? '' : 's'}${skippedSuffix}`);
+    } catch (e) {
+      toast.error(`Error unpacking archive: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [apiBasePath, dialog, isUnpackableArchive, loadFiles, readOnly, toast]);
+
   // ---- create new empty file ----
   const createNewFile = useCallback(async (filePath) => {
     if (!filePath?.trim()) return;
@@ -879,6 +929,7 @@ export default function useFileManager({
     pdfBlobUrl, imageBlobUrl, isEditing, expandedFolders, changedFiles, previewRefreshKey,
     dragOverFolder, folderUploadRef, apiBasePath,
     loadFiles, loadFileContent, saveFileContent, deleteFile, downloadFile,
+    unpackArchive,
     createNewFile, createNewFolder, renameItem, deleteFolderRecursive, downloadFolderZip,
     pasteInto,
     handleFileUpload, handleFolderUpload, triggerFolderUpload, handleDrop,

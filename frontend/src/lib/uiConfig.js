@@ -92,6 +92,7 @@ export const fileItemButtons = {
 export const filePreviewButtons = {
   edit:     { icon: '✏', bg: '#ff7300', label: 'Edit' },
   download: { icon: '⬇', bg: '#2f9722', label: 'Download' },
+  unpack:   { icon: '📦', bg: '#1d4ed8', label: 'Unpack here' },
   delete:   { icon: '🗑', bg: '#f81717', label: 'Delete' },
   save:     { icon: '💾', bg: '#0066ff', label: 'Save' },
   cancel:   { icon: '✕', bg: '#6b7280', label: 'Cancel' },

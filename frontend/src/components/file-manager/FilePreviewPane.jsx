@@ -35,6 +35,7 @@ export default function FilePreviewPane({
   onThemeChange,
   onOpenInNewWindow,
   onDownloadFile,
+  onUnpackArchive,
   onDeleteFile,
   onAnalyze,
   csvPreviewMaxRows,
@@ -111,6 +112,9 @@ export default function FilePreviewPane({
   const showMarkdownPreview = isMarkdown && !isEditing;
 
   const canEdit = isText && !readOnly && !fileIsReadonly && !isLockedByOther;
+  const canUnpackArchive = Boolean(onUnpackArchive)
+    && !readOnly
+    && /\.(zip|gz|gzip|tgz)$/i.test(selectedFile || '');
 
   // Large file guard — skip Monaco for files exceeding the configured limit
   const maxSize = previewMaxFileSize || 1048576;
@@ -238,6 +242,26 @@ export default function FilePreviewPane({
           >
             {fpBtn.download.icon} {fpBtn.download.label}
           </button>
+          {canUnpackArchive && (
+            <button
+              onClick={() => onUnpackArchive(selectedFile)}
+              disabled={loading}
+              style={{
+                padding: '4px 10px',
+                background: fpBtn.unpack.bg,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: loading ? 'not-allowed' : 'pointer',
+                fontSize: 12,
+                boxShadow: shadow.small,
+                opacity: loading ? 0.65 : 1,
+              }}
+              title={fpBtn.unpack.label}
+            >
+              {fpBtn.unpack.icon} {fpBtn.unpack.label}
+            </button>
+          )}
           {/* Analyze — CSV, JSON, TSV files only */}
           {onAnalyze && /\.(csv|json|tsv)$/i.test(selectedFile) && (
             <button

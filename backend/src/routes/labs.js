@@ -1,9 +1,12 @@
 import { Router } from 'express';
-import { promises as fs } from 'fs';
+import { promises as fs, createReadStream, createWriteStream } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
+import { pipeline } from 'stream/promises';
+import { createGunzip } from 'zlib';
 import archiver from 'archiver';
+import unzipper from 'unzipper';
 import { getSecurePath, listFiles, createUploadMiddleware, getDefaultDepth, copyRecursive } from '../utils/file-manager.js';
 import { writeRuntimeEnvironmentFile } from '../utils/runtime-environment.js';
 import { isReadonlyPath } from '../utils/file-locks.js';
@@ -674,6 +677,131 @@ function getLabCurrentOutputRoot(labId) {
   return path.join(getLabPath(labId), 'scripts', 'Outputs');
 }
 
+function isZipArchive(filePath) {
+  return /\.zip$/i.test(filePath || '');
+}
+
+function isGzipArchive(filePath) {
+  return /\.(gz|gzip|tgz)$/i.test(filePath || '');
+}
+
+function isSupportedArchive(filePath) {
+  return isZipArchive(filePath) || isGzipArchive(filePath);
+}
+
+function normalizeArchiveEntryPath(entryPath) {
+  const normalized = path.posix
+    .normalize(String(entryPath || '').replace(/\\/g, '/'))
+    .replace(/^\/+/, '');
+
+  if (!normalized || normalized === '.') {
+    return { type: 'skip' };
+  }
+  if (normalized === '..' || normalized.startsWith('../')) {
+    return { type: 'unsafe' };
+  }
+  return { type: 'file', relativePath: normalized };
+}
+
+function getGzipOutputRelativePath(relativeArchivePath) {
+  const dir = path.dirname(relativeArchivePath);
+  const fileName = path.basename(relativeArchivePath);
+  let outputName = fileName;
+
+  if (/\.tgz$/i.test(fileName)) {
+    outputName = fileName.replace(/\.tgz$/i, '.tar');
+  } else if (/\.gzip$/i.test(fileName)) {
+    outputName = fileName.replace(/\.gzip$/i, '');
+  } else if (/\.gz$/i.test(fileName)) {
+    outputName = fileName.replace(/\.gz$/i, '');
+  }
+
+  if (!outputName || outputName === fileName) {
+    const err = new Error('Unsupported gzip archive name');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return dir === '.' ? outputName : path.join(dir, outputName);
+}
+
+async function unpackZipArchive({ rootPath, relativeArchivePath, archivePath }) {
+  const archiveDir = path.dirname(relativeArchivePath);
+  const extracted = [];
+  const skippedUnsafe = [];
+  const openedArchive = await unzipper.Open.file(archivePath);
+
+  for (const entry of openedArchive.files) {
+    if (entry.type === 'Directory') continue;
+
+    const entryPathState = normalizeArchiveEntryPath(entry.path);
+    if (entryPathState.type === 'skip') continue;
+    if (entryPathState.type === 'unsafe') {
+      skippedUnsafe.push(entry.path);
+      continue;
+    }
+
+    const relativeOutputPath = archiveDir === '.'
+      ? entryPathState.relativePath
+      : path.join(archiveDir, entryPathState.relativePath);
+    const absoluteOutputPath = getSecurePath(rootPath, relativeOutputPath);
+
+    if (!absoluteOutputPath) {
+      skippedUnsafe.push(entry.path);
+      continue;
+    }
+
+    await fs.mkdir(path.dirname(absoluteOutputPath), { recursive: true });
+    await pipeline(entry.stream(), createWriteStream(absoluteOutputPath));
+    extracted.push(relativeOutputPath);
+  }
+
+  return { extracted, skippedUnsafe };
+}
+
+async function unpackGzipArchive({ rootPath, relativeArchivePath, archivePath }) {
+  const outputRelativePath = getGzipOutputRelativePath(relativeArchivePath);
+  const outputPath = getSecurePath(rootPath, outputRelativePath);
+  if (!outputPath) {
+    const err = new Error('Invalid output path for extracted gzip file');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await pipeline(createReadStream(archivePath), createGunzip(), createWriteStream(outputPath));
+
+  return { extracted: [outputRelativePath], skippedUnsafe: [] };
+}
+
+async function unpackArchiveAtRoot({ rootPath, relativeArchivePath }) {
+  if (!isSupportedArchive(relativeArchivePath)) {
+    const err = new Error('Unsupported archive type. Only ZIP and GZIP are supported.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const archivePath = getSecurePath(rootPath, relativeArchivePath);
+  if (!archivePath) {
+    const err = new Error('Invalid archive path');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const stat = await fs.stat(archivePath);
+  if (!stat.isFile()) {
+    const err = new Error('Path is not a file');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (isZipArchive(relativeArchivePath)) {
+    return unpackZipArchive({ rootPath, relativeArchivePath, archivePath });
+  }
+
+  return unpackGzipArchive({ rootPath, relativeArchivePath, archivePath });
+}
+
 async function readJsonFile(jsonPath, { allowMissing = false } = {}) {
   try {
     const raw = await fs.readFile(jsonPath, 'utf-8');
@@ -941,6 +1069,52 @@ router.get('/:id/results/:resultId/files/download', async (req, res, next) => {
     res.download(filePath, path.basename(filePath));
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    next(e);
+  }
+});
+
+// Unpack ZIP/GZIP archive directly inside the selected result folder.
+router.post('/:id/results/:resultId/files/unpack', async (req, res, next) => {
+  try {
+    const { file } = req.body ?? {};
+    if (!file?.trim()) return res.status(400).json({ error: 'Missing file parameter' });
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const resultRoot = path.join(getLabResultsRoot(req.params.id), req.params.resultId);
+    const secureResult = getSecurePath(getLabResultsRoot(req.params.id), req.params.resultId);
+    if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
+
+    const { extracted, skippedUnsafe } = await unpackArchiveAtRoot({
+      rootPath: resultRoot,
+      relativeArchivePath: file.trim(),
+    });
+
+    if (extracted.length === 0) {
+      return res.status(400).json({
+        error: 'Archive did not contain any unpackable files',
+        skippedUnsafe,
+      });
+    }
+
+    res.json({
+      success: true,
+      file: file.trim(),
+      extractedCount: extracted.length,
+      extracted,
+      skippedUnsafeCount: skippedUnsafe.length,
+      skippedUnsafe,
+    });
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Archive file not found' });
+    if (e.code === 'Z_DATA_ERROR' || /invalid|central directory|signature/i.test(String(e.message || ''))) {
+      return res.status(400).json({ error: 'Invalid archive file' });
+    }
     next(e);
   }
 });
@@ -1856,6 +2030,51 @@ router.get('/:id/scripts/download', async (req, res, next) => {
     res.download(filePath, path.basename(filePath));
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    next(e);
+  }
+});
+
+// Unpack a ZIP/GZIP archive directly inside the scripts folder.
+router.post('/:id/scripts/unpack', async (req, res, next) => {
+  try {
+    const { file } = req.body ?? {};
+    if (!file?.trim()) {
+      return res.status(400).json({ error: 'Missing file parameter' });
+    }
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabScriptsRoot(req.params.id);
+    const { extracted, skippedUnsafe } = await unpackArchiveAtRoot({
+      rootPath: root,
+      relativeArchivePath: file.trim(),
+    });
+
+    if (extracted.length === 0) {
+      return res.status(400).json({
+        error: 'Archive did not contain any unpackable files',
+        skippedUnsafe,
+      });
+    }
+
+    res.json({
+      success: true,
+      file: file.trim(),
+      extractedCount: extracted.length,
+      extracted,
+      skippedUnsafeCount: skippedUnsafe.length,
+      skippedUnsafe,
+    });
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Archive file not found' });
+    if (e.code === 'Z_DATA_ERROR' || /invalid|central directory|signature/i.test(String(e.message || ''))) {
+      return res.status(400).json({ error: 'Invalid archive file' });
+    }
     next(e);
   }
 });

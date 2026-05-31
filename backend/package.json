@@ -23,6 +23,7 @@
     "nodemailer": "^7.0.9",
     "pino": "^9.3.2",
     "pino-http": "^10.3.0",
+    "unzipper": "^0.12.3",
     "ws": "^8.19.0"
   },
   "devDependencies": {
