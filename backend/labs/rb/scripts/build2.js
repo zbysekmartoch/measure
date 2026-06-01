@@ -464,7 +464,7 @@ async function main() {
     // 1) Načti konfiguraci z runtime env JSON souboru
     environment = loadEnvironment();
 
-    IMAGES_DIR = path.join(RESULT_ROOT, 'img');
+    IMAGES_DIR = path.join(RESULT_ROOT, 'img');// todo smazat
 
     // 2) Zjisti konfigurace dokumentů
     let docConfigs = [];
@@ -523,6 +523,7 @@ async function main() {
             if (dataRelPath) { // pokud je zadáno, načti data, jinak nech reportData prázdný (ne všechny dokumenty musí mít data)
                 reportData=loadData(dataPath);
             }
+            reportData.env=environment; // přidej do dat celý environment pro případ, že by někdo chtěl použít nějakou env proměnnou v šabloně
 
             gData=reportData; // globální pro případ potřeby v customizeValue
             let virtualData = createDeepIntrospectingGetLoggerProxy(reportData, {
@@ -1184,7 +1185,10 @@ function createDeepIntrospectingGetLoggerProxy(rootObj, {
 
             if (parentValue == null) return undefined;
 
-            return Reflect.get(parentValue, lastProp);
+            // Keep original params (for example use=czDateTime) on the final segment
+            // so local overrides are not lost for dotted paths like env.workflow.started.
+            const forwardedLastProp = params ? `${lastProp} ${JSON.stringify(params)}` : lastProp;
+            return Reflect.get(parentValue, forwardedLastProp);
         }
 
 
