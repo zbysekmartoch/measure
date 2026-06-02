@@ -25,7 +25,33 @@ import { fetchJSON } from '../lib/fetchJSON.js';
 import WorkflowProgressPane from '../components/WorkflowProgressPane.jsx';
 import { useWorkflowEvents } from '../hooks/useWorkflowEvents.js';
 
-export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveAllRef, pollingEnabled = true }) {
+function normalizeBackupIgnoredFolders(value) {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set();
+  const out = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const normalized = item.replace(/\\/g, '/').trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized === '.' || normalized === '..' || normalized.includes('\0')) continue;
+    const parts = normalized.split('/').filter(Boolean);
+    if (parts.length === 0 || parts.some((part) => part === '.' || part === '..')) continue;
+    const safePath = parts.join('/');
+    if (seen.has(safePath)) continue;
+    seen.add(safePath);
+    out.push(safePath);
+  }
+
+  return out;
+}
+
+function toLabBackupFolderPath(folderPath) {
+  const normalized = String(folderPath || '').replace(/\\/g, '/').trim().replace(/^\/+|\/+$/g, '');
+  if (!normalized) return '';
+  return `scripts/${normalized}`;
+}
+
+export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLabUpdate, saveAllRef, pollingEnabled = true }) {
   const toast = useToast();
   const dialog = useDialog();
   const apiBasePath = `/api/v1/labs/${lab.id}/scripts`;
@@ -35,6 +61,13 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
   const [editorTheme, setEditorTheme] = useState(() =>
     localStorage.getItem('monacoTheme') || 'vs-dark'
   );
+  const [backupIgnoredFolders, setBackupIgnoredFolders] = useState(() =>
+    normalizeBackupIgnoredFolders(lab.backupIgnoredFolders || [])
+  );
+
+  useEffect(() => {
+    setBackupIgnoredFolders(normalizeBackupIgnoredFolders(lab.backupIgnoredFolders || []));
+  }, [lab.backupIgnoredFolders]);
 
   // ── File locking for tab-based editing ────────────────────────────────────
   // tabLocks: { [filePath]: { userId, userEmail, userName, isMe, locked } }
@@ -322,6 +355,36 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
     }
   }, [lab.id, toast, openFiles, saveFile]);
 
+  const handleToggleBackupIgnoreFolder = useCallback(async (folderPath, shouldIgnore) => {
+    const labRelativePath = toLabBackupFolderPath(folderPath);
+    if (!labRelativePath) return;
+
+    const current = normalizeBackupIgnoredFolders(backupIgnoredFolders);
+    const next = shouldIgnore
+      ? Array.from(new Set([...current, labRelativePath]))
+      : current.filter((p) => p !== labRelativePath);
+
+    try {
+      const updated = await fetchJSON(`/api/v1/labs/${lab.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backupIgnoredFolders: next }),
+      });
+
+      const normalizedUpdated = normalizeBackupIgnoredFolders(updated?.backupIgnoredFolders || next);
+      setBackupIgnoredFolders(normalizedUpdated);
+      onLabUpdate?.(updated);
+
+      if (shouldIgnore) {
+        toast.success(`Folder "${folderPath}" excluded from backup`);
+      } else {
+        toast.success(`Folder "${folderPath}" included in backup`);
+      }
+    } catch (e) {
+      toast.error(`Failed to update backup exclusions: ${e.message || e}`);
+    }
+  }, [backupIgnoredFolders, lab.id, onLabUpdate, toast]);
+
   // Open file as a tab (or switch to existing)
   const handleFileOpen = useCallback(async (file) => {
     const filePath = file.path;
@@ -526,6 +589,8 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, saveA
                 previewMaxFileSize={appConfig?.previewMaxFileSize}
                 onAnalyze={onAnalyze ? (fileName) => onAnalyze({ labId: lab.id, apiPath: apiBasePath, fileName }) : undefined}
                 labOwnerId={lab.ownerId}
+                backupIgnoredFolders={backupIgnoredFolders}
+                onToggleBackupIgnoreFolder={handleToggleBackupIgnoreFolder}
               />
             </div>
           </div>

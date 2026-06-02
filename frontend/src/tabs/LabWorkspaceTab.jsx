@@ -708,6 +708,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
               lab={lab}
               debug={debug}
               appConfig={appConfig}
+              onLabUpdate={onLabUpdate}
               onAnalyze={openAnalyze}
               saveAllRef={saveAllRef}
               pollingEnabled={isVisible && activeTab === 'scripts' && !popoutScripts.isPopout}
@@ -829,6 +830,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
             lab={lab}
             debug={debug}
             appConfig={appConfig}
+            onLabUpdate={onLabUpdate}
             onAnalyze={openAnalyze}
             saveAllRef={saveAllRef}
             pollingEnabled={popoutScripts.isPopout}

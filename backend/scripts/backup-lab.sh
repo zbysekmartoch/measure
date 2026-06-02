@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # backup-lab.sh — Create a deduplicated backup of a lab folder.
 #
-# Usage: ./backup-lab.sh <lab_folder_path> <backups_dir>
+# Usage: ./backup-lab.sh <lab_folder_path> <backups_dir> [ignored_folder ...]
 #
 # The script:
 #   1. Creates a ZIP archive of the lab folder (excluding any previous backup artifacts).
+#      Optional ignored folders are lab-relative paths (e.g. scripts/data/raw).
 #   2. Computes the SHA-256 hash of the new ZIP.
 #   3. Checks if any existing backup in <backups_dir> has an identical hash.
 #   4. If a duplicate exists, the new ZIP is discarded (no duplicate backups).
@@ -16,6 +17,7 @@ set -euo pipefail
 
 LAB_DIR="${1:?Usage: backup-lab.sh <lab_folder_path> <backups_dir>}"
 BACKUPS_DIR="${2:?Usage: backup-lab.sh <lab_folder_path> <backups_dir>}"
+IGNORE_FOLDERS=( "${@:3}" )
 
 if [ ! -d "$LAB_DIR" ]; then
   echo "Error: lab folder does not exist: $LAB_DIR" >&2
@@ -33,7 +35,27 @@ TMP_ZIP="$(mktemp /tmp/lab-backup-XXXXXX.zip)"
 rm -f "$TMP_ZIP"
 
 # Create ZIP archive (quiet mode, recurse, from parent dir, no extra attributes)
-(cd "$(dirname "$LAB_DIR")" && zip -r -q -X "$TMP_ZIP" "$LAB_ID")
+ZIP_ARGS=(-r -q -X "$TMP_ZIP" "$LAB_ID")
+EXCLUDE_PATTERNS=()
+
+for raw in "${IGNORE_FOLDERS[@]}"; do
+  rel="${raw//\\//}"
+  rel="${rel#/}"
+  rel="${rel%/}"
+
+  if [[ -z "$rel" || "$rel" == "." || "$rel" == ".." || "$rel" == ../* || "$rel" == */../* ]]; then
+    continue
+  fi
+
+  EXCLUDE_PATTERNS+=("${LAB_ID}/${rel}" "${LAB_ID}/${rel}/*")
+done
+
+if [ "${#EXCLUDE_PATTERNS[@]}" -gt 0 ]; then
+  ZIP_ARGS+=(-x)
+  ZIP_ARGS+=("${EXCLUDE_PATTERNS[@]}")
+fi
+
+(cd "$(dirname "$LAB_DIR")" && zip "${ZIP_ARGS[@]}")
 
 # Compute a content-based hash by listing the archive entries with CRCs.
 # This makes the hash stable across runs with identical content, even though

@@ -88,6 +88,31 @@ async function writeLabMetadata(labPath, metadata) {
   await fs.writeFile(path.join(labPath, 'lab.json'), JSON.stringify(metadata, null, 2), 'utf-8');
 }
 
+function normalizeBackupIgnoredFolders(input) {
+  if (!Array.isArray(input)) return [];
+
+  const out = [];
+  const seen = new Set();
+  for (const item of input) {
+    if (item === null || item === undefined) continue;
+
+    const normalized = path.posix
+      .normalize(String(item).trim().replace(/\\/g, '/'))
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+
+    if (!normalized || normalized === '.' || normalized === '..' || normalized.startsWith('../')) {
+      continue;
+    }
+
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+
+  return out;
+}
+
 // Ownership and sharing checks (simple owner/shared list).
 function isOwner(lab, userId) {
   return String(lab.ownerId) === String(userId);
@@ -287,6 +312,7 @@ router.post('/', async (req, res, next) => {
       description: description ? String(description).trim() : '',
       ownerId: req.userId,
       sharedWith: [],
+      backupIgnoredFolders: [],
       createdAt: now,
       updatedAt: now
     };
@@ -335,6 +361,7 @@ router.post('/:id/clone', async (req, res, next) => {
       description: srcLab.description || '',
       ownerId: req.userId,
       sharedWith: [],
+      backupIgnoredFolders: normalizeBackupIgnoredFolders(srcLab.backupIgnoredFolders || []),
       createdAt: now,
       updatedAt: now,
     };
@@ -440,6 +467,11 @@ router.patch('/:id', async (req, res, next) => {
       lab.backupFrequency = allowed.includes(backupFrequency) ? backupFrequency : null;
     }
 
+    const { backupIgnoredFolders } = req.body ?? {};
+    if (backupIgnoredFolders !== undefined) {
+      lab.backupIgnoredFolders = normalizeBackupIgnoredFolders(backupIgnoredFolders);
+    }
+
     // Optional shortName (alias) — must be unique across all labs
     const { shortName } = req.body ?? {};
     if (shortName !== undefined) {
@@ -517,9 +549,11 @@ router.post('/:id/backup', async (req, res, next) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    const ignoredFolders = normalizeBackupIgnoredFolders(lab.backupIgnoredFolders);
+
     // Run the backup shell script
     await new Promise((resolve, reject) => {
-      execFile(BACKUP_SCRIPT, [labPath, BACKUPS_DIR], { timeout: 120000 }, (err, stdout, stderr) => {
+      execFile(BACKUP_SCRIPT, [labPath, BACKUPS_DIR, ...ignoredFolders], { timeout: 120000 }, (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr || err.message));
         resolve(stdout.trim());
       });

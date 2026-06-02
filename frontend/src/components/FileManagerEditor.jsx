@@ -39,6 +39,8 @@ export default function FileManagerEditor({
   previewMaxFileSize,
   labOwnerId,
   pollingEnabled = true,
+  backupIgnoredFolders,
+  onToggleBackupIgnoreFolder,
 }) {
   const { user } = useAuth();
   const [showPreview, setShowPreview] = useState(true);
@@ -253,6 +255,8 @@ updateDirtyState();
         onUnlockFolder={handleUnlockFolder}
         labOwnerId={labOwnerId}
         currentUserId={user?.id}
+        backupIgnoredFolders={backupIgnoredFolders}
+        onToggleBackupIgnoreFolder={onToggleBackupIgnoreFolder}
       />
 
       {showPreview && (

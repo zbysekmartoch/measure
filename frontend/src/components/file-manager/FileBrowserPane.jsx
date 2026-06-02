@@ -9,7 +9,7 @@
  *   - Copy / Paste buttons on files and folders (cross-instance via ClipboardContext)
  *   - Drag-and-drop upload into any folder
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSettings } from '../../context/SettingsContext';
 import { formatFileSize, fileIcon } from './fileUtils.js';
 import { useFileClipboard } from './ClipboardContext.jsx';
@@ -101,6 +101,21 @@ function groupColorForExtension(ext) {
   return groupCfg.categoryColors?.[categoryName] || groupCfg.categoryColors?.other || '#111827';
 }
 
+function normalizeBackupPath(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.replace(/\\/g, '/').trim().replace(/^\/+|\/+$/g, '');
+  if (!trimmed || trimmed === '.' || trimmed === '..') return '';
+  const parts = trimmed.split('/').filter(Boolean);
+  if (parts.length === 0 || parts.some((part) => part === '.' || part === '..')) return '';
+  return parts.join('/');
+}
+
+function toScriptsBackupPath(folderPath) {
+  const normalized = normalizeBackupPath(folderPath);
+  if (!normalized) return '';
+  return `scripts/${normalized}`;
+}
+
 /* ── recursive tree node (folder) ───────────────────────────────────────────── */
 function FolderNode({
   node, depth, expandedFolders, selectedFile, dragOverFolder,
@@ -113,17 +128,29 @@ function FolderNode({
   onDebugWorkflow, onRunWorkflow, onRename, changedFiles,
   onPublish, onCreateSync,
   isRoot,
+  isBackupIgnored,
   groupByExtension,
   specialFolders,
   compactButtons,
   fileLocks, isReadonlyFile, onRequestLock,
   onUnlockFile, onUnlockFolder, labOwnerId, currentUserId,
+  onToggleBackupIgnoreFolder,
+  isFolderBackupIgnored,
   onPrompt,
 }) {
   const [hovered, setHovered] = useState(false);
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
   const indent = depth * 16;
   const isSpecial = !isRoot && specialFolders?.some(sf => sf.toLowerCase() === node.name.toLowerCase());
+  const folderRowBg = dragOverFolder === node.path
+    ? '#dbeafe'
+    : isBackupIgnored
+      ? '#fff7ed'
+      : isSpecial
+        ? '#f5f3ff'
+        : (depth === 0 ? '#f9fafb' : 'transparent');
+  const folderHoverBg = isBackupIgnored ? '#ffedd5' : (isSpecial ? '#ede9fe' : '#f0f4ff');
+  const folderNameColor = isBackupIgnored ? '#b45309' : (isSpecial ? '#7c3aed' : '#374151');
 
   // Count all files recursively in this folder
   const countFiles = (n) => {
@@ -146,21 +173,26 @@ function FolderNode({
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '4px 6px', paddingLeft: indent + 6,
-          background: dragOverFolder === node.path ? '#dbeafe' : isSpecial ? '#f5f3ff' : (depth === 0 ? '#f9fafb' : 'transparent'),
+          background: folderRowBg,
           borderRadius: 4, cursor: 'pointer', userSelect: 'none',
           borderBottom: depth === 0 ? '1px solid #e5e7eb' : 'none',
-          borderLeft: isSpecial ? '3px solid #8b5cf6' : '3px solid transparent',
+          borderLeft: isBackupIgnored ? '3px solid #f59e0b' : (isSpecial ? '3px solid #8b5cf6' : '3px solid transparent'),
           marginTop: depth === 0 ? 4 : 0,
           transition: 'background 0.1s',
         }}
         onClick={() => onToggleFolder(node.path)}
-        onMouseEnter={(e) => { setHovered(true); if (dragOverFolder !== node.path) e.currentTarget.style.background = isSpecial ? '#ede9fe' : '#f0f4ff'; }}
-        onMouseLeave={(e) => { setHovered(false); e.currentTarget.style.background = dragOverFolder === node.path ? '#dbeafe' : isSpecial ? '#f5f3ff' : (depth === 0 ? '#f9fafb' : 'transparent'); }}
+        onMouseEnter={(e) => { setHovered(true); if (dragOverFolder !== node.path) e.currentTarget.style.background = folderHoverBg; }}
+        onMouseLeave={(e) => { setHovered(false); e.currentTarget.style.background = folderRowBg; }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: isSpecial ? '#7c3aed' : '#374151', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: folderNameColor, minWidth: 0 }}>
           <span style={{ display: 'inline-block', transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>▶</span>
           <span>{isSpecial ? '📦' : '📁'}</span>
           <span title={node.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+          {isBackupIgnored && (
+            <span title="Excluded from backup" style={{ fontSize: 9, color: '#b45309', background: '#ffedd5', padding: '0 4px', borderRadius: 6, flexShrink: 0 }}>
+              NO BACKUP
+            </span>
+          )}
 
           <span style={{ fontSize: 9, color: '#9ca3af', background: '#e5e7eb', padding: '0 4px', borderRadius: 6, flexShrink: 0 }}>
             {countFiles(node)}
@@ -234,6 +266,14 @@ function FolderNode({
           )}
           {onCreateSync && !isRoot && (
             <IBtn title={fiBtn.createSync.label} onClick={() => onCreateSync(node.path)} bg={fiBtn.createSync.bg} disabled={loading}>{fiBtn.createSync.icon}</IBtn>
+          )}
+          {onToggleBackupIgnoreFolder && !isRoot && (
+            <IBtn
+              title={isBackupIgnored ? 'Include in backup' : 'Exclude from backup'}
+              onClick={() => onToggleBackupIgnoreFolder(node.path, !isBackupIgnored)}
+              bg={isBackupIgnored ? '#0f766e' : '#92400e'}
+              disabled={loading}
+            >{isBackupIgnored ? 'B+' : 'B-'}</IBtn>
           )}
           {/* Unlock all locked files in this folder */}
           {onUnlockFolder && (() => {
@@ -344,6 +384,7 @@ function FolderNode({
                 changedFiles={changedFiles}
                 onPublish={onPublish}
                 onCreateSync={onCreateSync}
+                isBackupIgnored={isFolderBackupIgnored?.(child.path)}
                 groupByExtension={groupByExtension}
                 specialFolders={specialFolders}
                 compactButtons={compactButtons}
@@ -354,6 +395,8 @@ function FolderNode({
                 onUnlockFolder={onUnlockFolder}
                 labOwnerId={labOwnerId}
                 currentUserId={currentUserId}
+                onToggleBackupIgnoreFolder={onToggleBackupIgnoreFolder}
+                isFolderBackupIgnored={isFolderBackupIgnored}
                 onPrompt={onPrompt}
               />
             ))}
@@ -548,6 +591,8 @@ export default function FileBrowserPane({
   onUnlockFolder,
   labOwnerId,
   currentUserId,
+  backupIgnoredFolders,
+  onToggleBackupIgnoreFolder,
 }) {
   const { compactButtons, setCompactButtons } = useSettings();
   const toast = useToast();
@@ -571,6 +616,27 @@ export default function FileBrowserPane({
   }, [groupByExtension]);
 
   const askPrompt = useCallback((options) => dialog.prompt(options), [dialog]);
+  const isScriptsBrowser = /\/labs\/[^/]+\/scripts(?:$|\/)/.test(apiBasePath);
+  const normalizedIgnoredFolders = useMemo(
+    () => (backupIgnoredFolders || []).map(normalizeBackupPath).filter(Boolean),
+    [backupIgnoredFolders]
+  );
+  const backupIgnoredSet = useMemo(() => new Set(normalizedIgnoredFolders), [normalizedIgnoredFolders]);
+  const canToggleBackupIgnoreFolder = isScriptsBrowser
+    && typeof onToggleBackupIgnoreFolder === 'function'
+    && String(labOwnerId) === String(currentUserId);
+
+  const isFolderBackupIgnored = useCallback((folderPath) => {
+    if (!isScriptsBrowser) return false;
+    const scriptsPath = toScriptsBackupPath(folderPath);
+    if (!scriptsPath) return false;
+    return backupIgnoredSet.has(scriptsPath);
+  }, [isScriptsBrowser, backupIgnoredSet]);
+
+  const handleToggleBackupIgnoreFolder = useCallback((folderPath, shouldIgnore) => {
+    if (!canToggleBackupIgnoreFolder) return;
+    onToggleBackupIgnoreFolder(folderPath, shouldIgnore);
+  }, [canToggleBackupIgnoreFolder, onToggleBackupIgnoreFolder]);
 
   // Create sync config for a folder (only for scripts-based file managers)
   const handleCreateSync = useCallback(async (folderPath) => {
@@ -720,6 +786,7 @@ export default function FileBrowserPane({
         changedFiles={changedFiles}
         onPublish={onPublish}
         onCreateSync={apiBasePath.includes('/scripts') ? handleCreateSync : undefined}
+        isBackupIgnored={false}
         groupByExtension={groupByExtension}
         specialFolders={specialFolders}
         isRoot
@@ -731,6 +798,8 @@ export default function FileBrowserPane({
         onUnlockFolder={onUnlockFolder}
         labOwnerId={labOwnerId}
         currentUserId={currentUserId}
+        onToggleBackupIgnoreFolder={canToggleBackupIgnoreFolder ? handleToggleBackupIgnoreFolder : undefined}
+        isFolderBackupIgnored={isFolderBackupIgnored}
         onPrompt={askPrompt}
       />
 

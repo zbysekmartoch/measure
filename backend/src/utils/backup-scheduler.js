@@ -16,6 +16,25 @@ const BACKUP_SCRIPT = path.resolve(__dirname, '../../scripts/backup-lab.sh');
 // Check interval: every hour
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
+function normalizeBackupIgnoredFolders(value) {
+  if (!Array.isArray(value)) return [];
+
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+
+    const normalized = item.replace(/\\/g, '/').trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized === '.' || normalized === '..' || normalized.startsWith('../')) continue;
+    if (seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    out.push(normalized);
+  }
+
+  return out;
+}
+
 // Determine if a lab needs backup based on its backupFrequency and lastBackupAt.
 function needsBackup(lab) {
   const freq = lab.backupFrequency;
@@ -36,9 +55,10 @@ function needsBackup(lab) {
 }
 
 // Run backup for a single lab.
-async function backupLab(labPath) {
+async function backupLab(labPath, backupIgnoredFolders = []) {
+  const ignoredFolders = normalizeBackupIgnoredFolders(backupIgnoredFolders);
   return new Promise((resolve, reject) => {
-    execFile(BACKUP_SCRIPT, [labPath, BACKUPS_DIR], { timeout: 120000 }, (err, stdout, stderr) => {
+    execFile(BACKUP_SCRIPT, [labPath, BACKUPS_DIR, ...ignoredFolders], { timeout: 120000 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(stderr || err.message));
       resolve(stdout.trim());
     });
@@ -66,7 +86,7 @@ async function runScheduledBackups() {
         const meta = JSON.parse(await fs.readFile(path.join(labPath, 'lab.json'), 'utf-8'));
         if (needsBackup(meta)) {
           console.log(`[backup-scheduler] Backing up lab ${meta.id || entry.name} (frequency: ${meta.backupFrequency})`);
-          const result = await backupLab(labPath);
+          const result = await backupLab(labPath, meta.backupIgnoredFolders);
           console.log(`[backup-scheduler] ${result}`);
           await updateLastBackup(labPath);
         }
