@@ -10,6 +10,13 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 |--------|----------|------|-------------|
 | GET | `/api/health` | No | System status, version, DB info, config (includes `outputsFolderName`) |
 
+`/api/health` now includes `config.office` with runtime readiness:
+
+- `enabled`
+- `configured`
+- `documentServerUrl`
+- `appUrl`
+
 ## Authentication (`/api/v1/auth`)
 
 | Method | Endpoint | Auth | Body | Description |
@@ -49,10 +56,21 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 
 ### Sharing
 
+#### Lab-level (full access)
+
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | POST | `/labs/:id/share` | Yes | Share `{userId}` |
 | DELETE | `/labs/:id/share/:userId` | Yes | Unshare |
+
+#### Folder-level (partial access)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/labs/:id/folder-share` | Yes | Share a folder `{folderPath, userIds[]}` — empty `userIds` removes the entry |
+| GET | `/labs/shared-folders` | Yes | List all folders shared with current user `→ { items: [{labId, labName, folders[]}] }` |
+
+Folder-level users can perform all file operations (read, write, upload, delete, rename, Office edit) but only within their shared folder. Script and workflow execution is not available.
 
 ### Scripts
 
@@ -61,6 +79,9 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 | GET | `/labs/:id/scripts` | Yes | List files (tree, supports `?subdir=...`) |
 | GET | `/labs/:id/scripts/content?file=…` | Yes | Read file content |
 | PUT | `/labs/:id/scripts/content` | Yes | Save `{file, content}` |
+| GET | `/labs/:id/scripts/office/editor-config?file=…&mode=edit|view` | Yes | Signed Euro/OnlyOffice editor config for DOCX/XLSX |
+| GET | `/labs/:id/scripts/office/active` | Yes | Active Office edit sessions in scripts (`{ sessions }`) |
+| POST | `/labs/:id/scripts/office/sync?file=…` | Yes | Force-save active Office session for one scripts file |
 | POST | `/labs/:id/scripts/upload` | Yes | Upload (multipart) |
 | POST | `/labs/:id/scripts/folder` | Yes | Create folder `{path}` |
 | DELETE | `/labs/:id/scripts?file=…` | Yes | Delete file |
@@ -74,6 +95,7 @@ Authentication also accepts `?token=<jwt>` query parameter (for SSE, downloads, 
 Notes:
 - `GET /labs/:id/scripts` returns a recursive tree. Recursion depth is controlled by backend config `fileManager.defaultDepth` (`0` means unlimited depth).
 - Both `scripts/debug` and `scripts/run` accept `workflowFile` as either a `.workflow` file or a single script (`.py`, `.js`, `.cjs`, `.r`).
+- Before workflow execution starts (`results/:rid/debug` and `scripts/run`), Measure force-saves all active Office sessions in that lab and waits for callbacks.
 - `scripts/run` response includes `runtimeEnvPath` (relative path like `analysis.workflow.env`).
 - `scripts/debug` response includes `runtimeEnvPath` (relative path like `results/7/runtime.env`).
 - Runtime env JSON is built by cascading merge of all `environment.json` files from `backend/labs` down to the launched file directory.
@@ -88,6 +110,9 @@ Notes:
 | POST | `/labs/:id/results/:rid/debug` | Yes | Execute/re-run `{debugVisible}` using `results/:rid/runtime.env` and `run.workflow` |
 | POST | `/labs/:id/results/:rid/abort` | Yes | Abort running result |
 | GET | `/labs/:id/results/:rid/files` | Yes | List result files |
+| GET | `/labs/:id/results/:rid/files/office/editor-config?file=…&mode=edit|view` | Yes | Signed Euro/OnlyOffice editor config for DOCX/XLSX |
+| GET | `/labs/:id/results/:rid/files/office/active` | Yes | Active Office edit sessions in this result (`{ sessions }`) |
+| POST | `/labs/:id/results/:rid/files/office/sync?file=…` | Yes | Force-save active Office session for one result file |
 | GET | `/labs/:id/results/:rid/files/content?file=…` | Yes | Read file |
 | PUT | `/labs/:id/results/:rid/files/content` | Yes | Save file |
 | POST | `/labs/:id/results/:rid/files/upload` | Yes | Upload |
@@ -102,6 +127,8 @@ Notes:
 |--------|----------|------|-------------|
 | POST | `/labs/:id/results/:rid/publish` | Yes | Publish file/folder to `current_output` `{path}` |
 | GET | `/labs/:id/current_output` | Yes | List current_output files |
+| GET | `/labs/:id/current_output/office/editor-config?file=…` | Yes | Signed Euro/OnlyOffice editor config (view-only) |
+| GET | `/labs/:id/current_output/office/active` | Yes | Office session shape endpoint for current_output (normally empty) |
 | GET | `/labs/:id/current_output/content?file=…` | Yes | Read current_output file |
 | GET | `/labs/:id/current_output/download?file=…` | Yes | Download current_output file |
 | GET | `/labs/:id/current_output/folder/zip?path=…` | Yes | Download current_output as ZIP |
@@ -144,6 +171,16 @@ Synchronized via server persistence (in-memory, per-user), BroadcastChannel API,
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | POST | `/paste` | Yes | Copy file/folder between different roots |
+
+## Office Public Endpoints (`/api/office`)
+
+These endpoints are intended for Euro/OnlyOffice Document Server only. They use short-lived
+tokenized URLs generated by the authenticated `editor-config` endpoints above.
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/office/file?token=…` | Token | Document bytes fetch for Document Server |
+| POST | `/office/callback?token=…` | Token | Save callback from Document Server (`status` 2/6 writes file) |
 
 ## Debug (DAP)
 

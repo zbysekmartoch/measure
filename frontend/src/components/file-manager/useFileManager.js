@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJSON } from '../../lib/fetchJSON.js';
 import { useToast } from '../Toast';
 import { useDialog } from '../Dialog.jsx';
-import { extractFiles, isImageFile, isPdfFile, isTextFile } from './fileUtils.js';
+import { extractFiles, isImageFile, isOfficeEditableFile, isPdfFile, isTextFile } from './fileUtils.js';
 
 export default function useFileManager({
   apiBasePath,
@@ -56,6 +56,7 @@ export default function useFileManager({
   const loadFilesRequestIdRef = useRef(0);
   // Counter incremented each time the preview is auto-refreshed (drives flash animation)
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
+  const [officeSessions, setOfficeSessions] = useState({});
 
   // ── File locking state ──────────────────────────────────────────────────────
   // fileLocks: { [filePath]: { userId, userEmail, userName, lockedAt, isMe } }
@@ -101,6 +102,41 @@ export default function useFileManager({
       setLockRequests(data.requests || []);
     } catch { /* ignore */ }
   }, []);
+
+  /** Fetch active Office edit sessions for this file-manager scope (scripts/results). */
+  const loadOfficeSessions = useCallback(async () => {
+    if (readOnly) {
+      setOfficeSessions((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    try {
+      const data = await fetchJSON(`${apiBasePath}/office/active`);
+      const next = data.sessions || {};
+      setOfficeSessions((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    } catch {
+      setOfficeSessions((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+    }
+  }, [apiBasePath, readOnly]);
+
+  /** Trigger immediate force-save from Document Server for a specific Office file. */
+  const syncOfficeFile = useCallback(async (filePath, options = {}) => {
+    const { silent = false } = options;
+
+    if (!filePath || readOnly) {
+      return { ok: true, skipped: true, reason: 'readonly_or_missing_path' };
+    }
+
+    try {
+      const data = await fetchJSON(`${apiBasePath}/office/sync?file=${encodeURIComponent(filePath)}`, { method: 'POST' });
+      await loadOfficeSessions();
+      return data;
+    } catch (e) {
+      if (!silent) {
+        toast.error(`Office sync failed: ${e.message}`);
+      }
+      return { ok: false, error: e.message };
+    }
+  }, [apiBasePath, loadOfficeSessions, readOnly, toast]);
 
   /** Acquire exclusive lock on a file. Returns true on success. */
   const acquireFileLock = useCallback(async (filePath) => {
@@ -188,6 +224,17 @@ export default function useFileManager({
     return () => clearInterval(id);
   }, [loadLocks, pollingEnabled]);
 
+  // Poll active Office sessions every 10 seconds (scripts/results only).
+  useEffect(() => {
+    if (!pollingEnabled || readOnly) {
+      setOfficeSessions((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    loadOfficeSessions();
+    const id = setInterval(loadOfficeSessions, 10_000);
+    return () => clearInterval(id);
+  }, [loadOfficeSessions, pollingEnabled, readOnly]);
+
   // Track latest scope so stale async responses (from previous apiBasePath) can be ignored.
   useEffect(() => {
     activeApiBasePathRef.current = apiBasePath;
@@ -222,6 +269,18 @@ export default function useFileManager({
 
       const newItems = data.items || [];
       setTree(newItems);
+
+      // Auto-expand top-level directories in read-only mode (e.g. shared folder browser)
+      if (readOnly) {
+        const topDirs = newItems.filter(i => i.type === 'directory');
+        if (topDirs.length > 0) {
+          setExpandedFolders(prev => {
+            const next = { ...prev };
+            topDirs.forEach(d => { if (next[d.path] === undefined) next[d.path] = true; });
+            return next;
+          });
+        }
+      }
 
       // Build a new mtime map and detect changed files
       const newMtimes = new Map();
@@ -282,9 +341,8 @@ export default function useFileManager({
   }, [apiBasePath]);
 
   useEffect(() => {
-    if (!pollingEnabled) return;
     loadFiles();
-  }, [loadFiles, refreshTrigger, pollingEnabled]);
+  }, [loadFiles, refreshTrigger]);
 
   // Auto-poll file list every 15 seconds to detect external changes (sync agent, scripts, etc.)
   useEffect(() => {
@@ -354,6 +412,10 @@ export default function useFileManager({
     setIsEditing(false);
     onFileSelect?.(file);
     setLoading(true);
+
+    if (!readOnly && isOfficeEditableFile(file.path)) {
+      loadOfficeSessions();
+    }
 
     if (isImageFile(file.path)) {
       try {
@@ -447,6 +509,8 @@ export default function useFileManager({
     releaseFileLock,
     previewMaxFileSize,
     clearPreviewBlobs,
+    loadOfficeSessions,
+    readOnly,
   ]);
 
   // Auto-reload selected file content when it was modified externally (e.g. after workflow, sync agent)
@@ -938,5 +1002,7 @@ export default function useFileManager({
     // File locking
     fileLocks, lockRequests, isReadonlyFile,
     acquireFileLock, releaseFileLock, requestFileLock, dismissLockReq, loadLocks,
+    // Office collaboration
+    officeSessions, loadOfficeSessions, syncOfficeFile,
   };
 }

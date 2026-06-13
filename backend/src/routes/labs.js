@@ -13,6 +13,21 @@ import { isReadonlyPath } from '../utils/file-locks.js';
 import { getDebugStatus, endDebugSession } from '../debug/debug-engine.js';
 import { startWorkflowRun, abortWorkflowRun } from '../workflow/workflow-runner.js';
 import { getUserStore } from '../users/index.js';
+import {
+  createOfficeViewDocumentKey,
+  ensureOfficeEditSession,
+  ensureOfficeConfigured,
+  getOfficeDocumentServerUrl,
+  getOfficeDocumentType,
+  getOfficeFileExtension,
+  isOfficeFilePath,
+  listOfficeSessionsForScope,
+  resolveOfficeAppUrl,
+  signOfficeAccessToken,
+  signOfficeDocumentConfig,
+  syncAllOfficeSessionsForLab,
+  syncOfficeSessionForFile,
+} from '../utils/office.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -125,6 +140,58 @@ function isShared(lab, userId) {
 // Shared users currently get the same access as owner (future: roles).
 function hasAccess(lab, userId) {
   return isOwner(lab, userId) || isShared(lab, userId);
+}
+
+// Returns folder paths (relative to lab root, e.g. 'scripts/reports') shared with userId.
+function getSharedFolderPaths(lab, userId) {
+  return (lab.sharedFolders || [])
+    .filter(sf => Array.isArray(sf.sharedWith) && sf.sharedWith.map(String).includes(String(userId)))
+    .map(sf => sf.folderPath);
+}
+
+// relPath is relative to scripts root ('reports/file.txt'); sharedFolderPaths are 'scripts/reports'.
+function isPathInSharedFolders(relPath, sharedFolderPaths) {
+  const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '');
+  return sharedFolderPaths.some(sp => {
+    const folderRel = sp.replace(/^scripts\//, '').replace(/^\/+/, '');
+    return normalized === folderRel || normalized.startsWith(folderRel + '/');
+  });
+}
+
+// Returns { fullAccess, sharedFolderPaths } for a user on a lab's scripts.
+// fullAccess=true means owner or lab-level shared user.
+// fullAccess=false with non-empty sharedFolderPaths means folder-level only.
+function getScriptAccess(lab, userId) {
+  const fullAccess = hasAccess(lab, userId);
+  const sharedFolderPaths = fullAccess ? [] : getSharedFolderPaths(lab, userId);
+  return { fullAccess, sharedFolderPaths };
+}
+
+// Filter file tree to only include items reachable from the shared folders.
+// Uses item.path (already computed by listFiles) for reliable path matching.
+function filterTreeToSharedFolders(items, sharedFolderPaths) {
+  const folderRels = sharedFolderPaths.map(sp =>
+    sp.replace(/\\/g, '/').replace(/^scripts\//, '').replace(/^\/+|\/+$/g, '')
+  );
+  const result = [];
+  for (const item of items) {
+    const p = (item.path || item.name || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (item.type === 'directory') {
+      // Include if this dir IS one of the shared folders, is an ancestor, or is inside one
+      const isRelevant = folderRels.some(f =>
+        p === f || f.startsWith(p + '/') || p.startsWith(f + '/')
+      );
+      if (isRelevant) {
+        const filteredChildren = filterTreeToSharedFolders(item.children || [], sharedFolderPaths);
+        result.push({ ...item, children: filteredChildren });
+      }
+    } else {
+      // Include file if its path is inside a shared folder
+      const inShared = folderRels.some(f => p === f || p.startsWith(f + '/'));
+      if (inShared) result.push(item);
+    }
+  }
+  return result;
 }
 
 // ─── Script Stats Helpers ─────────────────────────────────────────────────────
@@ -284,6 +351,23 @@ router.get('/aliases', async (_req, res, next) => {
   try {
     const aliases = await readAliases();
     res.json(aliases);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// List all folders that have been explicitly shared with the current user across all labs.
+router.get('/shared-folders', async (req, res, next) => {
+  try {
+    const labs = await loadAllLabs();
+    const items = [];
+    for (const lab of labs) {
+      const paths = getSharedFolderPaths(lab, req.userId);
+      if (paths.length > 0) {
+        items.push({ labId: lab.id, labName: lab.name, ownerId: lab.ownerId, folders: paths });
+      }
+    }
+    res.json({ items });
   } catch (e) {
     next(e);
   }
@@ -615,6 +699,44 @@ router.delete('/:id/share/:userId', async (req, res, next) => {
   }
 });
 
+// Share a specific folder with a set of users (owner only).
+// Body: { folderPath: 'scripts/reports', userIds: ['1', '2'] }
+// An empty userIds array removes the sharing entry for that folder.
+router.post('/:id/folder-share', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!isOwner(lab, req.userId)) return res.status(403).json({ error: 'Access denied' });
+
+    const { folderPath, userIds } = req.body ?? {};
+    if (!folderPath) return res.status(400).json({ error: 'folderPath is required' });
+    if (!Array.isArray(userIds)) return res.status(400).json({ error: 'userIds must be an array' });
+
+    const normalized = folderPath.replace(/\\/g, '/').trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized.split('/').some(p => p === '..')) {
+      return res.status(400).json({ error: 'Invalid folderPath' });
+    }
+
+    if (!Array.isArray(lab.sharedFolders)) lab.sharedFolders = [];
+
+    const existingIdx = lab.sharedFolders.findIndex(sf => sf.folderPath === normalized);
+    if (userIds.length === 0) {
+      if (existingIdx >= 0) lab.sharedFolders.splice(existingIdx, 1);
+    } else if (existingIdx >= 0) {
+      lab.sharedFolders[existingIdx].sharedWith = userIds.map(String);
+    } else {
+      lab.sharedFolders.push({ folderPath: normalized, sharedWith: userIds.map(String) });
+    }
+
+    lab.updatedAt = new Date().toISOString();
+    await writeLabMetadata(labPath, lab);
+    res.json(lab);
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'Lab not found' });
+    next(e);
+  }
+});
+
 // Load per-user UI state for a lab.
 router.get('/:id/state', async (req, res, next) => {
   try {
@@ -709,6 +831,167 @@ function getLabResultsRoot(labId) {
 // Helper for lab current_output root (Outputs folder inside scripts).
 function getLabCurrentOutputRoot(labId) {
   return path.join(getLabPath(labId), 'scripts', 'Outputs');
+}
+
+async function syncOfficeBeforeRun(labId, res) {
+  const officeSync = await syncAllOfficeSessionsForLab(labId, { waitForSave: true });
+  const hardFails = (officeSync.details || []).filter(
+    (d) => !d.ok && !d.skipped && d.errorCode != null && ![1, 4].includes(d.errorCode),
+  );
+  if (hardFails.length > 0) {
+    res.status(409).json({
+      error: 'Cannot start workflow: failed to sync active Office documents',
+      officeSync,
+    });
+    return null;
+  }
+  return officeSync;
+}
+
+function getOfficeUserDisplayName(user) {
+  const first = String(user?.firstName || '').trim();
+  const last = String(user?.lastName || '').trim();
+  const full = `${first} ${last}`.trim();
+  return full || String(user?.email || '').trim() || 'Measure User';
+}
+
+async function buildOfficeEditorConfig({
+  req,
+  userId,
+  area,
+  labId,
+  resultId,
+  rootPath,
+  filePath,
+  requestedMode = 'edit',
+}) {
+  ensureOfficeConfigured();
+
+  const cleanFilePath = String(filePath || '').trim();
+  if (!cleanFilePath) {
+    const err = new Error('Missing file parameter');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!isOfficeFilePath(cleanFilePath)) {
+    const err = new Error(`Unsupported office file type: ${getOfficeFileExtension(cleanFilePath) || 'unknown'}`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const absolutePath = getSecurePath(rootPath, cleanFilePath);
+  if (!absolutePath) {
+    const err = new Error('Invalid file path');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const stat = await fs.stat(absolutePath);
+  if (!stat.isFile()) {
+    const err = new Error('Path is not a file');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const extension = getOfficeFileExtension(cleanFilePath);
+  const documentType = getOfficeDocumentType(extension);
+  if (!documentType) {
+    const err = new Error(`Unsupported office document type: ${extension || 'unknown'}`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const mode = requestedMode === 'view' || isReadonlyPath(cleanFilePath) ? 'view' : 'edit';
+
+  let user = null;
+  try {
+    user = await getUserStore().findById(userId);
+  } catch {
+    user = null;
+  }
+
+  const appUrl = resolveOfficeAppUrl(req);
+  let documentKey = createOfficeViewDocumentKey({ area, labId, resultId, filePath: cleanFilePath });
+
+  if (mode === 'edit') {
+    const editSession = ensureOfficeEditSession({
+      area,
+      labId,
+      resultId,
+      filePath: cleanFilePath,
+      user: {
+        id: String(userId),
+        name: getOfficeUserDisplayName(user),
+        email: String(user?.email || '').trim(),
+      },
+    });
+    documentKey = editSession.key;
+  }
+
+  const fileToken = signOfficeAccessToken({
+    action: 'file',
+    area,
+    labId: String(labId),
+    resultId: resultId ? String(resultId) : '',
+    filePath: cleanFilePath,
+    mode,
+  });
+
+  const callbackToken = signOfficeAccessToken({
+    action: 'callback',
+    area,
+    labId: String(labId),
+    resultId: resultId ? String(resultId) : '',
+    filePath: cleanFilePath,
+    mode,
+  });
+
+  const documentUrl = `${appUrl}/api/office/file?token=${encodeURIComponent(fileToken)}`;
+  const callbackUrl = `${appUrl}/api/office/callback?token=${encodeURIComponent(callbackToken)}`;
+
+  const configPayload = {
+    document: {
+      fileType: extension,
+      key: documentKey,
+      title: path.basename(cleanFilePath),
+      url: documentUrl,
+      permissions: {
+        edit: mode === 'edit',
+        comment: mode === 'edit',
+        review: mode === 'edit',
+        copy: true,
+        print: true,
+        fillForms: mode === 'edit',
+      },
+    },
+    documentType,
+    editorConfig: {
+      lang: 'en',
+      mode,
+      user: {
+        id: `measure-${userId}`,
+        name: getOfficeUserDisplayName(user),
+      },
+      ...(mode === 'edit' && {
+        callbackUrl,
+        coEditing: {
+          mode: 'fast',
+          change: true,
+        },
+        customization: {
+          forceSave: true,
+        },
+      }),
+    },
+    height: '100%',
+    width: '100%',
+  };
+
+  return {
+    config: signOfficeDocumentConfig(configPayload),
+    docServerUrl: getOfficeDocumentServerUrl(),
+  };
 }
 
 function isZipArchive(filePath) {
@@ -979,6 +1262,93 @@ router.get('/:id/results/:resultId/files', async (req, res, next) => {
     res.json({ root: '', items: files, count: files.length });
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Result not found' });
+    next(e);
+  }
+});
+
+// Build Euro/OnlyOffice editor configuration for a result file (DOCX/XLSX).
+router.get('/:id/results/:resultId/files/office/editor-config', async (req, res, next) => {
+  try {
+    const { file, mode = 'edit' } = req.query;
+    if (!file) return res.status(400).json({ error: 'Missing file parameter' });
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const resultsRoot = getLabResultsRoot(req.params.id);
+    const resultRoot = path.join(resultsRoot, req.params.resultId);
+    const secureResult = getSecurePath(resultsRoot, req.params.resultId);
+    if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
+
+    const payload = await buildOfficeEditorConfig({
+      req,
+      userId: req.userId,
+      area: 'results',
+      labId: req.params.id,
+      resultId: req.params.resultId,
+      rootPath: resultRoot,
+      filePath: String(file),
+      requestedMode: String(mode || 'edit'),
+    });
+
+    res.json(payload);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    next(e);
+  }
+});
+
+// Active Office edit sessions for result files.
+router.get('/:id/results/:resultId/files/office/active', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const sessions = listOfficeSessionsForScope({
+      area: 'results',
+      labId: req.params.id,
+      resultId: req.params.resultId,
+    });
+
+    res.json({ sessions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Manual force-save + wait for a specific result Office file.
+router.post('/:id/results/:resultId/files/office/sync', async (req, res, next) => {
+  try {
+    const file = String(req.query.file || req.body?.file || '').trim();
+    if (!file) return res.status(400).json({ error: 'Missing file parameter' });
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const syncResult = await syncOfficeSessionForFile({
+      area: 'results',
+      labId: req.params.id,
+      resultId: req.params.resultId,
+      filePath: file,
+      waitForSave: true,
+    });
+
+    if (!syncResult.ok) {
+      return res.status(409).json({ error: syncResult.error || 'Office sync failed', details: syncResult });
+    }
+
+    res.json(syncResult);
+  } catch (e) {
     next(e);
   }
 });
@@ -1321,6 +1691,10 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
     const secureResult = getSecurePath(resultsRoot, resultId);
     if (!secureResult) return res.status(400).json({ error: 'Invalid result id' });
 
+    // Force-save open Office docs before the workflow reads them from disk.
+    const officeSync = await syncOfficeBeforeRun(labId, res);
+    if (officeSync === null) return;
+
     const debugVisible = req.body?.debugVisible === true;
     const stopOnFailure = req.body?.stopOnFailure !== false; // default true
 
@@ -1528,6 +1902,7 @@ router.post('/:id/results/:resultId/debug', async (req, res, next) => {
       debugScripts: [...scriptsWithBreakpoints],
       resultId,
       stopOnFailure,
+      officeSync,
     });
   } catch (e) {
     next(e);
@@ -1732,6 +2107,10 @@ router.post('/:id/scripts/run', async (req, res, next) => {
       throw e;
     }
 
+    // Force-save open Office docs before the workflow reads them from disk.
+    const officeSync = await syncOfficeBeforeRun(labId, res);
+    if (officeSync === null) return;
+
     // Determine the Outputs folder (at lab level, inside scripts root)
     let outputsFolderName = 'Outputs';
     try {
@@ -1898,6 +2277,7 @@ router.post('/:id/scripts/run', async (req, res, next) => {
       resultId,
       runtimeEnvPath: `${workflowFile}.env`,
       stopOnFailure,
+      officeSync,
     });
   } catch (e) {
     next(e);
@@ -1911,7 +2291,10 @@ router.get('/:id/scripts', async (req, res, next) => {
   try {
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
+
+    const fullAccess = hasAccess(lab, req.userId);
+    const sharedFolderPaths = fullAccess ? [] : getSharedFolderPaths(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1925,10 +2308,121 @@ router.get('/:id/scripts', async (req, res, next) => {
       return res.status(400).json({ error: 'Path is not a directory' });
     }
 
-    const files = await listFiles(targetPath, subdir || '', getDefaultDepth());
-    res.json({ root: subdir || '', items: files, count: files.length });
+    let files;
+    if (fullAccess) {
+      files = await listFiles(targetPath, subdir || '', getDefaultDepth());
+    } else {
+      // Folder-only access: build tree directly from each shared folder (avoids complex filtering)
+      const depth = getDefaultDepth();
+      const items = [];
+      for (const sfPath of sharedFolderPaths) {
+        const folderRel = sfPath.replace(/\\/g, '/').replace(/^scripts\//, '').replace(/^\/+|\/+$/g, '');
+        if (!folderRel) continue;
+        const folderAbs = path.join(root, ...folderRel.split('/'));
+        try {
+          const st = await fs.stat(folderAbs);
+          const children = await listFiles(folderAbs, folderRel, depth);
+          items.push({
+            name: path.basename(folderRel),
+            path: folderRel,
+            type: 'directory',
+            size: 0,
+            mtime: st.mtime.toISOString(),
+            children,
+          });
+        } catch { /* skip inaccessible */ }
+      }
+      files = items;
+    }
+    res.json({ root: subdir || '', items: files, count: files.length, readOnly: !fullAccess });
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Directory not found' });
+    next(e);
+  }
+});
+
+// Build Euro/OnlyOffice editor configuration for a scripts file (DOCX/XLSX).
+router.get('/:id/scripts/office/editor-config', async (req, res, next) => {
+  try {
+    const { file, mode = 'edit' } = req.query;
+    if (!file) return res.status(400).json({ error: 'Missing file parameter' });
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(String(file), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this file' });
+    }
+
+    const root = getLabScriptsRoot(req.params.id);
+    const payload = await buildOfficeEditorConfig({
+      req,
+      userId: req.userId,
+      area: 'scripts',
+      labId: req.params.id,
+      resultId: null,
+      rootPath: root,
+      filePath: String(file),
+      requestedMode: String(mode || 'edit'),
+    });
+
+    res.json(payload);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    next(e);
+  }
+});
+
+// Active Office edit sessions for scripts files.
+router.get('/:id/scripts/office/active', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+
+    const sessions = listOfficeSessionsForScope({
+      area: 'scripts',
+      labId: req.params.id,
+      resultId: null,
+    });
+
+    res.json({ sessions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Manual force-save + wait for a specific scripts Office file.
+router.post('/:id/scripts/office/sync', async (req, res, next) => {
+  try {
+    const file = String(req.query.file || req.body?.file || '').trim();
+    if (!file) return res.status(400).json({ error: 'Missing file parameter' });
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(file, sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this file' });
+    }
+
+    const syncResult = await syncOfficeSessionForFile({
+      area: 'scripts',
+      labId: req.params.id,
+      resultId: null,
+      filePath: file,
+      waitForSave: true,
+    });
+
+    if (!syncResult.ok) {
+      return res.status(409).json({ error: syncResult.error || 'Office sync failed', details: syncResult });
+    }
+
+    res.json(syncResult);
+  } catch (e) {
     next(e);
   }
 });
@@ -1941,8 +2435,13 @@ router.get('/:id/scripts/content', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
+    const fullAccess = hasAccess(lab, req.userId);
+    const sharedFolderPaths = fullAccess ? [] : getSharedFolderPaths(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!fullAccess && !isPathInSharedFolders(String(file), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this file' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -1975,8 +2474,10 @@ router.put('/:id/scripts/content', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(String(file), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this path' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -1998,15 +2499,21 @@ router.post('/:id/scripts/upload', async (req, res, next) => {
   try {
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
 
     const root = getLabScriptsRoot(req.params.id);
     const upload = createUploadMiddleware(root, 50 * 1024 * 1024);
     upload.single('file')(req, res, async (err) => {
       if (err) return next(err);
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      if (!fullAccess) {
+        const uploadedRelPath = path.join(req.body.targetPath || '', req.file.filename);
+        if (!isPathInSharedFolders(uploadedRelPath, sharedFolderPaths)) {
+          await fs.unlink(req.file.path).catch(() => {});
+          return res.status(403).json({ error: 'Access denied to this path' });
+        }
+      }
       res.json({ success: true, file: req.file.filename, size: req.file.size });
     });
   } catch (e) {
@@ -2022,8 +2529,10 @@ router.delete('/:id/scripts', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(String(file), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this path' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -2046,8 +2555,13 @@ router.get('/:id/scripts/download', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
+    const fullAccess = hasAccess(lab, req.userId);
+    const sharedFolderPaths = fullAccess ? [] : getSharedFolderPaths(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!fullAccess && !isPathInSharedFolders(String(file), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this file' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -2078,8 +2592,10 @@ router.post('/:id/scripts/unpack', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(file.trim(), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this path' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -2121,8 +2637,10 @@ router.get('/:id/scripts/folder/zip', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(String(folderPath), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this path' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -2154,8 +2672,10 @@ router.post('/:id/scripts/folder', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(folderPath.trim(), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this path' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -2179,8 +2699,10 @@ router.post('/:id/scripts/rename', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && (!isPathInSharedFolders(oldPath.trim(), sharedFolderPaths) || !isPathInSharedFolders(newPath.trim(), sharedFolderPaths))) {
+      return res.status(403).json({ error: 'Access denied to this path' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -2217,8 +2739,10 @@ router.delete('/:id/scripts/folder', async (req, res, next) => {
 
     const labPath = getLabPath(req.params.id);
     const lab = await readLabMetadata(labPath);
-    if (!hasAccess(lab, req.userId)) {
-      return res.status(403).json({ error: 'Access denied' });
+    const { fullAccess, sharedFolderPaths } = getScriptAccess(lab, req.userId);
+    if (!fullAccess && sharedFolderPaths.length === 0) return res.status(403).json({ error: 'Access denied' });
+    if (!fullAccess && !isPathInSharedFolders(String(folderPath), sharedFolderPaths)) {
+      return res.status(403).json({ error: 'Access denied to this path' });
     }
 
     const root = getLabScriptsRoot(req.params.id);
@@ -2350,6 +2874,61 @@ router.get('/:id/current_output', async (req, res, next) => {
     res.json({ root: subdir || '', items: files, count: files.length });
   } catch (e) {
     if (e.code === 'ENOENT') return res.status(404).json({ error: 'Directory not found' });
+    next(e);
+  }
+});
+
+// Build Euro/OnlyOffice editor configuration for current_output files (view-only).
+router.get('/:id/current_output/office/editor-config', async (req, res, next) => {
+  try {
+    const { file } = req.query;
+    if (!file) return res.status(400).json({ error: 'Missing file parameter' });
+
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const root = getLabCurrentOutputRoot(req.params.id);
+    await fs.mkdir(root, { recursive: true });
+
+    const payload = await buildOfficeEditorConfig({
+      req,
+      userId: req.userId,
+      area: 'current_output',
+      labId: req.params.id,
+      resultId: null,
+      rootPath: root,
+      filePath: String(file),
+      requestedMode: 'view',
+    });
+
+    res.json(payload);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    next(e);
+  }
+});
+
+// Current output has no editable Office sessions (view-only), keep shape for frontend polling.
+router.get('/:id/current_output/office/active', async (req, res, next) => {
+  try {
+    const labPath = getLabPath(req.params.id);
+    const lab = await readLabMetadata(labPath);
+    if (!hasAccess(lab, req.userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const sessions = listOfficeSessionsForScope({
+      area: 'current_output',
+      labId: req.params.id,
+      resultId: null,
+    });
+
+    res.json({ sessions });
+  } catch (e) {
     next(e);
   }
 });

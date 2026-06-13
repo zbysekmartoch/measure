@@ -32,10 +32,15 @@ backend/labs/<id>/
   "description": "Analyze pricing trends",
   "ownerId": 1,
   "sharedWith": [3, 7],
+  "sharedFolders": [
+    { "folderPath": "scripts/reports", "sharedWith": ["4", "8"] }
+  ],
   "createdAt": "2025-01-15T10:30:00.000Z",
   "updatedAt": "2025-02-01T14:22:00.000Z"
 }
 ```
+
+`sharedFolders` entries use `folderPath` relative to the lab root (always prefixed with `scripts/`). Users listed in a folder's `sharedWith` get full file access to that folder only — they cannot run scripts or workflows.
 
 ## API Endpoints
 
@@ -61,10 +66,21 @@ All endpoints require JWT authentication. Access requires ownership or shared ac
 
 ### Sharing
 
+#### Lab-level sharing (full access)
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/labs/:id/share` | Share with user |
+| POST | `/api/v1/labs/:id/share` | Share with user `{userId}` |
 | DELETE | `/api/v1/labs/:id/share/:userId` | Unshare |
+
+#### Folder-level sharing (partial access)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/labs/:id/folder-share` | Share a specific folder `{folderPath, userIds[]}` |
+| GET | `/api/v1/labs/shared-folders` | List all folders shared with the current user (across all labs) |
+
+`folderPath` is relative to the lab root, e.g. `scripts/reports`. Passing an empty `userIds` array removes the sharing entry for that folder.
 
 ### Scripts (File Management)
 
@@ -149,7 +165,9 @@ Per-user file clipboard stored on the server. Works across all browser windows/t
 
 ### Lab Browser (App.jsx)
 
-Two sub-tabs: **My Labs** and **Shared Labs**. Each lab row has **Clone** and **Enter** buttons. Double-click opens lab. My Labs has create/delete + detail/sharing panel.
+Three sub-tabs: **My Labs**, **Shared Labs**, and **Shared Folders**. Each lab row has **Clone** and **Enter** buttons. Double-click opens lab. My Labs has create/delete + detail/sharing panel.
+
+The **Shared Folders** tab lists all individual folders shared with the current user, grouped by lab. Clicking a folder opens a full file manager (read/write) scoped to that folder only. Script execution is not available in this view.
 
 ### Lab Workspace (LabWorkspaceTab)
 
@@ -200,5 +218,6 @@ See [WORKFLOW.md](WORKFLOW.md#shared-library-lab-labslib) for details.
 
 - Access checks on every endpoint (owner or shared user)
 - Path traversal protection on all file operations
-- Owner-only: delete lab, update metadata
+- Owner-only: delete lab, update metadata, manage sharing
 - Script execution sandboxed to lab directory
+- Folder-level access: all scripts file operations validate that the requested path falls within the shared folder — cross-folder access is denied even if the user knows the path

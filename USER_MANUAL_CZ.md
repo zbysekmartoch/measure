@@ -27,7 +27,7 @@
 7. [Workflow](#7-workflow)
    - [Co je workflow](#71-co-je-workflow)
    - [Formát souboru .workflow](#72-formát-souboru-workflow)
-   - [Soubor environment.json](#73-soubor-environmentjson)
+   - [Soubory environment.json a runtime env](#73-soubory-environmentjson-a-runtime-env)
    - [Spuštění workflow](#74-spuštění-workflow)
    - [Sledování průběhu v reálném čase](#75-sledování-průběhu-v-reálném-čase)
    - [Zastavení workflow](#76-zastavení-workflow)
@@ -78,6 +78,7 @@ Measure je **single-page aplikace (SPA)** běžící v prohlížeči. Rozhraní 
 |---------|-------|
 | **My Labs** | Seznam vlastních laboratoří |
 | **Shared Labs** | Laboratoře sdílené jinými uživateli |
+| **Shared Folders** | Složky sdílené s vámi z laboratoří ostatních uživatelů |
 | **Otevřené laboratoře** | Dynamické záložky — každá otevřená laboratoř má vlastní tab |
 | **Settings** | Nastavení aplikace |
 
@@ -172,7 +173,7 @@ Dole se zobrazují informace: ID, vlastník, datum vytvoření/aktualizace a vel
 
 ### 4.3 Sdílení laboratoří
 
-V záložce **Settings** laboratoře se v pravém sloupci zobrazuje seznam všech uživatelů systému. Zaškrtnutím políčka vedle jména uživatele mu udělíte přístup k laboratoři.
+V záložce **Settings** laboratoře se v pravém sloupci zobrazuje seznam všech uživatelů systému. Zaškrtnutím políčka vedle jména uživatele mu udělíte přístup k celé laboratoři.
 
 Sdílený přístup umožňuje:
 - Prohlížet a editovat skripty
@@ -184,6 +185,14 @@ Sdílený uživatel **nemůže**:
 - Smazat laboratoř
 - Měnit metadata (název, popis)
 - Měnit sdílení
+
+#### Sdílení konkrétní složky
+
+Kromě sdílení celé laboratoře lze sdílet i **jednotlivé složky**. Tato možnost je dostupná přímo ve správci souborů v záložce **Scripts**: klikněte pravým tlačítkem na složku a zvolte **Share folder**.
+
+Uživatel se sdílenou složkou ji vidí v záložce **Shared Folders** na hlavní obrazovce. Po kliknutí se otevře plnohodnotný správce souborů omezený na tuto složku — lze číst, editovat, nahrávat i mazat soubory. Spouštění skriptů a workflow není k dispozici.
+
+Vlastník může sdílení složky kdykoli změnit nebo odebrat ze záložky Settings nebo přímo z kontextového menu složky.
 
 ### 4.4 Klonování laboratoří
 
@@ -338,7 +347,7 @@ Toto funguje v režimu **Run** i **Debug** a pro všechny Python skripty ve vše
 Při spuštění skriptu v rámci workflow dostává každý skript:
 
 1. **Argument 1** — absolutní cesta k adresáři výsledku (`results/<číslo>/`), kam skript zapisuje své výstupy
-2. **Argument 2** — relativní cesta ke kořenu workflow souboru v rámci `scripts/`
+2. **Argument 2** — absolutní cesta k runtime env JSON souboru (`runtime.env` nebo `*.env`)
 3. **Argument 3** — absolutní cesta ke kořenu `scripts/`
 
 Python skript typicky pracuje takto:
@@ -348,7 +357,7 @@ import sys
 import os
 
 result_dir = sys.argv[1]      # kam ukládat výstupy
-workflow_root = sys.argv[2]    # adresář workflow souboru
+runtime_env_path = sys.argv[2] # runtime env JSON soubor
 scripts_root = sys.argv[3]    # kořen skriptů
 
 # Uložení výstupu do výsledkové složky
@@ -404,15 +413,40 @@ Toto je užitečné pro dočasné vypnutí části analýzy bez nutnosti mazat �
 
 Cesty ke skriptům v `.workflow` souboru jsou **relativní ke složce, kde leží workflow soubor**. Pokud je workflow umístěn v `scripts/analysis/main.workflow`, pak odkaz `preprocess.py` znamená `scripts/analysis/preprocess.py`.
 
-### 7.3 Soubor environment.json
+### 7.3 Soubory environment.json a runtime env
 
-Při vytvoření nového spuštění (result) se do výsledkové složky zkopíruje soubor `environment.json` ze složky workflow souboru (pokud existuje). Tento soubor obsahuje:
+Konfigurace běhového prostředí je dvouvrstvá:
 
-- Definici workflow (pole skriptů nebo odkaz na `.workflow` soubor)
-- Konfigurační parametry pro skripty
-- Metadata o spuštění (uživatel, čas, cesty)
+1. **Zdrojové `environment.json` soubory**
+2. **Vygenerovaný runtime env JSON (`runtime.env` nebo `*.env`)**
 
-Struktura:
+Detailní příručka ke kaskádování je v souboru `MEASURE_ENVIRONMENT.md`.
+
+#### Zdrojové environment.json
+
+`environment.json` může být v libovolné podsložce laboratoře. Při spuštění se vezmou všechny `environment.json` od kořene `backend/labs` směrem ke spouštěnému souboru a **hluboce se sloučí**.
+
+Pravidla merge:
+
+- U objektů se klíče mergují rekurzivně.
+- Pokud stejný klíč není pole, bližší soubor hodnotu přepíše.
+- Pokud stejný klíč je pole, pole se **zřetězí** (concat).
+- Čím blíž je `environment.json` ke spouštěnému souboru, tím vyšší má prioritu.
+
+#### Runtime env JSON
+
+Runtime soubor je výsledkem výše uvedeného merge a ten se předává skriptům jako argument 2:
+
+- **Spuštění ze záložky Scripts (`Run`)**: vznikne soubor vedle spouštěného souboru, např. `full_analysis.workflow.env` nebo `draw_plots.py.env`.
+- **Create debugging session**: vznikne `results/<id>/runtime.env`.
+
+Soubor se při každém spuštění přepisuje.
+
+#### Metadata běhu v resultu
+
+Ve výsledku stále existuje `environment.json` s metadaty běhu (`run`) a workflow definicí.
+
+Typická struktura:
 
 ```json
 {
@@ -444,9 +478,12 @@ Existují dva způsoby spuštění:
 2. U souboru se zobrazí tlačítko 🛠️ **Debug Workflow**.
 3. Po kliknutí se automaticky:
    - Vytvoří nový výsledek (results) s dalším pořadovým číslem
-   - Zkopíruje se `environment.json` z adresáře workflow
+   - Vytvoří se `results/<id>/runtime.env` (kaskádovým sloučením `environment.json`)
+   - Zkopíruje se `environment.json` z adresáře workflow (metadata kompatibilita)
    - Zkopíruje se obsah podsložky `outputs/` (pokud existuje)
    - Přepne se na záložku **Results** s novým výsledkem
+
+Poznámka: Při spuštění přes **Run** ze záložky Scripts se vytváří runtime soubor vedle spouštěného souboru (`*.env`).
 
 #### B) Ze záložky Results
 
@@ -522,8 +559,9 @@ Každé spuštění workflow vytvoří **nový výsledek** v číslované podslo
 ```
 results/
 ├── 1/
-│   ├── environment.json    ← konfigurační soubor (kopie z workflow adresáře)
-│   ├── progress.json       ← stav workflow (stavy kroků, časování)
+│   ├── environment.json    ← metadata běhu + workflow definice
+│   ├── runtime.env         ← sloučená runtime konfigurace pro běh
+│   ├── _progress.json      ← stav workflow (stavy kroků, časování)
 │   ├── output.log          ← standardní výstup (stdout)
 │   ├── output.err          ← chybový výstup (stderr)
 │   ├── report.csv          ← výstupní soubory vytvořené skripty
@@ -536,7 +574,8 @@ results/
 ```
 
 - **environment.json** — zachycuje workflow definici a metadata spuštění
-- **progress.json** — automaticky aktualizovaný stav workflow (stavy jednotlivých kroků, časy spuštění a dokončení, návratové kódy)
+- **runtime.env** — sloučená runtime konfigurace z kaskády `environment.json`
+- **_progress.json** — automaticky aktualizovaný stav workflow (stavy jednotlivých kroků, časy spuštění a dokončení, návratové kódy)
 - **output.log** / **output.err** — přímo ze stdout/stderr skriptů
 - **Výstupní soubory** — cokoli, co skripty zapíší do výsledkového adresáře (tabulky, grafy, PDF, HTML reporty…)
 
