@@ -11,6 +11,7 @@ import sql from './sql.js';
 import labs from './labs.js';
 import users from './users.js';
 import sync from './sync.js';
+import office from './office.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { getSecurePath, copyRecursive } from '../utils/file-manager.js';
 import debugRoutes from '../debug/debug-routes.js';
@@ -121,6 +122,12 @@ router.get('/health', async (req, res) => {
         csvPreviewMaxRows,
         previewMaxFileSize,
         keyboardMenu,
+        office: {
+          enabled: config.office.enabled,
+          configured: Boolean(config.office.documentServerUrl && config.office.jwtSecret),
+          documentServerUrl: config.office.documentServerUrl || null,
+          appUrl: config.office.appUrl || null,
+        },
       },
       timestamp: new Date().toISOString()
     });
@@ -159,6 +166,7 @@ router.get('/whatsnew', async (req, res) => {
 
 // API routes - auth endpoint without authentication
 router.use('/v1/auth', auth);
+router.use('/office', office);
 
 // All other v1 routes require authentication
 router.use('/v1/labs/:id/sync', authenticateToken, sync);

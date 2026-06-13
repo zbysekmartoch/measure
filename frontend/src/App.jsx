@@ -26,6 +26,7 @@ import { fetchJSON } from './lib/fetchJSON.js';
 import { icons, tabIcons } from './lib/uiConfig.js';
 import { hasDirtyFiles, hasDirtyFilesForLab } from './lib/dirtyRegistry.js';
 import WhatsNewPage from './components/WhatsNewPage.jsx';
+import SharedFoldersTab from './tabs/SharedFoldersTab.jsx';
 
 /**
  * Standalone lab view — used when opened via popup window (?lab=<id>&standalone=1).
@@ -61,7 +62,7 @@ function StandaloneLabView({ labId }) {
  * Labs browser (My Labs / Shared Labs) + open lab tabs are all at the top level.
  */
 function AppContent() {
-  // tab: 'mine' | 'shared' | 'lab:<id>' | 'settings' | 'performance'
+  // tab: 'mine' | 'shared' | 'sharedFolders' | 'lab:<id>' | 'settings' | 'performance'
   const [tab, setTab] = useState('mine');
   const [healthInfo, setHealthInfo] = useState(null);
   const { user, logout } = useAuth();
@@ -300,6 +301,7 @@ function AppContent() {
     })
     : [];
   const showList = tab === 'mine' || tab === 'shared';
+  const showSharedFolders = tab === 'sharedFolders';
   const isLabTabActive = tab.startsWith('lab:');
   const isFocusedLabView = focusedMode && isLabTabActive;
 
@@ -412,6 +414,7 @@ function AppContent() {
           <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <TabButton id="mine">My labs</TabButton>
             <TabButton id="shared">Shared labs</TabButton>
+            <TabButton id="sharedFolders">Shared folders</TabButton>
 
             {/* Open lab workspace tabs */}
             {openLabs.map((lab) => {
@@ -715,6 +718,13 @@ function AppContent() {
               )}
             </div>
             )}
+          </div>
+        )}
+
+        {/* Shared folders browser */}
+        {showSharedFolders && (
+          <div style={{ height: '100%', overflow: 'auto', padding: 2 }}>
+            <SharedFoldersTab appConfig={healthInfo?.config} />
           </div>
         )}
 

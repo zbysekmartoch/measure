@@ -18,6 +18,7 @@ import { performanceMetricsMiddleware } from './utils/performance-metrics.js';
 import { initUserStore, userStoreNeedsSql } from './users/index.js';
 
 const app = express();
+const officeOrigins = config.office.documentServerOrigin ? [config.office.documentServerOrigin] : [];
 
 function getTokenFromRequest(req) {
   const authHeader = req.headers?.authorization;
@@ -63,14 +64,14 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "blob:"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "blob:", ...officeOrigins],
       workerSrc: ["'self'", "blob:"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
       fontSrc: ["'self'", "https://cdn.jsdelivr.net", "data:"],
-      connectSrc: ["'self'", "ws:", "wss:", "https://cdn.jsdelivr.net"],
+      connectSrc: ["'self'", "ws:", "wss:", "https://cdn.jsdelivr.net", ...officeOrigins],
       imgSrc: ["'self'", "data:", "blob:"],
       objectSrc: ["'self'", "blob:"],
-      frameSrc: ["'self'", "blob:"],
+      frameSrc: ["'self'", "blob:", ...officeOrigins],
     },
   },
 }));

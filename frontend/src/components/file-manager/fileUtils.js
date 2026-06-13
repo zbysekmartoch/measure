@@ -41,6 +41,22 @@ export const isPdfFile = (filename) => {
   return filename.split('.').pop()?.toLowerCase() === 'pdf';
 };
 
+/** Office file editable via Euro/OnlyOffice integration. */
+export const isOfficeEditableFile = (filename) => {
+  if (!filename) return false;
+  const ext = filename.split('.').pop()?.toLowerCase();
+  return ['docx', 'xlsx'].includes(ext);
+};
+
+/** File path contains "readonly" — used to determine view-only mode. */
+export const isReadonlyFile = (filePath) => !!(filePath && /readonly/i.test(filePath));
+
+/** Open the Office editor/viewer in a new window. */
+export const openOfficeEditor = (apiBasePath, filePath, mode) => {
+  const url = `/office-editor.html?apiBasePath=${encodeURIComponent(apiBasePath)}&file=${encodeURIComponent(filePath)}&mode=${encodeURIComponent(mode)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+};
+
 /** Markdown file? */
 export const isMarkdownFile = (filename) => {
   if (!filename) return false;

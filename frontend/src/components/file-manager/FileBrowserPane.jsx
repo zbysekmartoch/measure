@@ -118,9 +118,9 @@ function toScriptsBackupPath(folderPath) {
 
 /* ── recursive tree node (folder) ───────────────────────────────────────────── */
 function FolderNode({
-  node, depth, expandedFolders, selectedFile, dragOverFolder,
+  node, depth, expandedFolders, selectedFile, selectedFolderPath, dragOverFolder,
   showUpload, showDelete, showModificationDate, loading,
-  onToggleFolder, onFileClick, onFileDoubleClick,
+  onToggleFolder, onFileClick, onFileDoubleClick, onFolderSelect,
   onCreateNewFile, onCreateNewFolder,
   onTriggerFolderUpload, onDownloadFolderZip, onDeleteFolder,
   onDrop, onDragOver, onDragLeave,
@@ -139,17 +139,29 @@ function FolderNode({
   onPrompt,
 }) {
   const [hovered, setHovered] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const isExpanded = isRoot || (expandedFolders[node.path] ?? (depth === 0));
+  const isFolderSelected = !isRoot && selectedFolderPath === node.path;
+
+  const toggleGroup = useCallback((key) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
   const indent = depth * 16;
   const isSpecial = !isRoot && specialFolders?.some(sf => sf.toLowerCase() === node.name.toLowerCase());
   const folderRowBg = dragOverFolder === node.path
     ? '#dbeafe'
-    : isBackupIgnored
-      ? '#fff7ed'
-      : isSpecial
-        ? '#f5f3ff'
-        : (depth === 0 ? '#f9fafb' : 'transparent');
-  const folderHoverBg = isBackupIgnored ? '#ffedd5' : (isSpecial ? '#ede9fe' : '#f0f4ff');
+    : isFolderSelected
+      ? '#eff6ff'
+      : isBackupIgnored
+        ? '#fff7ed'
+        : isSpecial
+          ? '#f5f3ff'
+          : (depth === 0 ? '#f9fafb' : 'transparent');
+  const folderHoverBg = isFolderSelected ? '#dbeafe' : (isBackupIgnored ? '#ffedd5' : (isSpecial ? '#ede9fe' : '#f0f4ff'));
   const folderNameColor = isBackupIgnored ? '#b45309' : (isSpecial ? '#7c3aed' : '#374151');
 
   // Count all files recursively in this folder
@@ -164,23 +176,31 @@ function FolderNode({
 
   return (
     <div
+      style={{ position: 'relative' }}
       onDrop={(e) => onDrop(e, node.path)}
       onDragOver={(e) => onDragOver(e, node.path)}
       onDragLeave={onDragLeave}
     >
+      {isExpanded && !isRoot && (
+        <div style={{
+          position: 'absolute', left: indent + 10, top: 28, bottom: 8,
+          width: 1, background: '#d1d5db', pointerEvents: 'none', zIndex: 0,
+        }} />
+      )}
       {/* Folder header row */}
       <div
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '4px 6px', paddingLeft: indent + 6,
+          minHeight: 28,
           background: folderRowBg,
           borderRadius: 4, cursor: 'pointer', userSelect: 'none',
           borderBottom: depth === 0 ? '1px solid #e5e7eb' : 'none',
-          borderLeft: isBackupIgnored ? '3px solid #f59e0b' : (isSpecial ? '3px solid #8b5cf6' : '3px solid transparent'),
+          borderLeft: isBackupIgnored ? '3px solid #f59e0b' : (isSpecial ? '3px solid #8b5cf6' : (isFolderSelected ? '3px solid #3b82f6' : '3px solid transparent')),
           marginTop: depth === 0 ? 4 : 0,
           transition: 'background 0.1s',
         }}
-        onClick={() => onToggleFolder(node.path)}
+        onClick={() => { onToggleFolder(node.path); if (!isRoot) onFolderSelect?.(node); }}
         onMouseEnter={(e) => { setHovered(true); if (dragOverFolder !== node.path) e.currentTarget.style.background = folderHoverBg; }}
         onMouseLeave={(e) => { setHovered(false); e.currentTarget.style.background = folderRowBg; }}
       >
@@ -331,23 +351,52 @@ function FolderNode({
         return (
           <>
             {groupByExtension
-              ? buildExtensionGroups(fileChildren).map((group, idx) => (
-                <div
-                  key={`${node.path || '__root__'}::${group.ext || '__noext__'}`}
-                  style={{
-                    marginTop: idx === 0 ? 3 : 7,
-                    marginBottom: 2,
-                    marginLeft: groupInset,
-                    border: `1px solid ${groupCfg.borderColor || '#e5e7eb'}`,
-                    borderLeft: `${groupCfg.borderLeftWidth || 5}px solid ${groupColorForExtension(group.ext)}`,
-                    borderRadius: 6,
-                    background: 'transparent',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {group.files.map((f) => renderFileRow(f, groupInset))}
-                </div>
-              ))
+              ? buildExtensionGroups(fileChildren).map((group, idx) => {
+                  const groupKey = `${node.path || '__root__'}::${group.ext || '__noext__'}`;
+                  const isGroupCollapsed = collapsedGroups.has(groupKey);
+                  const groupColor = groupColorForExtension(group.ext);
+                  const barWidth = (groupCfg.borderLeftWidth || 5) + 3;
+                  return (
+                    <div
+                      key={groupKey}
+                      style={{
+                        marginTop: idx === 0 ? 3 : 7,
+                        marginBottom: 2,
+                        marginLeft: groupInset,
+                        border: `1px solid ${groupCfg.borderColor || '#e5e7eb'}`,
+                        borderRadius: 6,
+                        overflow: 'hidden',
+                        display: 'flex',
+                      }}
+                    >
+                      <div
+                        onClick={() => toggleGroup(groupKey)}
+                        title={isGroupCollapsed ? 'Click to expand' : 'Click to collapse'}
+                        style={{
+                          width: barWidth,
+                          flexShrink: 0,
+                          background: groupColor,
+                          cursor: 'n-resize',
+                        }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {isGroupCollapsed ? (
+                          <div
+                            onClick={() => toggleGroup(groupKey)}
+                            style={{
+                              padding: '4px 8px', fontSize: 11, color: '#6b7280',
+                              cursor: 'pointer', userSelect: 'none', fontStyle: 'italic',
+                            }}
+                          >
+                            {group.ext ? `.${group.ext}` : '—'} — {group.files.length} {group.files.length === 1 ? 'file' : 'files'} · click to expand
+                          </div>
+                        ) : (
+                          group.files.map((f) => renderFileRow(f, groupInset))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
               : fileChildren.map(renderFileRow)}
 
             {dirChildren.map((child) => (
@@ -357,6 +406,7 @@ function FolderNode({
                 depth={depth + 1}
                 expandedFolders={expandedFolders}
                 selectedFile={selectedFile}
+                selectedFolderPath={selectedFolderPath}
                 dragOverFolder={dragOverFolder}
                 showUpload={showUpload}
                 showDelete={showDelete}
@@ -365,6 +415,7 @@ function FolderNode({
                 onToggleFolder={onToggleFolder}
                 onFileClick={onFileClick}
                 onFileDoubleClick={onFileDoubleClick}
+                onFolderSelect={onFolderSelect}
                 onCreateNewFile={onCreateNewFile}
                 onCreateNewFolder={onCreateNewFolder}
                 onTriggerFolderUpload={onTriggerFolderUpload}
@@ -431,6 +482,7 @@ function FileRow({ file, depth, indentOffset = 0, isSelected, showModificationDa
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '3px 6px', paddingLeft: indent,
+        minHeight: 26,
         borderRadius: 4,
         background: baseBg,
         borderLeft: isReadonly ? `3px solid ${lockCfg.readonlyColor}`
@@ -553,6 +605,7 @@ export default function FileBrowserPane({
   files,           // flat list — used only for "no files" check
   expandedFolders,
   selectedFile,
+  selectedFolderPath,
   dragOverFolder,
   showPreview,
   showUpload,
@@ -569,6 +622,7 @@ export default function FileBrowserPane({
   onToggleFolder,
   onFileClick,
   onFileDoubleClick,
+  onFolderSelect,
   onCreateNewFile,
   onCreateNewFolder,
   onDeleteFolder,
@@ -759,6 +813,7 @@ export default function FileBrowserPane({
         depth={0}
         expandedFolders={expandedFolders}
         selectedFile={selectedFile}
+        selectedFolderPath={selectedFolderPath}
         dragOverFolder={dragOverFolder}
         showUpload={showUpload}
         showDelete={showDelete}
@@ -767,6 +822,7 @@ export default function FileBrowserPane({
         onToggleFolder={onToggleFolder}
         onFileClick={onFileClick}
         onFileDoubleClick={onFileDoubleClick}
+        onFolderSelect={onFolderSelect}
         onCreateNewFile={onCreateNewFile}
         onCreateNewFolder={onCreateNewFolder}
         onTriggerFolderUpload={onTriggerFolderUpload}

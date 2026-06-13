@@ -91,6 +91,9 @@ export const fileItemButtons = {
 
 export const filePreviewButtons = {
   edit:     { icon: '✏', bg: '#ff7300', label: 'Edit' },
+  officeEdit: { icon: '✏', bg: '#ea580c', label: 'Edit in' },
+  officeView: { icon: '👁', bg: '#475569', label: 'Open Office Preview' },
+  officeRefresh: { icon: '↺', bg: '#0f766e', label: 'Refresh' },
   download: { icon: '⬇', bg: '#2f9722', label: 'Download' },
   unpack:   { icon: '📦', bg: '#1d4ed8', label: 'Unpack here' },
   delete:   { icon: '🗑', bg: '#f81717', label: 'Delete' },
@@ -311,6 +314,8 @@ export const fileIcons = {
   // Documents
   md:       '📝',
   mexpr:      '∑',
+  docx:     '📘',
+  xlsx:     '📗',
   txt:      '📄',
   log:      '📃',
   err:      '🚨',

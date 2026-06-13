@@ -17,6 +17,24 @@ const fileConfig = (() => {
   }
 })();
 
+const sampleOfficeEnv = (() => {
+  try {
+    const sampleEnvPath = path.resolve(__dirname, '../../euro-office-sample-app/.env');
+    return dotenv.parse(readFileSync(sampleEnvPath, 'utf8'));
+  } catch {
+    return {};
+  }
+})();
+
+const firstNonEmpty = (...values) => {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+};
+
 const toNumber = (value, fallback) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -28,6 +46,24 @@ const toBool = (value, fallback) => {
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return fallback;
+};
+
+const normalizeUrl = (value) => {
+  if (!value) return '';
+  try {
+    return String(new URL(value)).replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+};
+
+const extractOrigin = (value) => {
+  if (!value) return '';
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '';
+  }
 };
 
 const required = (key) => {
@@ -43,6 +79,31 @@ if (!['sql', 'dual', 'file'].includes(userStoreMode)) {
 }
 
 const dbIsRequired = userStoreMode !== 'file';
+const fallbackJwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+const officeConfigFromFile = fileConfig.office && typeof fileConfig.office === 'object' ? fileConfig.office : {};
+
+const officeDocumentServerUrl = normalizeUrl(firstNonEmpty(
+  process.env.DOC_SERVER_URL,
+  process.env.OFFICE_DOC_SERVER_URL,
+  officeConfigFromFile.documentServerUrl,
+  officeConfigFromFile.docServerUrl,
+  sampleOfficeEnv.DOC_SERVER_URL,
+));
+
+const officeAppUrl = normalizeUrl(firstNonEmpty(
+  process.env.OFFICE_APP_URL,
+  process.env.APP_URL,
+  officeConfigFromFile.appUrl,
+  sampleOfficeEnv.APP_URL,
+));
+
+const officeJwtSecret = firstNonEmpty(
+  process.env.DOC_SERVER_JWT_SECRET,
+  process.env.OFFICE_DOC_SERVER_JWT_SECRET,
+  officeConfigFromFile.jwtSecret,
+  officeConfigFromFile.docServerJwtSecret,
+  sampleOfficeEnv.JWT_SECRET,
+);
 
 export const config = {
   env: process.env.NODE_ENV || 'development',
@@ -55,7 +116,7 @@ export const config = {
     database: dbIsRequired ? required('DB_NAME') : (process.env.DB_NAME || null)
   },
   corsOrigins: (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
-  jwtSecret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
+  jwtSecret: fallbackJwtSecret,
   
   // Email configuration
   email: {
@@ -95,6 +156,32 @@ export const config = {
   
   // Frontend URL for reset links
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+
+  office: {
+    enabled: toBool(
+      process.env.OFFICE_ENABLED,
+      toBool(officeConfigFromFile.enabled, Boolean(officeDocumentServerUrl && officeJwtSecret)),
+    ),
+    documentServerUrl: officeDocumentServerUrl,
+    documentServerOrigin: extractOrigin(officeDocumentServerUrl),
+    jwtSecret: officeJwtSecret,
+    appUrl: officeAppUrl,
+    tokenSecret: firstNonEmpty(process.env.OFFICE_TOKEN_SECRET, officeConfigFromFile.tokenSecret) || `${fallbackJwtSecret}:office`,
+    accessTokenTtl: firstNonEmpty(process.env.OFFICE_ACCESS_TOKEN_TTL, officeConfigFromFile.accessTokenTtl) || '2h',
+    configTokenTtl: firstNonEmpty(process.env.OFFICE_CONFIG_TOKEN_TTL, officeConfigFromFile.configTokenTtl) || '1h',
+    forceSaveIntervalMs: toNumber(
+      firstNonEmpty(process.env.OFFICE_FORCE_SAVE_INTERVAL_MS, officeConfigFromFile.forceSaveIntervalMs),
+      30000,
+    ),
+    forceSaveWaitTimeoutMs: toNumber(
+      firstNonEmpty(process.env.OFFICE_FORCE_SAVE_WAIT_TIMEOUT_MS, officeConfigFromFile.forceSaveWaitTimeoutMs),
+      12000,
+    ),
+    sessionPreregistrationTtlMs: toNumber(
+      firstNonEmpty(process.env.OFFICE_SESSION_PREREGISTRATION_TTL_MS, officeConfigFromFile.sessionPreregistrationTtlMs),
+      120000,
+    ),
+  },
 
   userStore: {
     mode: userStoreMode,

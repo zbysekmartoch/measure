@@ -2,7 +2,7 @@
  * FileManagerEditor — index barrel for the decomposed file-manager module.
  * Re-exports everything so existing `import … from './FileManagerEditor.jsx'` still works.
  */
-export { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate, fileIcon, extractFiles, groupFilesByFolder } from './file-manager/fileUtils.js';
+export { getLanguageFromFilename, isImageFile, isPdfFile, isOfficeEditableFile, isReadonlyFile, isTextFile, formatFileSize, formatModifiedDate, fileIcon, extractFiles, groupFilesByFolder, openOfficeEditor } from './file-manager/fileUtils.js';
 export { default as useFileManager } from './file-manager/useFileManager.js';
 export { default as FileBrowserPane } from './file-manager/FileBrowserPane.jsx';
 export { default as FilePreviewPane } from './file-manager/FilePreviewPane.jsx';
@@ -12,12 +12,15 @@ export { useFileClipboard, FileClipboardProvider } from './file-manager/Clipboar
  * Default export — drop-in replacement for the old 1254-line monolith.
  * Composes FileBrowserPane + FilePreviewPane + useFileManager hook.
  */
-import React, { useCallback, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import useFileManager from './file-manager/useFileManager.js';
 import FileBrowserPane from './file-manager/FileBrowserPane.jsx';
 import FilePreviewPane from './file-manager/FilePreviewPane.jsx';
 import { getLanguageFromFilename } from './file-manager/fileUtils.js';
+import { useToast } from './Toast';
+import { useDialog } from './Dialog.jsx';
+import { useFileClipboard } from './file-manager/ClipboardContext.jsx';
 
 
 export default function FileManagerEditor({
@@ -41,12 +44,32 @@ export default function FileManagerEditor({
   pollingEnabled = true,
   backupIgnoredFolders,
   onToggleBackupIgnoreFolder,
+  sharedFolders,
+  onFolderShareUpdate,
 }) {
   const { user } = useAuth();
+  const toast = useToast();
+  const dialog = useDialog();
+  const { copyFolder } = useFileClipboard();
   const [showPreview, setShowPreview] = useState(true);
   const [editorTheme, setEditorTheme] = useState(() => localStorage.getItem('monacoTheme') || 'vs-dark');
   const [splitterWidth, setSplitterWidth] = useState(380);
   const containerRef = useRef(null);
+  const [selectedFolder, setSelectedFolder] = useState(null);
+  const [users, setUsers] = useState([]);
+
+  // Extract labId from apiBasePath (e.g. '/api/v1/labs/123/scripts' → '123')
+  const labId = apiBasePath.match(/\/labs\/([^/]+)\//)?.[1] ?? null;
+  const isLabOwner = labId && labOwnerId && String(labOwnerId) === String(user?.id);
+
+  // Load users list (needed for folder sharing, only if lab owner)
+  useEffect(() => {
+    if (!isLabOwner) return;
+    fetch('/api/v1/users', { headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.items) setUsers(d.items.filter(u => String(u.id) !== String(user?.id))); })
+      .catch(() => {});
+  }, [isLabOwner, user?.id]);
 
   const fm = useFileManager({
     apiBasePath,
@@ -156,6 +179,54 @@ updateDirtyState();
     doc.addEventListener('mouseup', onUp);
   }, [splitterWidth]);
 
+  // Folder selection: clicking a folder switches preview pane to folder panel.
+  // In pure read-only mode (no owner), skip folder detail panel — just expand/collapse in tree.
+  const handleFolderSelect = useCallback((node) => {
+    if (readOnly && !isLabOwner) return;
+    setSelectedFolder(node ? { path: node.path, name: node.name, isRoot: !node.path } : null);
+  }, [readOnly, isLabOwner]);
+
+  // File click: clear folder selection so file preview is shown
+  const handleFileClick = useCallback((file) => {
+    setSelectedFolder(null);
+    fm.loadFileContent(file);
+  }, [fm]);
+
+  // Folder share update
+  const handleFolderShare = useCallback(async (folderPath, userIds) => {
+    if (!labId) return;
+    try {
+      const res = await fetch(`/api/v1/labs/${encodeURIComponent(labId)}/folder-share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ folderPath: apiBasePath.includes('/scripts') ? `scripts/${folderPath}` : folderPath, userIds }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = await res.json();
+      onFolderShareUpdate?.(updated);
+      toast.success('Folder sharing updated');
+    } catch {
+      toast.error('Failed to update folder sharing');
+    }
+  }, [labId, apiBasePath, onFolderShareUpdate, toast]);
+
+  // Create sync config (reused from FileBrowserPane logic, used in folder panel)
+  const handleFolderCreateSync = useCallback(async (folderPath) => {
+    if (!labId) return;
+    try {
+      const r = await fetch(`/api/v1/labs/${encodeURIComponent(labId)}/sync/create-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        body: JSON.stringify({ folder: folderPath, serverUrl: window.location.origin }),
+      });
+      if (!r.ok) throw new Error();
+      fm.loadFiles();
+      toast.success('Sync config created.');
+    } catch {
+      toast.error('Error creating sync config');
+    }
+  }, [labId, fm, toast]);
+
   // Handle edit with lock acquisition
   const handleEdit = useCallback(async () => {
     if (!fm.selectedFile) return;
@@ -234,7 +305,9 @@ updateDirtyState();
         onDragOver={fm.handleDragOver}
         onDragLeave={fm.handleDragLeave}
         onToggleFolder={fm.toggleFolder}
-        onFileClick={(file) => fm.loadFileContent(file)}
+        onFileClick={handleFileClick}
+        onFolderSelect={handleFolderSelect}
+        selectedFolderPath={selectedFolder?.path ?? null}
         onFileDoubleClick={onFileDoubleClick}
         onCreateNewFile={fm.createNewFile}
         onCreateNewFolder={fm.createNewFolder}
@@ -276,6 +349,7 @@ updateDirtyState();
         <FilePreviewPane
           selectedFile={fm.selectedFile}
           selectedFileInfo={fm.selectedFileInfo}
+          apiBasePath={apiBasePath}
           fileContent={fm.fileContent}
           pdfBlobUrl={fm.pdfBlobUrl}
           imageBlobUrl={fm.imageBlobUrl}
@@ -286,6 +360,30 @@ updateDirtyState();
           editorTheme={editorTheme}
           showDelete={showDelete}
           previewRefreshKey={fm.previewRefreshKey}
+          selectedFolder={selectedFolder}
+          isFolderBackupIgnored={selectedFolder?.path ? (backupIgnoredFolders || []).some(p => {
+            const normalized = p.replace(/^scripts\//, '').replace(/^\/+|\/+$/g, '');
+            return normalized === selectedFolder.path || selectedFolder.path.startsWith(normalized + '/');
+          }) : false}
+          folderSharedWith={selectedFolder?.path && sharedFolders
+            ? (sharedFolders.find(sf => {
+                const fp = sf.folderPath?.replace(/^scripts\//, '').replace(/^\/+|\/+$/g, '');
+                return fp === selectedFolder.path;
+              })?.sharedWith ?? [])
+            : []}
+          users={users}
+          isLabOwner={!!isLabOwner}
+          onFolderNewFile={!readOnly ? fm.createNewFile : undefined}
+          onFolderNewFolder={!readOnly ? fm.createNewFolder : undefined}
+          onFolderCopy={!readOnly ? (path) => copyFolder(path, apiBasePath) : undefined}
+          onFolderUpload={showUpload && !readOnly ? fm.triggerFolderUpload : undefined}
+          onFolderDownloadZip={fm.downloadFolderZip}
+          onFolderRename={!readOnly ? (oldPath, newPath) => { fm.renameItem(oldPath, newPath); setSelectedFolder(null); } : undefined}
+          onFolderDelete={showDelete && !readOnly ? (path) => { fm.deleteFolderRecursive(path); setSelectedFolder(null); } : undefined}
+          onFolderCreateSync={apiBasePath.includes('/scripts') && !readOnly ? handleFolderCreateSync : undefined}
+          onFolderToggleBackup={onToggleBackupIgnoreFolder && isLabOwner && !readOnly ? onToggleBackupIgnoreFolder : undefined}
+          onFolderShare={isLabOwner && !readOnly ? handleFolderShare : undefined}
+          onFolderPrompt={dialog.prompt}
           onEdit={handleEdit}
           onSave={fm.saveFileContent}
           onCancel={handleCancelEdit}
@@ -302,6 +400,8 @@ updateDirtyState();
           isReadonlyFile={fm.isReadonlyFile}
           onReleaseLock={fm.releaseFileLock}
           onRequestLock={fm.requestFileLock}
+          officeSessions={fm.officeSessions}
+          onSyncOfficeFile={fm.syncOfficeFile}
         />
       )}
     </div>

@@ -42,6 +42,16 @@ See [PYTHON_SETUP.md](PYTHON_SETUP.md) for details.
 | `EMAIL_SECURE` | `true` or `false` for TLS |
 | `EMAIL_FROM` | Sender address |
 | `FRONTEND_URL` | Frontend URL for reset links |
+| `OFFICE_ENABLED` | Enable Euro/OnlyOffice integration (`true` / `false`) |
+| `DOC_SERVER_URL` | Euro/OnlyOffice Document Server base URL |
+| `DOC_SERVER_JWT_SECRET` | Shared JWT secret with Document Server |
+| `OFFICE_APP_URL` | Public backend URL used in DS callbacks/file URLs (optional on localhost) |
+| `OFFICE_TOKEN_SECRET` | Secret for short-lived internal Office access tokens |
+| `OFFICE_ACCESS_TOKEN_TTL` | Expiration for Office file/callback access tokens |
+| `OFFICE_CONFIG_TOKEN_TTL` | Expiration for signed OnlyOffice config token |
+| `OFFICE_FORCE_SAVE_INTERVAL_MS` | Periodic force-save interval for active edit sessions (default 30000) |
+| `OFFICE_FORCE_SAVE_WAIT_TIMEOUT_MS` | Timeout when waiting for DS save callback on manual/workflow sync (default 12000) |
+| `OFFICE_SESSION_PREREGISTRATION_TTL_MS` | Auto-expire pre-registered session if status=1 callback never arrives (default 120000) |
 | `RATE_LIMIT_WINDOW_MS` | Optional override for `config.json.requestLimits.api.windowMs` |
 | `RATE_LIMIT_MAX_PER_KEY` | Optional override for `config.json.requestLimits.api.maxPerKey` |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | Optional override for `config.json.requestLimits.auth.windowMs` |
@@ -66,6 +76,22 @@ Script execution commands, file manager settings, logging, outputs folder name. 
 | `requestLimits` | See config | JSON body size + auth/API rate limit windows and maxima |
 | `fileManager` | See config | File browser defaults |
 | `outputsFolderName` | `"Outputs"` | Name of special outputs/template folder |
+
+### Office Configuration Priority
+
+Office integration values are resolved in this order:
+
+1. `backend/.env` (or process env)
+2. `backend/config.json` (`office` section)
+3. `euro-office-sample-app/.env` fallback (for local dev convenience)
+
+This means local setup works out-of-the-box if the sample app is configured and uses
+the same Document Server + JWT secret.
+
+You can verify runtime state via `GET /api/health` under `config.office`:
+
+- `enabled` — feature toggle
+- `configured` — `true` when both DS URL and JWT secret are present
 
 #### Request limits in `config.json`
 

@@ -3,7 +3,7 @@
  * Shows: filename, size, mtime, Edit / Save / Cancel + Download / Delete buttons,
  * then the actual preview (Monaco editor, image, PDF, or binary placeholder).
  */
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -11,12 +11,158 @@ import rehypeRaw from 'rehype-raw';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import CodeEditor from '../CodeEditor.jsx';
-import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile, formatFileSize, formatModifiedDate, isMarkdownFile } from './fileUtils.js';
-import { filePreviewButtons as fpBtn, shadow, fileLocking as lockCfg } from '../../lib/uiConfig.js';
+import { getLanguageFromFilename, isImageFile, isPdfFile, isOfficeEditableFile, isTextFile, formatFileSize, formatModifiedDate, isMarkdownFile, openOfficeEditor } from './fileUtils.js';
+import { filePreviewButtons as fpBtn, fileItemButtons as fiBtn, shadow, fileLocking as lockCfg } from '../../lib/uiConfig.js';
+
+/* ── tiny action button for folder panel ────────────────────────────────────── */
+const FBtn = ({ title, onClick, bg = '#6b7280', children, disabled }) => (
+  <button
+    title={title}
+    onClick={onClick}
+    disabled={disabled}
+    style={{
+      fontSize: 11, padding: '4px 10px', background: disabled ? '#d1d5db' : bg, color: 'white',
+      border: 'none', borderRadius: 5, cursor: disabled ? 'not-allowed' : 'pointer',
+      whiteSpace: 'nowrap', boxShadow: disabled ? 'none' : shadow.small,
+    }}
+  >{children}</button>
+);
+
+/* ── Folder detail panel ─────────────────────────────────────────────────────── */
+function FolderDetailPanel({
+  folder, isFolderBackupIgnored, folderSharedWith, users, isLabOwner, loading,
+  onNewFile, onNewFolder, onCopy, onUpload, onDownloadZip,
+  onRename, onDelete, onCreateSync, onToggleBackup, onShare, onPrompt,
+}) {
+  const [pendingShareIds, setPendingShareIds] = useState(null);
+
+  // Reset pending edits when folder changes
+  useEffect(() => {
+    setPendingShareIds(null);
+  }, [folder?.path]);
+
+  const currentSharedWith = pendingShareIds ?? (folderSharedWith || []);
+
+  const toggleUser = useCallback((userId) => {
+    const cur = pendingShareIds ?? (folderSharedWith || []);
+    const id = String(userId);
+    if (cur.map(String).includes(id)) {
+      setPendingShareIds(cur.filter(x => String(x) !== id));
+    } else {
+      setPendingShareIds([...cur, id]);
+    }
+  }, [pendingShareIds, folderSharedWith]);
+
+  const handleSaveShare = useCallback(() => {
+    onShare?.(folder.path, currentSharedWith.map(String));
+    setPendingShareIds(null);
+  }, [onShare, folder?.path, currentSharedWith]);
+
+  const isRoot = folder?.isRoot;
+
+  return (
+    <section style={{
+      flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb',
+      borderRadius: 12, padding: 16, background: '#fff',
+      display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 20 }}>{isRoot ? '📂' : '📁'}</span>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{folder.name}</div>
+          {folder.path && <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{folder.path}</div>}
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {onNewFile && (
+          <FBtn title={fiBtn.newFile.label} bg={fiBtn.newFile.bg} disabled={loading} onClick={async () => {
+            const name = await onPrompt?.({ title: 'Create file', message: 'New file name:', placeholder: 'file.txt', confirmText: 'Create', cancelText: 'Cancel' });
+            if (name) onNewFile((isRoot ? '' : folder.path + '/') + name);
+          }}>{fiBtn.newFile.icon} New File</FBtn>
+        )}
+        {onNewFolder && (
+          <FBtn title={fiBtn.newFolder.label} bg={fiBtn.newFolder.bg} disabled={loading} onClick={async () => {
+            const name = await onPrompt?.({ title: 'Create folder', message: 'New folder name:', placeholder: 'new-folder', confirmText: 'Create', cancelText: 'Cancel' });
+            if (name) onNewFolder((isRoot ? '' : folder.path + '/') + name);
+          }}>{fiBtn.newFolder.icon} New Folder</FBtn>
+        )}
+        {onCopy && folder.path && (
+          <FBtn title={fiBtn.copyFolder.label} bg={fiBtn.copyFolder.bg} onClick={() => onCopy(folder.path)}>{fiBtn.copyFolder.icon} Copy</FBtn>
+        )}
+        {onUpload && (
+          <FBtn title={fiBtn.uploadHere.label} bg={fiBtn.uploadHere.bg} disabled={loading} onClick={() => onUpload(isRoot ? '.' : folder.path)}>{fiBtn.uploadHere.icon} Upload</FBtn>
+        )}
+        <FBtn title={fiBtn.downloadZip.label} bg={fiBtn.downloadZip.bg} disabled={loading} onClick={() => onDownloadZip?.(isRoot ? '.' : folder.path)}>{fiBtn.downloadZip.icon} Download ZIP</FBtn>
+        {!isRoot && onRename && (
+          <FBtn title={fiBtn.renameFolder.label} bg={fiBtn.renameFolder.bg} disabled={loading} onClick={async () => {
+            const newName = await onPrompt?.({ title: 'Rename folder', message: 'New name:', defaultValue: folder.name, confirmText: 'Rename', cancelText: 'Cancel' });
+            if (newName && newName !== folder.name) {
+              const parts = folder.path.split('/');
+              parts[parts.length - 1] = newName;
+              onRename(folder.path, parts.join('/'));
+            }
+          }}>{fiBtn.renameFolder.icon} Rename</FBtn>
+        )}
+        {!isRoot && onDelete && (
+          <FBtn title={fiBtn.deleteFolder.label} bg={fiBtn.deleteFolder.bg} disabled={loading} onClick={() => onDelete(folder.path)}>{fiBtn.deleteFolder.icon} Delete</FBtn>
+        )}
+        {!isRoot && onCreateSync && (
+          <FBtn title={fiBtn.createSync.label} bg={fiBtn.createSync.bg} disabled={loading} onClick={() => onCreateSync(folder.path)}>{fiBtn.createSync.icon} Sync Config</FBtn>
+        )}
+        {!isRoot && onToggleBackup && (
+          <FBtn
+            title={isFolderBackupIgnored ? 'Include in backup' : 'Exclude from backup'}
+            bg={isFolderBackupIgnored ? '#0f766e' : '#92400e'}
+            disabled={loading}
+            onClick={() => onToggleBackup(folder.path, !isFolderBackupIgnored)}
+          >{isFolderBackupIgnored ? 'B+ Include' : 'B- Exclude'}</FBtn>
+        )}
+      </div>
+
+      {/* Share panel — always visible for lab owners (non-root folders only) */}
+      {!isRoot && isLabOwner && onShare && (
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#111827' }}>Share outside the lab with users</div>
+          {(!users || users.length === 0) ? (
+            <div style={{ color: '#9ca3af', fontSize: 12 }}>No other users.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
+              {users.map(u => {
+                const checked = currentSharedWith.map(String).includes(String(u.id));
+                return (
+                  <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '3px 0' }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleUser(u.id)} />
+                    <span>{u.firstName} {u.lastName}</span>
+                    <span style={{ color: '#9ca3af', fontSize: 11 }}>{u.email}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {pendingShareIds !== null && (
+            <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+              <FBtn bg="#059669" onClick={handleSaveShare}>Save</FBtn>
+              <FBtn bg="#6b7280" onClick={() => setPendingShareIds(null)}>Cancel</FBtn>
+            </div>
+          )}
+          {currentSharedWith.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
+              Shared with {currentSharedWith.length} user{currentSharedWith.length !== 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default function FilePreviewPane({
   selectedFile,
   selectedFileInfo,
+  apiBasePath,
   fileContent,
   pdfBlobUrl,
   imageBlobUrl,
@@ -27,6 +173,23 @@ export default function FilePreviewPane({
   editorTheme,
   showDelete,
   previewRefreshKey = 0,
+  // Folder selection (when a folder is clicked in the browser pane)
+  selectedFolder,
+  isFolderBackupIgnored,
+  folderSharedWith,
+  users,
+  isLabOwner,
+  onFolderNewFile,
+  onFolderNewFolder,
+  onFolderCopy,
+  onFolderUpload,
+  onFolderDownloadZip,
+  onFolderRename,
+  onFolderDelete,
+  onFolderCreateSync,
+  onFolderToggleBackup,
+  onFolderShare,
+  onFolderPrompt,
   // actions
   onEdit,
   onSave,
@@ -45,16 +208,25 @@ export default function FilePreviewPane({
   isReadonlyFile,
   onReleaseLock,
   onRequestLock,
+  officeSessions,
+  onSyncOfficeFile,
 }) {
 
   // Flash effect: set to true when previewRefreshKey changes, auto-clears after animation
   const [flash, setFlash] = useState(false);
+  const [officePreviewRevision, setOfficePreviewRevision] = useState(0);
+  const [officeRefreshing, setOfficeRefreshing] = useState(false);
   useEffect(() => {
     if (previewRefreshKey === 0) return;
     setFlash(true);
     const timer = setTimeout(() => setFlash(false), 1200);
     return () => clearTimeout(timer);
   }, [previewRefreshKey]);
+
+  useEffect(() => {
+    setOfficePreviewRevision(0);
+    setOfficeRefreshing(false);
+  }, [selectedFile]);
 
   const editorLanguage = useMemo(() => getLanguageFromFilename(selectedFile), [selectedFile]);
 
@@ -96,10 +268,34 @@ export default function FilePreviewPane({
     { value: 'hc-black', label: 'High Contrast' },
   ];
 
+  if (selectedFolder) {
+    return (
+      <FolderDetailPanel
+        folder={selectedFolder}
+        isFolderBackupIgnored={isFolderBackupIgnored}
+        folderSharedWith={folderSharedWith}
+        users={users}
+        isLabOwner={isLabOwner}
+        loading={loading}
+        onNewFile={onFolderNewFile}
+        onNewFolder={onFolderNewFolder}
+        onCopy={onFolderCopy}
+        onUpload={onFolderUpload}
+        onDownloadZip={onFolderDownloadZip}
+        onRename={onFolderRename}
+        onDelete={onFolderDelete}
+        onCreateSync={onFolderCreateSync}
+        onToggleBackup={onFolderToggleBackup}
+        onShare={onFolderShare}
+        onPrompt={onFolderPrompt}
+      />
+    );
+  }
+
   if (!selectedFile || !selectedFileInfo) {
     return (
       <section style={{ flex: 1, minWidth: 0, height: '100%', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
-        {'Select a file to view'}
+        {'Select a file or folder to view'}
       </section>
     );
   }
@@ -107,6 +303,7 @@ export default function FilePreviewPane({
   const isText = selectedFileInfo.isText || isTextFile(selectedFile);
   const isImg = isImageFile(selectedFile);
   const isPdf = isPdfFile(selectedFile);
+  const isOfficeEditable = isOfficeEditableFile(selectedFile);
   //const isMarkdown = selectedFile && /\.md$/i.test(selectedFile);
   const isMarkdown = isMarkdownFile(selectedFile);
   const showMarkdownPreview = isMarkdown && !isEditing;
@@ -119,6 +316,28 @@ export default function FilePreviewPane({
   // Large file guard — skip Monaco for files exceeding the configured limit
   const maxSize = previewMaxFileSize || 1048576;
   const fileTooLarge = isText && !isMarkdown && selectedFileInfo.size > maxSize;
+  const officeSession = selectedFile ? officeSessions?.[selectedFile] : null;
+  const officeEditors = officeSession?.users || [];
+  const isOfficeEdited = officeEditors.length > 0;
+
+  const openOffice = (targetMode) => {
+    if (!apiBasePath || !selectedFile) return;
+    openOfficeEditor(apiBasePath, selectedFile, targetMode);
+  };
+
+  const refreshOfficePreview = async () => {
+    if (!selectedFile) return;
+    setOfficeRefreshing(true);
+    try {
+      await onSyncOfficeFile?.(selectedFile, { silent: true });
+      setOfficePreviewRevision((v) => v + 1);
+    } finally {
+      setOfficeRefreshing(false);
+    }
+  };
+
+  const officeMode = (!readOnly && !fileIsReadonly) ? 'edit' : 'view';
+  const officeBtnCfg = officeMode === 'edit' ? fpBtn.officeEdit : fpBtn.officeView;
 
   return (
     <section style={{
@@ -234,6 +453,39 @@ export default function FilePreviewPane({
               {fpBtn.edit.icon} {fpBtn.edit.label}
             </button>
           ) : null}
+          {isOfficeEditable && (
+            <button
+              onClick={() => openOffice(officeMode)}
+              style={{ padding: '4px 10px', background: officeBtnCfg.bg, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, boxShadow: shadow.small }}
+              title={officeBtnCfg.label}
+            >
+              {officeMode === 'edit' ? (
+                <>✏ Edit</>
+              ) : (
+                <>{officeBtnCfg.icon} {officeBtnCfg.label}</>
+              )}
+            </button>
+          )}
+          {isOfficeEditable && !readOnly && (
+            <button
+              onClick={refreshOfficePreview}
+              disabled={officeRefreshing}
+              style={{
+                padding: '4px 10px',
+                background: fpBtn.officeRefresh.bg,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: officeRefreshing ? 'not-allowed' : 'pointer',
+                opacity: officeRefreshing ? 0.7 : 1,
+                fontSize: 12,
+                boxShadow: shadow.small,
+              }}
+              title={fpBtn.officeRefresh.label}
+            >
+              {officeRefreshing ? '⏳' : fpBtn.officeRefresh.icon} {fpBtn.officeRefresh.label}
+            </button>
+          )}
           {/* Download */}
           <button
             onClick={() => onDownloadFile(selectedFile)}
@@ -452,6 +704,38 @@ export default function FilePreviewPane({
           )}
         </div>
         )
+      ) : isOfficeEditable ? (
+        <div style={{ flex: 1, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fff' }}>
+          {isOfficeEdited && (
+            <>
+              <style>{`@keyframes measure-live-pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }`}</style>
+              <div style={{
+                padding: '5px 10px',
+                borderBottom: '1px solid #bbf7d0',
+                fontSize: 12,
+                color: '#166534',
+                background: '#dcfce7',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+              }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%', background: '#16a34a', flexShrink: 0,
+                  animation: 'measure-live-pulse 1.4s ease-in-out infinite',
+                }} />
+                <span>{officeEditors.map((u) => u.name || u.email || u.id).join(', ')}</span>
+              </div>
+            </>
+          )}
+          <div style={{ flex: 1, minHeight: 0, background: '#f8fafc' }}>
+            <iframe
+              key={`${selectedFile}:${officePreviewRevision}`}
+              title={`Office preview ${selectedFile}`}
+              src={`/office-editor.html?apiBasePath=${encodeURIComponent(apiBasePath)}&file=${encodeURIComponent(selectedFile)}&mode=view&embed=1`}
+              style={{ width: '100%', height: '100%', border: 'none' }}
+            />
+          </div>
+        </div>
       ) : (
         /* Binary file */
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#6b7280', gap: 16 }}>

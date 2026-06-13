@@ -22,7 +22,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { useDialog } from '../components/Dialog.jsx';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
-import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
+import { getLanguageFromFilename, isImageFile, isOfficeEditableFile, isReadonlyFile, isPdfFile, isTextFile, openOfficeEditor } from '../components/file-manager/fileUtils.js';
 import CodeEditor from '../components/CodeEditor.jsx';
 import { appConfig as appCfg } from '../lib/appConfig.js';
 import { shadow, resultButtons as rbtn } from '../lib/uiConfig.js';
@@ -484,7 +484,13 @@ export default function LabResultsPane({
 
     const isImg = isImageFile(filePath);
     const isPd = isPdfFile(filePath);
+    const isOffice = isOfficeEditableFile(filePath);
     const isTxt = file.isText || isTextFile(filePath);
+
+    if (isOffice) {
+      openOfficeEditor(fileManagerApiPath, filePath, isReadonlyFile(filePath) ? 'view' : 'edit');
+      return;
+    }
 
     if (isTxt) {
       fetch(`${fileManagerApiPath}/content?file=${encodeURIComponent(filePath)}`, {

@@ -15,7 +15,7 @@ import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import SqlEditorTab from './SqlEditorTab.jsx';
 import CodeEditor from '../components/CodeEditor.jsx';
 import DebugEditor from '../debug/DebugEditor.jsx';
-import { getLanguageFromFilename, isImageFile, isPdfFile, isTextFile } from '../components/file-manager/fileUtils.js';
+import { getLanguageFromFilename, isImageFile, isOfficeEditableFile, isPdfFile, isTextFile, openOfficeEditor } from '../components/file-manager/fileUtils.js';
 import { useToast } from '../components/Toast';
 import { useDialog } from '../components/Dialog.jsx';
 import ZoomableImage from '../components/ZoomableImage.jsx';
@@ -64,10 +64,15 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
   const [backupIgnoredFolders, setBackupIgnoredFolders] = useState(() =>
     normalizeBackupIgnoredFolders(lab.backupIgnoredFolders || [])
   );
+  const [sharedFolders, setSharedFolders] = useState(lab.sharedFolders || []);
 
   useEffect(() => {
     setBackupIgnoredFolders(normalizeBackupIgnoredFolders(lab.backupIgnoredFolders || []));
   }, [lab.backupIgnoredFolders]);
+
+  useEffect(() => {
+    setSharedFolders(lab.sharedFolders || []);
+  }, [lab.sharedFolders]);
 
   // ── File locking for tab-based editing ────────────────────────────────────
   // tabLocks: { [filePath]: { userId, userEmail, userName, isMe, locked } }
@@ -397,7 +402,13 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
     const isSql = ext === 'sql';
     const isImg = isImageFile(filePath);
     const isPd = isPdfFile(filePath);
+    const isOffice = isOfficeEditableFile(filePath);
     const isTxt = file.isText || isTextFile(filePath);
+
+    if (isOffice) {
+      openOfficeEditor(apiBasePath, filePath, isReadonlyFile(filePath) ? 'view' : 'edit');
+      return;
+    }
 
     // Acquire lock for editable text files before opening
     if ((isTxt || isSql) && !isReadonlyFile(filePath)) {
@@ -591,6 +602,11 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
                 labOwnerId={lab.ownerId}
                 backupIgnoredFolders={backupIgnoredFolders}
                 onToggleBackupIgnoreFolder={handleToggleBackupIgnoreFolder}
+                sharedFolders={sharedFolders}
+                onFolderShareUpdate={(updated) => {
+                  setSharedFolders(updated.sharedFolders || []);
+                  onLabUpdate?.(updated);
+                }}
               />
             </div>
           </div>
