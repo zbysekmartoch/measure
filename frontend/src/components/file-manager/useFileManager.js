@@ -112,7 +112,13 @@ export default function useFileManager({
     try {
       const data = await fetchJSON(`${apiBasePath}/office/active`);
       const next = data.sessions || {};
-      setOfficeSessions((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+      setOfficeSessions((prev) => {
+        const pKeys = Object.keys(prev);
+        const nKeys = Object.keys(next);
+        if (pKeys.length !== nKeys.length) return next;
+        if (pKeys.some(k => prev[k] !== next[k])) return next;
+        return prev;
+      });
     } catch {
       setOfficeSessions((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     }
@@ -270,18 +276,6 @@ export default function useFileManager({
       const newItems = data.items || [];
       setTree(newItems);
 
-      // Auto-expand top-level directories in read-only mode (e.g. shared folder browser)
-      if (readOnly) {
-        const topDirs = newItems.filter(i => i.type === 'directory');
-        if (topDirs.length > 0) {
-          setExpandedFolders(prev => {
-            const next = { ...prev };
-            topDirs.forEach(d => { if (next[d.path] === undefined) next[d.path] = true; });
-            return next;
-          });
-        }
-      }
-
       // Build a new mtime map and detect changed files
       const newMtimes = new Map();
       const collectMtimes = (nodes) => {
@@ -343,6 +337,19 @@ export default function useFileManager({
   useEffect(() => {
     loadFiles();
   }, [loadFiles, refreshTrigger]);
+
+  // Auto-expand top-level directories on first load in read-only mode (e.g. shared folder browser)
+  useEffect(() => {
+    if (!readOnly || tree.length === 0) return;
+    const topDirs = tree.filter(i => i.type === 'directory');
+    if (topDirs.length === 0) return;
+    setExpandedFolders(prev => {
+      const next = { ...prev };
+      let changed = false;
+      topDirs.forEach(d => { if (next[d.path] === undefined) { next[d.path] = true; changed = true; } });
+      return changed ? next : prev;
+    });
+  }, [readOnly, tree]);
 
   // Auto-poll file list every 15 seconds to detect external changes (sync agent, scripts, etc.)
   useEffect(() => {

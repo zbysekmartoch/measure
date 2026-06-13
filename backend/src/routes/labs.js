@@ -144,8 +144,9 @@ function hasAccess(lab, userId) {
 
 // Returns folder paths (relative to lab root, e.g. 'scripts/reports') shared with userId.
 function getSharedFolderPaths(lab, userId) {
+  const userIdStr = String(userId);
   return (lab.sharedFolders || [])
-    .filter(sf => Array.isArray(sf.sharedWith) && sf.sharedWith.map(String).includes(String(userId)))
+    .filter(sf => Array.isArray(sf.sharedWith) && sf.sharedWith.some(id => String(id) === userIdStr))
     .map(sf => sf.folderPath);
 }
 
@@ -165,33 +166,6 @@ function getScriptAccess(lab, userId) {
   const fullAccess = hasAccess(lab, userId);
   const sharedFolderPaths = fullAccess ? [] : getSharedFolderPaths(lab, userId);
   return { fullAccess, sharedFolderPaths };
-}
-
-// Filter file tree to only include items reachable from the shared folders.
-// Uses item.path (already computed by listFiles) for reliable path matching.
-function filterTreeToSharedFolders(items, sharedFolderPaths) {
-  const folderRels = sharedFolderPaths.map(sp =>
-    sp.replace(/\\/g, '/').replace(/^scripts\//, '').replace(/^\/+|\/+$/g, '')
-  );
-  const result = [];
-  for (const item of items) {
-    const p = (item.path || item.name || '').replace(/\\/g, '/').replace(/^\/+/, '');
-    if (item.type === 'directory') {
-      // Include if this dir IS one of the shared folders, is an ancestor, or is inside one
-      const isRelevant = folderRels.some(f =>
-        p === f || f.startsWith(p + '/') || p.startsWith(f + '/')
-      );
-      if (isRelevant) {
-        const filteredChildren = filterTreeToSharedFolders(item.children || [], sharedFolderPaths);
-        result.push({ ...item, children: filteredChildren });
-      }
-    } else {
-      // Include file if its path is inside a shared folder
-      const inShared = folderRels.some(f => p === f || p.startsWith(f + '/'));
-      if (inShared) result.push(item);
-    }
-  }
-  return result;
 }
 
 // ─── Script Stats Helpers ─────────────────────────────────────────────────────
@@ -2314,25 +2288,21 @@ router.get('/:id/scripts', async (req, res, next) => {
     } else {
       // Folder-only access: build tree directly from each shared folder (avoids complex filtering)
       const depth = getDefaultDepth();
-      const items = [];
-      for (const sfPath of sharedFolderPaths) {
-        const folderRel = sfPath.replace(/\\/g, '/').replace(/^scripts\//, '').replace(/^\/+|\/+$/g, '');
-        if (!folderRel) continue;
-        const folderAbs = path.join(root, ...folderRel.split('/'));
-        try {
-          const st = await fs.stat(folderAbs);
-          const children = await listFiles(folderAbs, folderRel, depth);
-          items.push({
-            name: path.basename(folderRel),
-            path: folderRel,
-            type: 'directory',
-            size: 0,
-            mtime: st.mtime.toISOString(),
-            children,
-          });
-        } catch { /* skip inaccessible */ }
-      }
-      files = items;
+      const folderEntries = sharedFolderPaths
+        .map(sfPath => sfPath.replace(/\\/g, '/').replace(/^scripts\//, '').replace(/^\/+|\/+$/g, ''))
+        .filter(Boolean)
+        .map(folderRel => ({ folderRel, folderAbs: path.join(root, ...folderRel.split('/')) }));
+      files = (await Promise.all(
+        folderEntries.map(async ({ folderRel, folderAbs }) => {
+          try {
+            const [st, children] = await Promise.all([
+              fs.stat(folderAbs),
+              listFiles(folderAbs, folderRel, depth),
+            ]);
+            return { name: path.basename(folderRel), path: folderRel, type: 'directory', size: 0, mtime: st.mtime.toISOString(), children };
+          } catch { return null; }
+        })
+      )).filter(Boolean);
     }
     res.json({ root: subdir || '', items: files, count: files.length, readOnly: !fullAccess });
   } catch (e) {

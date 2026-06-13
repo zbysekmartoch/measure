@@ -1,10 +1,9 @@
-/**
- * SharedFoldersTab — shows folders explicitly shared with the current user.
- * Folders are grouped by lab. Clicking a folder opens a read-only file browser.
- */
 import React, { useState, useEffect, useCallback } from 'react';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { fetchJSON } from '../lib/fetchJSON.js';
+
+const folderRelPath = (folderPath) =>
+  folderPath.replace(/^scripts\//, '').replace(/^\/+/, '');
 
 export default function SharedFoldersTab({ appConfig }) {
   const [sharedFolderGroups, setSharedFolderGroups] = useState([]);
@@ -36,10 +35,6 @@ export default function SharedFoldersTab({ appConfig }) {
       </div>
     );
   }
-
-  // Strip 'scripts/' prefix to get path relative to scripts root
-  const folderRelPath = (folderPath) =>
-    folderPath.replace(/^scripts\//, '').replace(/^\/+/, '');
 
   if (activeBrowser) {
     const apiBasePath = `/api/v1/labs/${activeBrowser.labId}/scripts`;
@@ -85,12 +80,10 @@ export default function SharedFoldersTab({ appConfig }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {sharedFolderGroups.map(group => (
           <div key={group.labId} style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-            {/* Lab header */}
             <div style={{ padding: '8px 12px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 15 }}>🔬</span>
               <span style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{group.labName}</span>
             </div>
-            {/* Folder list */}
             <div>
               {(group.folders || []).map(folderPath => {
                 const displayName = folderRelPath(folderPath);
