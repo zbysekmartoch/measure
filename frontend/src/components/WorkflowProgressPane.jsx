@@ -7,6 +7,7 @@
  *   ✓  completed   — finished successfully (green checkmark + duration)
  *   !  failed      — script failed (red exclamation + duration)
  *   ⊘  skipped     — skipped due to earlier failure
+ *   ⏳ waiting     — held back until the system has enough free memory
  *   ⏳ debug-waiting — waiting for debugger to attach (orange, animated)
  *   ⏸  debug-stopped — paused in debugger (red, blinking)
  *
@@ -24,6 +25,7 @@ const STATUS_CONFIG = {
   completed:       { icon: '✓', color: '#16a34a', bg: '#dcfce7',     label: 'Completed' },
   failed:          { icon: '!', color: '#dc2626', bg: '#fee2e2',     label: 'Failed' },
   skipped:         { icon: '⊘', color: '#9ca3af', bg: '#f3f4f6',     label: 'Skipped' },
+  waiting:         { icon: '⏳', color: '#b45309', bg: '#fef3c7',    label: 'Waiting for free memory', animate: true },
   'debug-waiting': { icon: '⏳', color: '#d97706', bg: '#fef3c7',    label: 'Waiting for debugger', animate: true },
   'debug-stopped': { icon: '⏸', color: '#dc2626', bg: '#fef3c7',    label: 'Paused in debugger', animate: true },
 };
@@ -31,6 +33,12 @@ const STATUS_CONFIG = {
 /**
  * Format milliseconds into a human-readable duration string.
  */
+function formatMb(mb) {
+  if (mb == null || !Number.isFinite(Number(mb))) return '';
+  const v = Number(mb);
+  return v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${Math.round(v)} MB`;
+}
+
 function formatDuration(ms) {
   if (ms == null) return '';
   if (ms < 1000) return `${ms}ms`;
@@ -99,6 +107,25 @@ function StepRow({ step, isLast }) {
           {step.name}
         </span>
 
+        {/* Live memory badge while running */}
+        {(step.status === 'running' || step.status === 'debug-stopped') && step.rssMb != null && (
+          <span
+            title={`Current RSS of the script process${step.peakRssMb != null ? ` (peak ${formatMb(step.peakRssMb)})` : ''}`}
+            style={{
+              fontSize: 10,
+              color: '#1d4ed8',
+              background: '#dbeafe',
+              padding: '0 4px',
+              borderRadius: 3,
+              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+              whiteSpace: 'nowrap',
+              marginLeft: 4,
+            }}
+          >
+            {formatMb(step.rssMb)}
+          </span>
+        )}
+
         {/* Duration badge */}
         {step.durationMs != null && (
           <span style={{
@@ -113,6 +140,33 @@ function StepRow({ step, isLast }) {
           }}>
             {formatDuration(step.durationMs)}
           </span>
+        )}
+
+        {/* Peak memory badge after the step finished */}
+        {step.durationMs != null && step.peakRssMb > 0 && (
+          <span
+            title="Peak RSS of the script process tree"
+            style={{
+              fontSize: 10,
+              color: '#6b7280',
+              background: '#f3f4f6',
+              padding: '0 4px',
+              borderRadius: 3,
+              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+              whiteSpace: 'nowrap',
+              marginLeft: 4,
+            }}
+          >
+            ▲{formatMb(step.peakRssMb)}
+          </span>
+        )}
+
+        {/* Waiting-for-memory detail */}
+        {step.status === 'waiting' && step.waiting && (
+          <div style={{ fontSize: 10, color: '#b45309', marginTop: 1, fontStyle: 'italic' }}>
+            {STATUS_CONFIG.waiting.label}: {formatMb(step.waiting.availableMb)} available, needs {formatMb(step.waiting.requiredMb)}
+            {step.waiting.waitedMs != null && ` (${formatDuration(step.waiting.waitedMs)})`}
+          </div>
         )}
 
         {/* Status label for special states */}
@@ -194,6 +248,20 @@ function WorkflowHeader({ workflowState, onClose }) {
             </span>
           )}
         </span>
+
+        {workflowState?.system && status === 'running' && (
+          <span
+            title={`System memory: ${formatMb(workflowState.system.availableMb)} available of ${formatMb(workflowState.system.totalMb)}`
+              + (workflowState?.limits?.maxMemoryMb ? ` • per-script limit ${formatMb(workflowState.limits.maxMemoryMb)}${workflowState.limits.cgroup ? ' (hard)' : ' (soft)'}` : '')}
+            style={{
+              fontSize: 10,
+              color: workflowState.system.usedPercent >= 90 ? '#dc2626' : workflowState.system.usedPercent >= 75 ? '#b45309' : '#6b7280',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            RAM {Math.round(workflowState.system.usedPercent)}% · {formatMb(workflowState.system.availableMb)} free
+          </span>
+        )}
       </div>
 
       {onClose && (

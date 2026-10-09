@@ -42,6 +42,7 @@ export default function LabResultsPane({
   debugVisible = false,
   runDebugRef,
   runResultRef,
+  selectResultRef, // ref: parent sets .current(id) to reload the list and select a result
   onAnalyze,
   appConfig,
   saveAllRef,
@@ -169,11 +170,29 @@ export default function LabResultsPane({
   const loadResults = useCallback(async () => {
     try {
       const data = await fetchJSON(`/api/v1/labs/${lab.id}/results`);
-      setResults(data.items || []);
+      const items = data.items || [];
+      setResults(items);
+      return items;
     } catch {
       setResults([]);
+      return [];
     }
   }, [lab.id]);
+
+  // Let the parent select a freshly created debugging session by id
+  useEffect(() => {
+    if (!selectResultRef) return undefined;
+    selectResultRef.current = async (resultId) => {
+      const items = await loadResults();
+      const item = items.find((r) => String(r.id) === String(resultId));
+      if (!item) return false;
+      setSelectedResultId(String(item.id));
+      setSelectedResult(item);
+      setRefreshTrigger((p) => p + 1);
+      return true;
+    };
+    return () => { selectResultRef.current = null; };
+  }, [selectResultRef, loadResults]);
 
   useEffect(() => {
     if (!pollingEnabled) return;

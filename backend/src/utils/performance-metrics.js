@@ -3,6 +3,36 @@ import { performance as nodePerformance } from 'perf_hooks';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { getUserStore } from '../users/index.js';
+import { readMemInfo, getResourceLimits, detectCgroupRunner, getCgroupStatusSync } from './system-resources.js';
+import { getActiveRuns } from '../workflow/workflow-runner.js';
+
+// Probe cgroup support once at startup so the snapshot can report it synchronously.
+detectCgroupRunner().catch(() => {});
+
+function buildWorkflowsSnapshot() {
+  const items = [];
+  for (const run of getActiveRuns().values()) {
+    const idx = run.currentStepIndex;
+    const step = idx >= 0 ? run.stepStatuses[idx] : null;
+    items.push({
+      key: run.key,
+      labId: run.labId,
+      resultId: run.resultId,
+      status: run.status,
+      debug: Boolean(run.debugVisible),
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      totalSteps: run.steps.length,
+      currentStep: idx + 1,
+      stepName: step ? step.name : null,
+      stepStatus: step ? step.status : null,
+      rssMb: step ? step.rssMb : null,
+      peakRssMb: step ? step.peakRssMb : null,
+      waiting: step ? step.waiting : null,
+    });
+  }
+  return items.sort((a, b) => String(a.startedAt || '').localeCompare(String(b.startedAt || '')));
+}
 
 const RATE_WINDOW_MS = 60_000;
 const USER_ACTIVITY_WINDOW_MS = Number(process.env.PERF_ACTIVE_USER_TTL_MS || 30_000);
@@ -345,6 +375,9 @@ export function getPerformanceSnapshot({ chatUsers = 0 } = {}) {
 
   const mem = process.memoryUsage();
   const cpuPercent = sampleCpuPercent(now);
+  const sysMem = readMemInfo();
+  const limits = getResourceLimits();
+  const cgroup = getCgroupStatusSync();
 
   const requestPerMinute = requestTimestamps.length;
   const status429PerMinute = status429Timestamps.length;
@@ -398,6 +431,22 @@ export function getPerformanceSnapshot({ chatUsers = 0 } = {}) {
       externalMb: Number((mem.external / (1024 * 1024)).toFixed(2)),
       loadAvg1m: Number((os.loadavg()?.[0] ?? 0).toFixed(2)),
     },
+    system: {
+      memTotalMb: sysMem.totalMb,
+      memAvailableMb: sysMem.availableMb,
+      memUsedMb: sysMem.usedMb,
+      memUsedPercent: sysMem.usedPercent,
+      swapTotalMb: sysMem.swapTotalMb,
+      swapUsedMb: sysMem.swapUsedMb,
+      cpuCount: Math.max(1, os.cpus().length || 1),
+      limits: {
+        maxMemoryMb: limits.maxMemoryMb,
+        minAvailableMb: limits.minAvailableMb,
+        cgroup: cgroup ? cgroup.available : null,
+        cgroupReason: cgroup ? cgroup.reason : 'probing',
+      },
+    },
+    workflows: buildWorkflowsSnapshot(),
   };
 }
 

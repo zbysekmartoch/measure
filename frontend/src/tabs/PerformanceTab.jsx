@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLanguage } from '../context/LanguageContext';
 import { fetchJSON } from '../lib/fetchJSON.js';
+import { getPageLoads, clearPageLoads, explainPageLoad } from '../lib/uiSession.js';
 
 const STREAM_INTERVAL_MS = 2000;
 const HISTORY_SIZE = 90;
@@ -13,6 +14,12 @@ function pushSample(arr, value) {
   const next = [...arr, Number.isFinite(value) ? value : 0];
   if (next.length > HISTORY_SIZE) next.shift();
   return next;
+}
+
+function formatMb(mb) {
+  const v = Number(mb);
+  if (!Number.isFinite(v)) return '-';
+  return v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${Math.round(v)} MB`;
 }
 
 function formatNumber(value, digits = 0) {
@@ -250,6 +257,7 @@ export default function PerformanceTab() {
   const [requestDetailsLoading, setRequestDetailsLoading] = useState(false);
   const [requestDetailsError, setRequestDetailsError] = useState('');
   const [usageHistoryByKey, setUsageHistoryByKey] = useState({});
+  const [pageLoads, setPageLoads] = useState(() => getPageLoads());
   const [history, setHistory] = useState({
     activeUsers: [],
     requestsPerMinute: [],
@@ -259,6 +267,8 @@ export default function PerformanceTab() {
     avgLatencyMs1m: [],
     cpuPercent: [],
     rssMb: [],
+    systemMemPercent: [],
+    systemAvailableMb: [],
   });
 
   const loadRequestDetails = useRef(async () => {
@@ -318,6 +328,8 @@ export default function PerformanceTab() {
           avgLatencyMs1m: pushSample(prev.avgLatencyMs1m, data.latency?.avgMs1m || 0),
           cpuPercent: pushSample(prev.cpuPercent, data.runtime?.cpuPercent || 0),
           rssMb: pushSample(prev.rssMb, data.runtime?.rssMb || 0),
+          systemMemPercent: pushSample(prev.systemMemPercent, data.system?.memUsedPercent || 0),
+          systemAvailableMb: pushSample(prev.systemAvailableMb, data.system?.memAvailableMb || 0),
         }));
 
         const keyUsageItems = Array.isArray(data?.requests?.apiKeyUsage) ? data.requests.apiKeyUsage : [];
@@ -385,6 +397,20 @@ export default function PerformanceTab() {
   const apiKeyUsageItems = useMemo(() => {
     return Array.isArray(stats?.requests?.apiKeyUsage) ? stats.requests.apiKeyUsage : [];
   }, [stats]);
+
+  const systemMem = stats?.system || null;
+  const memUsedPercent = clamp(Number(systemMem?.memUsedPercent || 0), 0, 100);
+  const memColor = memUsedPercent >= 90 ? '#ef4444' : memUsedPercent >= 75 ? '#f59e0b' : '#22c55e';
+  const workflows = Array.isArray(stats?.workflows) ? stats.workflows : [];
+  const WORKFLOW_STATUS_COLORS = {
+    running: '#1d4ed8',
+    waiting: '#b45309',
+    'debug-waiting': '#b45309',
+    'debug-stopped': '#dc2626',
+    completed: '#16a34a',
+    failed: '#dc2626',
+    aborted: '#92400e',
+  };
 
   return (
     <div style={{ padding: 16, height: '100%', overflow: 'auto', boxSizing: 'border-box' }}>
@@ -506,6 +532,103 @@ export default function PerformanceTab() {
           value={formatNumber(stats?.requests?.inFlight || 0)}
           subtitle={`Peak: ${formatNumber(stats?.requests?.peakInFlight || 0)}`}
         />
+        <StatCard
+          title="System memory used"
+          valueNode={(
+            <div style={{ fontSize: 22, lineHeight: 1.1, color: memColor, fontWeight: 700 }}>
+              {formatNumber(memUsedPercent, 0)} %
+            </div>
+          )}
+          subtitle={systemMem
+            ? `${formatMb(systemMem.memAvailableMb)} available of ${formatMb(systemMem.memTotalMb)}`
+            : 'Waiting for data'}
+        />
+        <StatCard
+          title="Swap used"
+          value={systemMem ? formatMb(systemMem.swapUsedMb) : '-'}
+          subtitle={systemMem ? `of ${formatMb(systemMem.swapTotalMb)} swap` : 'Waiting for data'}
+        />
+        <StatCard
+          title="Running workflow scripts"
+          value={formatNumber(workflows.filter((w) => w.status === 'running').length)}
+          subtitle={systemMem?.limits
+            ? `Limit per script ${formatMb(systemMem.limits.maxMemoryMb)} (${systemMem.limits.cgroup ? 'hard cgroup' : systemMem.limits.cgroup === false ? 'soft watchdog' : 'probing'})`
+            : 'Waiting for data'}
+        />
+      </div>
+
+      <div style={{
+        marginBottom: 14,
+        border: '1px solid #e5e7eb',
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: '#fff',
+      }}>
+        <div style={{
+          padding: '10px 12px',
+          borderBottom: '1px solid #e5e7eb',
+          fontWeight: 600,
+          color: '#111827',
+          fontSize: 13,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'baseline',
+        }}>
+          <span>Workflow runs (memory guard)</span>
+          {systemMem?.limits && (
+            <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>
+              scripts start only with ≥ {formatMb(systemMem.limits.minAvailableMb)} available • per-script limit {formatMb(systemMem.limits.maxMemoryMb)}
+              {systemMem.limits.cgroup === false && systemMem.limits.cgroupReason ? ` • cgroup unavailable: ${systemMem.limits.cgroupReason}` : ''}
+            </span>
+          )}
+        </div>
+        {workflows.length === 0 ? (
+          <div style={{ padding: '12px', fontSize: 12, color: '#64748b' }}>
+            No workflow is running right now.
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', color: '#334155' }}>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Lab / result</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Run</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Current step</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Step status</th>
+                <th style={{ textAlign: 'right', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>RSS now</th>
+                <th style={{ textAlign: 'right', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Peak</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workflows.map((w) => (
+                <tr key={w.key}>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
+                    lab {w.labId} / #{w.resultId}
+                  </td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap', color: WORKFLOW_STATUS_COLORS[w.status] || '#0f172a', fontWeight: 600 }}>
+                    {w.debug ? '🛠 ' : '▶ '}{w.status} {w.currentStep}/{w.totalSteps}
+                  </td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', wordBreak: 'break-all' }}>
+                    {w.stepName || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', color: WORKFLOW_STATUS_COLORS[w.stepStatus] || '#0f172a' }}>
+                    {w.stepStatus || '-'}
+                    {w.stepStatus === 'waiting' && w.waiting && (
+                      <span style={{ color: '#b45309' }}>
+                        {' '}({formatMb(w.waiting.availableMb)} free, needs {formatMb(w.waiting.requiredMb)})
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', fontFamily: 'ui-monospace, monospace' }}>
+                    {w.rssMb != null ? formatMb(w.rssMb) : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', fontFamily: 'ui-monospace, monospace', color: '#64748b' }}>
+                    {w.peakRssMb != null ? formatMb(w.peakRssMb) : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div style={{
@@ -578,6 +701,15 @@ export default function PerformanceTab() {
           value={`${formatNumber(stats?.runtime?.rssMb || 0, 1)} MB`}
           data={history.rssMb}
           color="#60a5fa"
+        />
+        <PercentUsageChart
+          title="System memory used"
+          subtitle={systemMem
+            ? `${formatMb(systemMem.memUsedMb)} used • ${formatMb(systemMem.memAvailableMb)} available • swap ${formatMb(systemMem.swapUsedMb)}`
+            : 'Whole machine (MemAvailable from /proc/meminfo)'}
+          value={`${formatNumber(memUsedPercent, 1)} %`}
+          data={history.systemMemPercent}
+          color={memColor}
         />
       </div>
 
@@ -747,6 +879,67 @@ export default function PerformanceTab() {
         <div style={{
           padding: '10px 12px',
           borderBottom: '1px solid #e5e7eb',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <div style={{ fontWeight: 600, color: '#111827', fontSize: 13 }}>
+            Page loads of this browser tab (newest first)
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 11, color: '#6b7280' }}>
+              Explains unexpected "refreshes": a reload while the tab was hidden means the browser unloaded it to save memory.
+            </span>
+            <button
+              type="button"
+              onClick={() => { clearPageLoads(); setPageLoads([]); }}
+              style={{ border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff', fontSize: 11, padding: '4px 8px', cursor: 'pointer', color: '#0f172a' }}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        <div style={{ maxHeight: 220, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead style={{ position: 'sticky', top: 0 }}>
+              <tr style={{ background: '#f8fafc', color: '#334155' }}>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Loaded at</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Type</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Discarded</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Previous page went away</th>
+                <th style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}>Interpretation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...pageLoads].reverse().map((p, idx) => (
+                <tr key={`${p.at}-${idx}`} style={{ background: idx % 2 ? '#fcfcfd' : '#fff' }}>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap', color: '#475569' }}>{new Date(p.at).toLocaleString()}</td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', fontWeight: 600, color: p.type === 'reload' ? '#b45309' : '#0f172a' }}>{p.type}</td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', color: p.wasDiscarded ? '#dc2626' : '#64748b' }}>{p.wasDiscarded ? 'yes' : 'no'}</td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', color: '#475569', whiteSpace: 'nowrap' }}>
+                    {p.lastHide ? `${new Date(p.lastHide.at).toLocaleString()} (${p.lastHide.event})` : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid #f1f5f9', color: '#374151' }}>{explainPageLoad(p)}</td>
+                </tr>
+              ))}
+              {pageLoads.length === 0 && (
+                <tr><td colSpan={5} style={{ padding: 12, color: '#64748b', textAlign: 'center' }}>No page loads recorded yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{
+        marginTop: 14,
+        border: '1px solid #e5e7eb',
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: '#fff',
+      }}>
+        <div style={{
+          padding: '10px 12px',
+          borderBottom: '1px solid #e5e7eb',
           fontWeight: 600,
           color: '#111827',
           fontSize: 13,
@@ -767,6 +960,8 @@ export default function PerformanceTab() {
           <div>Heap total: <strong>{formatNumber(stats?.runtime?.heapTotalMb || 0, 1)} MB</strong></div>
           <div>External memory: <strong>{formatNumber(stats?.runtime?.externalMb || 0, 1)} MB</strong></div>
           <div>Load avg (1m): <strong>{formatNumber(stats?.runtime?.loadAvg1m || 0, 2)}</strong></div>
+          <div>CPU cores: <strong>{formatNumber(systemMem?.cpuCount || 0)}</strong></div>
+          <div>System RAM: <strong>{systemMem ? formatMb(systemMem.memTotalMb) : '-'}</strong></div>
           <div>Active performance streams: <strong>{formatNumber(stats?.runtime?.activePerformanceStreams || 0)}</strong></div>
           <div>HTTP 2xx: <strong>{formatNumber(statusTotals['2xx'] || 0)}</strong></div>
           <div>HTTP 3xx: <strong>{formatNumber(statusTotals['3xx'] || 0)}</strong></div>

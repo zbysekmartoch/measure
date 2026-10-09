@@ -27,6 +27,8 @@ import LabChatPane from './LabChatPane.jsx';
 import FileManagerEditor from '../components/FileManagerEditor.jsx';
 import { useToast } from '../components/Toast';
 import { useSettings } from '../context/SettingsContext';
+import { useAuth } from '../context/AuthContext';
+import { readJSON, writeJSON, uiKey } from '../lib/uiSession.js';
 import { useDebugSession } from '../debug/useDebugSession.js';
 import DebugPanel from '../debug/DebugPanel.jsx';
 import { shadow, debugModes as dmCfg } from '../lib/uiConfig.js';
@@ -84,7 +86,16 @@ function isShortcutKeyMatch(eventKey, configuredKey) {
 export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible = true }) {
   const toast = useToast();
   const { doubleShiftActivation, focusedMode: isFocusedModeEnabled, setFocusedMode } = useSettings();
-  const [activeTab, setActiveTab] = useState('scripts');
+  const { user } = useAuth();
+  // Active sub-tab survives a page reload (explorer tabs cannot be restored — they hold live data sources)
+  const tabStorageKey = uiKey(user?.id, 'lab', lab.id, 'tab');
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = readJSON(tabStorageKey);
+    return ['scripts', 'results', 'chat', 'settings'].includes(saved) ? saved : 'scripts';
+  });
+  useEffect(() => {
+    if (typeof activeTab === 'string' && !activeTab.startsWith('explorer:')) writeJSON(tabStorageKey, activeTab);
+  }, [activeTab, tabStorageKey]);
   const [debugMode, setDebugMode] = useState('hidden');
   const [shortcutMenuOpen, setShortcutMenuOpen] = useState(false);
   const popupRef = useRef(null);
@@ -119,6 +130,19 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
 
   // ---- Run-selected-result ref (set by LabResultsPane, used by keyboard shortcut menu) ----
   const runResultRef = useRef(null);
+
+  // ---- Select-result ref (set by LabResultsPane) + handler: a newly created debugging
+  //      session is opened immediately — switch to the Debug tab and select it ----
+  const selectResultRef = useRef(null);
+  const handleDebugSessionCreated = useCallback((resultId) => {
+    setActiveTab('results');
+    const trySelect = (attempt) => {
+      const fn = selectResultRef.current;
+      if (fn) { fn(resultId); return; }
+      if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100); // pane may still be mounting
+    };
+    setTimeout(() => trySelect(0), 0);
+  }, []);
 
   // ---- Lab Chat ----
   const chat = useLabChat(lab.id);
@@ -711,6 +735,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
               onLabUpdate={onLabUpdate}
               onAnalyze={openAnalyze}
               saveAllRef={saveAllRef}
+              onDebugSessionCreated={handleDebugSessionCreated}
               pollingEnabled={isVisible && activeTab === 'scripts' && !popoutScripts.isPopout}
             />
           </div>
@@ -721,6 +746,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
               debugVisible={debugMode !== 'hidden'}
               runDebugRef={runDebugRef}
               runResultRef={runResultRef}
+              selectResultRef={selectResultRef}
               onAnalyze={openAnalyze}
               appConfig={appConfig}
               saveAllRef={saveAllRef}
@@ -833,6 +859,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
             onLabUpdate={onLabUpdate}
             onAnalyze={openAnalyze}
             saveAllRef={saveAllRef}
+            onDebugSessionCreated={handleDebugSessionCreated}
             pollingEnabled={popoutScripts.isPopout}
           />
         </div>,
@@ -846,6 +873,7 @@ export default function LabWorkspaceTab({ lab, onLabUpdate, appConfig, isVisible
             debugVisible={debugMode !== 'hidden'}
             runDebugRef={runDebugRef}
             runResultRef={runResultRef}
+            selectResultRef={selectResultRef}
             onAnalyze={openAnalyze}
             appConfig={appConfig}
             saveAllRef={saveAllRef}

@@ -22,6 +22,8 @@ import ZoomableImage from '../components/ZoomableImage.jsx';
 import { fileLocking as lockCfg } from '../lib/uiConfig.js';
 import { setDirtyCount, removeDirtyCount } from '../lib/dirtyRegistry.js';
 import { fetchJSON } from '../lib/fetchJSON.js';
+import { useAuth } from '../context/AuthContext';
+import { readJSON, writeJSON, uiKey, draftKey } from '../lib/uiSession.js';
 import WorkflowProgressPane from '../components/WorkflowProgressPane.jsx';
 import { useWorkflowEvents } from '../hooks/useWorkflowEvents.js';
 
@@ -51,13 +53,55 @@ function toLabBackupFolderPath(folderPath) {
   return `scripts/${normalized}`;
 }
 
-export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLabUpdate, saveAllRef, pollingEnabled = true }) {
+export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLabUpdate, saveAllRef, pollingEnabled = true, onDebugSessionCreated }) {
   const toast = useToast();
   const dialog = useDialog();
+  const { user } = useAuth();
   const apiBasePath = `/api/v1/labs/${lab.id}/scripts`;
 
   const [activeTab, setActiveTab] = useState('browser');
   const [openFiles, setOpenFiles] = useState([]);
+
+  // ── Session persistence (open file tabs + unsaved drafts survive a page reload) ──
+  const filesStorageKey = uiKey(user?.id, 'lab', lab.id, 'files');
+  const sessionRestoredRef = useRef(false);
+  const handleFileOpenRef = useRef(null);
+
+  useEffect(() => {
+    if (!sessionRestoredRef.current) return;
+    writeJSON(filesStorageKey, {
+      files: openFiles.map((f) => ({ path: f.path, name: f.name, isText: f.isText })),
+      activeTab: typeof activeTab === 'string' && activeTab.startsWith('file:') ? activeTab : 'browser',
+    });
+  }, [openFiles, activeTab, filesStorageKey]);
+
+  // Keep unsaved editor content in localStorage (debounced); removed once saved or closed
+  useEffect(() => {
+    const t = setTimeout(() => {
+      openFiles.forEach((f) => {
+        if (!f.isText) return;
+        const key = draftKey(user?.id, lab.id, f.path);
+        if (f.dirty) writeJSON(key, { content: f.content, base: f.originalContent, at: new Date().toISOString() });
+        else writeJSON(key, null);
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [openFiles, lab.id, user?.id]);
+
+  // Restore previously open files once on mount
+  useEffect(() => {
+    if (sessionRestoredRef.current) return;
+    sessionRestoredRef.current = true;
+    const saved = readJSON(filesStorageKey);
+    if (!saved?.files?.length) return;
+    const activePath = typeof saved.activeTab === 'string' && saved.activeTab.startsWith('file:') ? saved.activeTab.slice(5) : null;
+    (async () => {
+      for (const f of saved.files) {
+        try { await handleFileOpenRef.current?.(f, { activate: f.path === activePath }); } catch { /* ignore */ }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [editorTheme, setEditorTheme] = useState(() =>
     localStorage.getItem('monacoTheme') || 'vs-dark'
   );
@@ -355,10 +399,12 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
       const data = await res.json();
       toast.success(`Debug session #${data.resultId} prepared for ${workflowFile}`);
+      // Switch straight to the new session so the user does not have to find it in the Debug tab
+      if (data.resultId != null) onDebugSessionCreated?.(String(data.resultId), workflowFile);
     } catch (e) {
       toast.error(`Create new debugging session error: ${e.message}`);
     }
-  }, [lab.id, toast, openFiles, saveFile]);
+  }, [lab.id, toast, openFiles, saveFile, onDebugSessionCreated]);
 
   const handleToggleBackupIgnoreFolder = useCallback(async (folderPath, shouldIgnore) => {
     const labRelativePath = toLabBackupFolderPath(folderPath);
@@ -391,10 +437,11 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
   }, [backupIgnoredFolders, lab.id, onLabUpdate, toast]);
 
   // Open file as a tab (or switch to existing)
-  const handleFileOpen = useCallback(async (file) => {
+  const handleFileOpen = useCallback(async (file, opts = {}) => {
     const filePath = file.path;
+    const activate = opts.activate !== false;
     if (openFiles.find((f) => f.path === filePath)) {
-      setActiveTab(`file:${filePath}`);
+      if (activate) setActiveTab(`file:${filePath}`);
       return;
     }
 
@@ -422,13 +469,30 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
       })
         .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
         .then((data) => {
+          const serverContent = data.content || '';
+          // Unsaved draft from before a page reload: apply it only if the file on the
+          // server is still the version the draft was based on.
+          const dKey = draftKey(user?.id, lab.id, filePath);
+          const draft = readJSON(dKey);
+          let content = serverContent;
+          let dirty = false;
+          if (draft && typeof draft.content === 'string' && draft.content !== serverContent) {
+            if (draft.base === serverContent) {
+              content = draft.content;
+              dirty = true;
+              toast.info(`Restored unsaved changes: ${file.name}`);
+            } else {
+              writeJSON(dKey, null);
+              toast.info(`Unsaved draft of ${file.name} dropped — the file changed on the server meanwhile`);
+            }
+          }
           setOpenFiles((prev) => [...prev, {
             path: filePath, name: file.name,
-            content: data.content || '', originalContent: data.content || '',
+            content, originalContent: serverContent,
             language: getLanguageFromFilename(filePath),
-            isSql, isImage: false, isPdf: false, isText: true, dirty: false,
+            isSql, isImage: false, isPdf: false, isText: true, dirty,
           }]);
-          setActiveTab(`file:${filePath}`);
+          if (activate) setActiveTab(`file:${filePath}`);
         })
         .catch(() => {
           releaseTabLock(filePath);
@@ -439,9 +503,10 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
         path: filePath, name: file.name, content: '', originalContent: '',
         language: 'plaintext', isSql: false, isImage: isImg, isPdf: isPd, isText: false, dirty: false,
       }]);
-      setActiveTab(`file:${filePath}`);
+      if (activate) setActiveTab(`file:${filePath}`);
     }
-  }, [openFiles, apiBasePath, toast, acquireTabLock, releaseTabLock, isReadonlyFile]);
+  }, [openFiles, apiBasePath, toast, acquireTabLock, releaseTabLock, isReadonlyFile, lab.id, user?.id]);
+  handleFileOpenRef.current = handleFileOpen;
 
   const handleFileClose = useCallback(async (filePath) => {
     const file = openFiles.find((f) => f.path === filePath);
@@ -454,6 +519,7 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
         tone: 'warning',
       });
       if (!shouldClose) return;
+      writeJSON(draftKey(user?.id, lab.id, filePath), null); // user chose to discard the draft
     }
     // Release lock when closing tab
     if (file?.isText && !isReadonlyFile(filePath)) {
@@ -461,7 +527,7 @@ export default function LabScriptsPane({ lab, debug, appConfig, onAnalyze, onLab
     }
     setOpenFiles((prev) => prev.filter((f) => f.path !== filePath));
     setActiveTab((prev) => (prev === `file:${filePath}` ? 'browser' : prev));
-  }, [openFiles, releaseTabLock, isReadonlyFile, dialog]);
+  }, [openFiles, releaseTabLock, isReadonlyFile, dialog, lab.id, user?.id]);
 
   const updateFileContent = useCallback((filePath, newContent) => {
     setOpenFiles((prev) =>

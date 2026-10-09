@@ -60,6 +60,7 @@ export function useWorkflowEvents(labId, resultId, active = false, reconnectKey 
     // but individual events can be useful for animations/transitions.
     const eventTypes = [
       'workflow-start', 'step-start', 'step-complete', 'step-failed',
+      'step-waiting', 'step-progress',
       'debug-waiting', 'debug-attached', 'debug-stopped',
       'workflow-complete', 'workflow-failed', 'workflow-aborted',
     ];

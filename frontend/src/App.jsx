@@ -23,6 +23,7 @@ import SettingsTab from './tabs/SettingsTab';
 import PerformanceTab from './tabs/PerformanceTab.jsx';
 import LabWorkspaceTab from './tabs/LabWorkspaceTab.jsx';
 import { fetchJSON } from './lib/fetchJSON.js';
+import { readJSON, writeJSON, uiKey } from './lib/uiSession.js';
 import { icons, tabIcons } from './lib/uiConfig.js';
 import { hasDirtyFiles, hasDirtyFilesForLab } from './lib/dirtyRegistry.js';
 import WhatsNewPage from './components/WhatsNewPage.jsx';
@@ -130,6 +131,38 @@ function AppContent() {
   // Check for standalone lab mode
   const params = new URLSearchParams(window.location.search);
   const standaloneLabId = params.get('standalone') === '1' ? params.get('lab') : null;
+
+  // ── Session persistence: open labs + active top-level tab survive a page reload ──
+  const sessionKey = uiKey(user?.id, 'app');
+  const sessionRestoredRef = useRef(false);
+
+  useEffect(() => {
+    if (!sessionRestoredRef.current || standaloneLabId) return;
+    writeJSON(sessionKey, { openLabIds: openLabs.map((l) => l.id), tab });
+  }, [openLabs, tab, sessionKey, standaloneLabId]);
+
+  useEffect(() => {
+    if (sessionRestoredRef.current || standaloneLabId || !user?.id) return;
+    sessionRestoredRef.current = true;
+    const saved = readJSON(sessionKey);
+    if (!saved) return;
+    (async () => {
+      const labs = [];
+      for (const id of saved.openLabIds || []) {
+        try { labs.push(await fetchJSON(`/api/v1/labs/${id}`)); } catch { /* lab deleted or no access */ }
+      }
+      if (labs.length > 0) {
+        setOpenLabs((prev) => {
+          const ids = new Set(prev.map((l) => l.id));
+          return [...prev, ...labs.filter((l) => !ids.has(l.id))];
+        });
+      }
+      const t = saved.tab;
+      if (typeof t === 'string' && (!t.startsWith('lab:') || labs.some((l) => `lab:${l.id}` === t))) {
+        setTab(t);
+      }
+    })();
+  }, [sessionKey, standaloneLabId, user?.id]);
 
   // Load backend health info on mount
   useEffect(() => {

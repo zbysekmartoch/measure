@@ -7,6 +7,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
+import { recordPageLoad } from './lib/uiSession.js'
+
+// Record why this page load happened (reload / tab discarded / navigation) for the Performance tab
+recordPageLoad()
 
 // AG Grid styles - must be imported before components
 import 'ag-grid-community/styles/ag-grid.css';

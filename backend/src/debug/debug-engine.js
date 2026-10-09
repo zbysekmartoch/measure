@@ -197,7 +197,14 @@ export async function startDebugSession(opts) {
   console.log(`[debug-engine] CWD: ${opts.cwd}, DAP port: ${port}, step: ${opts.stepName || '?'} (index=${opts.stepIndex ?? '?'})`);
   console.log(`[debug-engine] Lab: ${opts.labId}, Result: ${opts.resultId}`);
 
-  const child = spawn(pythonCmd, spawnArgs, {
+  // Optional wrapper (e.g. systemd-run --scope with MemoryMax) supplied by the
+  // workflow runner: [wrapperCmd, ...wrapperArgs] — python is appended after it.
+  const prefix = Array.isArray(opts.commandPrefix) && opts.commandPrefix.length > 0 ? opts.commandPrefix : null;
+  const execCmd = prefix ? prefix[0] : pythonCmd;
+  const execArgs = prefix ? [...prefix.slice(1), pythonCmd, ...spawnArgs] : spawnArgs;
+  if (prefix) console.log(`[debug-engine] Wrapped by: ${prefix.join(' ')}`);
+
+  const child = spawn(execCmd, execArgs, {
     cwd: opts.cwd,
     env: {
       ...process.env,

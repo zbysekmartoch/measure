@@ -186,3 +186,13 @@ cd backend && cp .env.example .env && npm install && npm run dev
 cd frontend && cp vite.config.js.example vite.config.js && npm install && npm run dev
 mysql -u root -p < backend/sql/create.sql
 ```
+
+## Proč se stránka v dev režimu sama obnoví
+
+Vite dev server (`:50101`) vkládá do stránky HMR klienta. Když jeho WebSocket spadne
+(uspání notebooku, změna sítě, restart dev serveru), klient počká, až server zase odpoví,
+a zavolá `location.reload()` — stránka se „sama refreshne". Nejde to vypnout bez vypnutí HMR.
+Pro běžnou práci používej sestavený frontend přímo z backendu (`npm run build` ve `frontend/`,
+pak `http://localhost:50100`), kde žádný HMR klient není. Důvod každého načtení stránky je
+vidět v záložce **Performance → Page loads of this browser tab**; stav UI (otevřené laby,
+soubory, neuložené koncepty) se po reloadu obnoví (`frontend/src/lib/uiSession.js`).

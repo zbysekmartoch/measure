@@ -15,6 +15,8 @@
  *   'step-start'        — { index, name, startedAt }
  *   'step-complete'     — { index, name, durationMs, exitCode }
  *   'step-failed'       — { index, name, durationMs, exitCode, error }
+ *   'step-waiting'      — { index, name, reason, availableMb, requiredMb, waitedMs }
+ *   'step-progress'     — { index, name, rssMb, peakRssMb }
  *   'debug-waiting'     — { index, name, port, status: 'waiting_for_client' }
  *   'debug-attached'    — { index, name, status: 'running' }
  *   'debug-stopped'     — { index, name, status: 'stopped' }
@@ -35,6 +37,15 @@ import {
   endDebugSession,
 } from '../debug/debug-engine.js';
 import { closeAllDapConnections } from '../debug/dap-proxy.js';
+import {
+  readMemInfo,
+  getResourceLimits,
+  detectCgroupRunner,
+  wrapWithMemoryLimit,
+  ProcessMemoryWatchdog,
+  describeProcessExit,
+  fmtMb,
+} from '../utils/system-resources.js';
 
 // ── Active workflow runs: Map<"labId:resultId", WorkflowRun> ────────────────
 
@@ -66,6 +77,7 @@ export const StepStatus = {
   COMPLETED: 'completed',
   FAILED: 'failed',
   SKIPPED: 'skipped',
+  WAITING: 'waiting', // waiting for free system memory before start
   DEBUG_WAITING: 'debug-waiting',
   DEBUG_STOPPED: 'debug-stopped',
 };
@@ -128,7 +140,12 @@ export class WorkflowRun extends EventEmitter {
       completedAt: null,
       exitCode: null,
       error: null,
+      rssMb: null,      // current RSS of the step's process tree (MB)
+      peakRssMb: null,  // peak RSS observed during the step (MB)
+      waiting: null,    // { reason, availableMb, requiredMb, waitedMs } while status === 'waiting'
     }));
+    this.limits = getResourceLimits();
+    this.cgroup = { available: false, reason: 'not probed' };
     this.startedAt = null;
     this.completedAt = null;
     this.aborted = false;
@@ -150,7 +167,75 @@ export class WorkflowRun extends EventEmitter {
       completedAt: this.completedAt,
       debugVisible: this.debugVisible,
       stopOnFailure: this.stopOnFailure,
+      system: (() => {
+        const m = readMemInfo();
+        return { totalMb: m.totalMb, availableMb: m.availableMb, usedPercent: m.usedPercent, swapUsedMb: m.swapUsedMb };
+      })(),
+      limits: {
+        maxMemoryMb: this.limits.maxMemoryMb,
+        minAvailableMb: this.limits.minAvailableMb,
+        cgroup: this.cgroup.available,
+      },
     };
+  }
+
+  /**
+   * Block until the system has at least `minAvailableMb` of available memory,
+   * so a step does not start while another heavy process is still running.
+   * Emits 'step-waiting' while blocked. Resolves true when it is OK to start,
+   * false on abort or when maxWaitMs elapsed.
+   */
+  async _waitForMemory(i, stepName) {
+    const { minAvailableMb, waitPollMs, maxWaitMs } = this.limits;
+    if (!(minAvailableMb > 0)) return true;
+    const startedWaiting = Date.now();
+    let announced = false;
+    for (;;) {
+      if (this.aborted) return false;
+      const mem = readMemInfo();
+      if (mem.availableMb >= minAvailableMb) {
+        if (announced) {
+          const waitedMs = Date.now() - startedWaiting;
+          this.stepStatuses[i].waiting = null;
+          if (this.logFile) await fs.appendFile(this.logFile, `[measure] memory OK after ${Math.round(waitedMs / 1000)} s (available ${fmtMb(mem.availableMb)}), starting step\n`).catch(() => {});
+        }
+        return true;
+      }
+      const waitedMs = Date.now() - startedWaiting;
+      if (maxWaitMs > 0 && waitedMs > maxWaitMs) {
+        this.stepStatuses[i].waiting = null;
+        this.stepStatuses[i].error = `waited ${Math.round(waitedMs / 1000)} s for free memory (available ${fmtMb(mem.availableMb)} < required ${fmtMb(minAvailableMb)}), giving up`;
+        return false;
+      }
+      const waiting = { reason: 'memory', availableMb: mem.availableMb, requiredMb: minAvailableMb, waitedMs };
+      this.stepStatuses[i].status = StepStatus.WAITING;
+      this.stepStatuses[i].waiting = waiting;
+      if (!announced) {
+        announced = true;
+        if (this.logFile) await fs.appendFile(this.logFile, `[measure] waiting for free memory: available ${fmtMb(mem.availableMb)} < required ${fmtMb(minAvailableMb)}\n`).catch(() => {});
+      }
+      this._emit('step-waiting', { index: i, name: stepName, ...waiting });
+      await new Promise((r) => setTimeout(r, waitPollMs));
+    }
+  }
+
+  /**
+   * Steps whose script name contains '!' run without the hard memory cap
+   * (no cgroup MemoryMax, no watchdog kill). RSS is still sampled for display.
+   */
+  _isUncapped(stepName) {
+    return typeof stepName === 'string' && stepName.includes('!');
+  }
+
+  /**
+   * Record a memory sample for a running step and notify SSE clients.
+   */
+  _onMemorySample(i, stepName, { rssMb, peakMb }) {
+    const st = this.stepStatuses[i];
+    if (!st) return;
+    st.rssMb = rssMb;
+    st.peakRssMb = peakMb;
+    this._emit('step-progress', { index: i, name: stepName, rssMb, peakRssMb: peakMb });
   }
 
   /**
@@ -217,6 +302,20 @@ export class WorkflowRun extends EventEmitter {
     const workflowStartTime = Date.now();
 
     try {
+      if (this.limits.useCgroup) {
+        this.cgroup = await detectCgroupRunner();
+      } else {
+        this.cgroup = { available: false, reason: 'disabled in config' };
+      }
+      const mem0 = readMemInfo();
+      if (this.logFile) {
+        await fs.appendFile(this.logFile,
+          `[measure] memory guard: limit per script ${fmtMb(this.limits.maxMemoryMb)} `
+          + `(${this.cgroup.available ? 'hard cgroup limit' : 'soft watchdog limit — ' + this.cgroup.reason}), `
+          + `start requires ${fmtMb(this.limits.minAvailableMb)} available, `
+          + `system ${fmtMb(mem0.availableMb)} available of ${fmtMb(mem0.totalMb)}\n`);
+      }
+
       for (let i = 0; i < this.steps.length; i++) {
         if (this.aborted) {
           // Mark remaining steps as skipped
@@ -234,6 +333,18 @@ export class WorkflowRun extends EventEmitter {
         const shouldDebug = isPython && this.debugVisible;
 
         this.currentStepIndex = i;
+
+        // Hold the step while the machine is short on memory
+        const memoryOk = await this._waitForMemory(i, stepName);
+        if (this.aborted) {
+          for (let j = i; j < this.steps.length; j++) {
+            if (this.stepStatuses[j].status === StepStatus.PENDING || this.stepStatuses[j].status === StepStatus.WAITING) {
+              this.stepStatuses[j].status = StepStatus.SKIPPED;
+            }
+          }
+          break;
+        }
+
         const stepStartTime = Date.now();
 
         // Update step status
@@ -249,9 +360,16 @@ export class WorkflowRun extends EventEmitter {
           startedAt: this.stepStatuses[i].startedAt,
         });
 
-        let success = false;
+        if (this._isUncapped(stepName) && this.logFile) {
+          await fs.appendFile(this.logFile, `[measure] script name contains '!' — running WITHOUT the memory cap (RSS is only monitored)\n`).catch(() => {});
+        }
 
-        if (shouldDebug) {
+        let success = false;
+        let failureMessage = null; // human-readable reason written to output.err
+
+        if (!memoryOk) {
+          failureMessage = this.stepStatuses[i].error;
+        } else if (shouldDebug) {
           // ── Debug mode: spawn via debugpy ──
           await this._debugLog(`Starting debugpy for step ${stepName}`);
 
@@ -259,17 +377,27 @@ export class WorkflowRun extends EventEmitter {
           closeAllDapConnections();
 
           try {
+            const uncapped = this._isUncapped(stepName);
+            const limited = wrapWithMemoryLimit(this.pythonCmd, [], {
+              maxMemoryMb: uncapped ? 0 : this.limits.maxMemoryMb,
+              cgroupAvailable: this.cgroup.available,
+              unitName: `measure-debug-${this.labId}-${this.resultId}-${i}-${Date.now()}`,
+            });
             const { port, pid } = await startDebugSession({
               scriptAbsolutePath: scriptAbsPath,
               scriptPath: stepName,
               cwd: this.resultDir,
               pythonCommand: this.pythonCmd,
+              commandPrefix: limited.limited ? [limited.command, ...limited.args.slice(0, -1)] : null,
               args: [this.resultDir, this.runtimeEnvPath, this.scriptsRoot],
               labId: this.labId,
               resultId: this.resultId,
               stepIndex: i,
               stepName: stepName,
-              extraEnv: { PYTHONPATH: this.libScriptsPath + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : '') },
+              extraEnv: {
+                PYTHONPATH: this.libScriptsPath + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : ''),
+                PYTHONUNBUFFERED: '1',
+              },
               logFile: this.logFile,
               errorFile: this.errorFile,
             });
@@ -289,6 +417,13 @@ export class WorkflowRun extends EventEmitter {
             // Listen to debug events for status changes
             const debugEvents = getDebugEvents();
             let lastDebugStatus = null;
+
+            const watchdog = new ProcessMemoryWatchdog(pid, {
+              limitMb: this.limits.maxMemoryMb,
+              enforce: !uncapped && !this.cgroup.available,
+              intervalMs: this.limits.sampleIntervalMs,
+              onSample: (sample) => this._onMemorySample(i, stepName, sample),
+            });
 
             success = await new Promise((resolve) => {
               const onStatus = (s) => {
@@ -314,7 +449,23 @@ export class WorkflowRun extends EventEmitter {
                 this._debugLog(`[step ${i}] Debug process exited: code=${info.code}, signal=${info.signal}`).catch(() => {});
                 debugEvents.off('exit', onExit);
                 debugEvents.off('status', onStatus);
-                resolve(info.code === 0 || info.code === null);
+                watchdog.stop();
+                // Keep the historical semantics (a session ended by the user → code null → ok),
+                // but treat SIGKILL (OOM) and watchdog kills as failures.
+                const ok = info.code === 0 || (info.code === null && info.signal !== 'SIGKILL' && !watchdog.killed);
+                if (!ok) {
+                  failureMessage = describeProcessExit({
+                    code: info.code,
+                    signal: info.signal,
+                    peakMb: watchdog.peakMb,
+                    limitMb: this.limits.maxMemoryMb,
+                    limited: limited.limited,
+                    killedByWatchdog: watchdog.killed,
+                    stderrBytes: 1, // debugpy always writes something to stderr
+                    available: readMemInfo().availableMb,
+                  });
+                }
+                resolve(ok);
               };
 
               debugEvents.on('exit', onExit);
@@ -326,9 +477,11 @@ export class WorkflowRun extends EventEmitter {
                 this._debugLog(`[step ${i}] Debug session already ended before listeners were set`).catch(() => {});
                 debugEvents.off('exit', onExit);
                 debugEvents.off('status', onStatus);
+                watchdog.stop();
                 resolve(false);
               }
             });
+            this.stepStatuses[i].peakRssMb = watchdog.peakMb;
 
             await this._debugLog(`Step ${stepName} debug process exited, success=${success}`);
 
@@ -339,7 +492,7 @@ export class WorkflowRun extends EventEmitter {
           }
         } else if (isPython) {
           // ── Python without debug ──
-          success = await this._spawnScript(this.pythonCmd, scriptAbsPath);
+          ({ success, message: failureMessage } = await this._spawnScript(this.pythonCmd, scriptAbsPath, i, stepName));
         } else {
           // ── Non-Python scripts ──
           const cmdMap = { '.js': 'node', '.cjs': 'node', '.sh': 'bash', '.r': 'Rscript', '.R': 'Rscript' };
@@ -348,7 +501,7 @@ export class WorkflowRun extends EventEmitter {
             if (this.errorFile) await fs.appendFile(this.errorFile, `Unsupported script type: ${ext}\n`);
             success = false;
           } else {
-            success = await this._spawnScript(command, scriptAbsPath);
+            ({ success, message: failureMessage } = await this._spawnScript(command, scriptAbsPath, i, stepName));
           }
         }
 
@@ -357,9 +510,14 @@ export class WorkflowRun extends EventEmitter {
         this.stepStatuses[i].durationMs = stepDuration;
         this.stepStatuses[i].completedAt = new Date().toISOString();
 
+        this.stepStatuses[i].rssMb = null;
+        this.stepStatuses[i].waiting = null;
+        const peakTxt = this.stepStatuses[i].peakRssMb > 0 ? `, peak RSS ${fmtMb(this.stepStatuses[i].peakRssMb)}` : '';
+
         if (success) {
           this.stepStatuses[i].status = StepStatus.COMPLETED;
           this.stepStatuses[i].exitCode = 0;
+          if (this.logFile) await fs.appendFile(this.logFile, `[${new Date().toISOString()}] Step ${i + 1} finished in ${Math.round(stepDuration / 1000)} s${peakTxt}\n`).catch(() => {});
           this._emit('step-complete', {
             index: i,
             name: stepName,
@@ -369,14 +527,17 @@ export class WorkflowRun extends EventEmitter {
         } else {
           this.stepStatuses[i].status = StepStatus.FAILED;
           this.stepStatuses[i].exitCode = 1;
-          this.stepStatuses[i].error = `Script ${stepName} failed`;
+          const reason = failureMessage || `Script ${stepName} failed`;
+          this.stepStatuses[i].error = reason;
+          if (this.errorFile) await fs.appendFile(this.errorFile, `[measure] Step ${i + 1} ${stepName} FAILED after ${Math.round(stepDuration / 1000)} s: ${reason}\n`).catch(() => {});
+          if (this.logFile) await fs.appendFile(this.logFile, `[${new Date().toISOString()}] Step ${i + 1} FAILED: ${reason}\n`).catch(() => {});
 
           this._emit('step-failed', {
             index: i,
             name: stepName,
             durationMs: stepDuration,
             exitCode: 1,
-            error: `Script ${stepName} failed`,
+            error: reason,
           });
 
           if (this.stopOnFailure) {
@@ -455,38 +616,76 @@ export class WorkflowRun extends EventEmitter {
 
   /**
    * Spawn a script and wait for it to exit.
-   * @returns {Promise<boolean>} true if exit code was 0
+   * The process runs inside a memory-limited cgroup when available; otherwise a
+   * watchdog kills it when its RSS exceeds the configured limit.
+   * @returns {Promise<{ success: boolean, message: string|null }>}
    */
-  _spawnScript(command, scriptAbsPath) {
+  _spawnScript(command, scriptAbsPath, stepIndex, stepName) {
     return new Promise((resolve) => {
       const env = { ...process.env, WORK_DIR: this.resultDir };
       // Add shared lib scripts to PYTHONPATH so labs can import from labs/lib/scripts
       if (command === this.pythonCmd) {
         env.PYTHONPATH = this.libScriptsPath + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : '');
+        // Unbuffered stdout/stderr: otherwise print() output sits in Python's block
+        // buffer and is lost entirely when the process is OOM-killed (SIGKILL).
+        env.PYTHONUNBUFFERED = '1';
       }
-      const child = spawn(command, [scriptAbsPath, this.resultDir, this.runtimeEnvPath, this.scriptsRoot], {
+      const scriptArgs = [scriptAbsPath, this.resultDir, this.runtimeEnvPath, this.scriptsRoot];
+      const uncapped = this._isUncapped(stepName);
+      const limited = wrapWithMemoryLimit(command, scriptArgs, {
+        maxMemoryMb: uncapped ? 0 : this.limits.maxMemoryMb,
+        cgroupAvailable: this.cgroup.available,
+        unitName: `measure-run-${this.labId}-${this.resultId}-${stepIndex}-${Date.now()}`,
+      });
+      const child = spawn(limited.command, limited.args, {
         cwd: this.resultDir,
         env,
       });
 
       this._currentProcess = child;
+      let stderrBytes = 0;
+
+      const watchdog = new ProcessMemoryWatchdog(child.pid, {
+        limitMb: this.limits.maxMemoryMb,
+        enforce: !uncapped && !limited.limited,
+        intervalMs: this.limits.sampleIntervalMs,
+        onSample: (sample) => this._onMemorySample(stepIndex, stepName, sample),
+      });
 
       child.stdout.on('data', (d) => {
         if (this.logFile) fs.appendFile(this.logFile, d.toString()).catch(() => {});
       });
 
       child.stderr.on('data', (d) => {
+        stderrBytes += d.length;
         if (this.errorFile) fs.appendFile(this.errorFile, d.toString()).catch(() => {});
       });
 
-      child.on('error', () => {
+      child.on('error', (err) => {
+        watchdog.stop();
         this._currentProcess = null;
-        resolve(false);
+        resolve({ success: false, message: `failed to start process: ${err.message}` });
       });
 
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
+        watchdog.stop();
         this._currentProcess = null;
-        resolve(code === 0);
+        this.stepStatuses[stepIndex].peakRssMb = watchdog.peakMb;
+        if (code === 0) {
+          resolve({ success: true, message: null });
+          return;
+        }
+        const message = describeProcessExit({
+          code,
+          signal,
+          peakMb: watchdog.peakMb,
+          limitMb: this.limits.maxMemoryMb,
+          limited: limited.limited,
+          killedByWatchdog: watchdog.killed,
+          stderrBytes,
+          available: readMemInfo().availableMb,
+        });
+        resolve({ success: false, message });
       });
     });
   }
@@ -516,7 +715,7 @@ export class WorkflowRun extends EventEmitter {
     // Mark current step as failed, remaining as skipped
     if (this.currentStepIndex >= 0 && this.currentStepIndex < this.stepStatuses.length) {
       const current = this.stepStatuses[this.currentStepIndex];
-      if (current.status === StepStatus.RUNNING || current.status === StepStatus.DEBUG_WAITING || current.status === StepStatus.DEBUG_STOPPED) {
+      if (current.status === StepStatus.RUNNING || current.status === StepStatus.WAITING || current.status === StepStatus.DEBUG_WAITING || current.status === StepStatus.DEBUG_STOPPED) {
         current.status = StepStatus.FAILED;
         current.completedAt = new Date().toISOString();
         if (current.startedAt) {

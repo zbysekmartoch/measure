@@ -104,6 +104,8 @@ Returns a Server-Sent Events stream with these event types:
 | `step-start` | `{ index, name, startedAt }` | A script starts |
 | `step-complete` | `{ index, name, durationMs, exitCode }` | Script succeeded |
 | `step-failed` | `{ index, name, durationMs, exitCode, error }` | Script failed |
+| `step-waiting` | `{ index, name, reason, availableMb, requiredMb, waitedMs }` | Step held back by the memory guard |
+| `step-progress` | `{ index, name, rssMb, peakRssMb }` | Periodic RSS sample of the running step |
 | `debug-waiting` | `{ index, name, port, status }` | Waiting for debugger attach |
 | `debug-attached` | `{ index, name, status }` | Debugger attached, running |
 | `debug-stopped` | `{ index, name, status }` | Paused at breakpoint in debugger |
@@ -174,6 +176,7 @@ The `state` event delivers the full workflow state:
 | `completed` | ✓ (green) | Finished successfully |
 | `failed` | ! (red) | Script exited with non-zero code |
 | `skipped` | ⊘ (grey) | Skipped (due to earlier failure or abort) |
+| `waiting` | ⏳ (amber, animated) | Held back by the memory guard until enough system memory is available |
 | `debug-waiting` | ⏳ (orange, animated) | Waiting for debugger to attach |
 | `debug-stopped` | ⏸ (red, blinking) | Paused at breakpoint in debugger |
 
@@ -252,6 +255,54 @@ Configured in `backend/config.json`:
   }
 }
 ```
+
+### Memory Guard
+
+Every workflow step runs under a memory guard (`backend/src/utils/system-resources.js`):
+
+1. **Wait before start** — a step does not start while the machine has less than
+   `minAvailableMb` of available memory (`MemAvailable` from `/proc/meminfo`). The step
+   shows status `waiting` with the current/required numbers; after `maxWaitMs` it fails
+   with an explanatory message.
+2. **Hard cap per script** — when `systemd-run --user --scope` works (user systemd with the
+   memory controller delegated, the default on modern Linux desktops/servers), the script is
+   started inside a transient cgroup with `MemoryMax=<maxMemoryMb>` and `MemorySwapMax=0`.
+   A script that exceeds the cap is killed by the kernel instead of pushing the whole
+   machine into swap. Where cgroups are unavailable a watchdog samples the RSS of the
+   process tree and kills it (SIGKILL) above the cap.
+3. **Live RSS** — the RSS of the running step is sampled every `sampleIntervalMs` and sent
+   to the progress pane (`step-progress` event); the peak is stored per step and written to
+   `output.log` when the step ends.
+4. **Opt-out per script** — a step whose script name contains `!` (e.g.
+   `Analyses/heavy_model!.py`) runs without the hard cap and without the watchdog kill; its
+   RSS is still shown. Use it for scripts that legitimately need most of the machine.
+5. **Explained failures** — a non-zero exit is always explained in `output.err` as
+   `[measure] Step N <name> FAILED after X s: <reason>`. A SIGKILL with no traceback is
+   reported as a probable out-of-memory kill together with the peak RSS and the cap; exit
+   code 139 is reported as a segmentation fault in a native library.
+
+Configured in `backend/config.json` (environment variables `SCRIPT_MAX_MEMORY_MB`,
+`SCRIPT_MAX_MEMORY_PERCENT`, `SCRIPT_MIN_AVAILABLE_MB`, `SCRIPT_MIN_AVAILABLE_PERCENT`,
+`SCRIPT_USE_CGROUP` override the file):
+
+```json
+{
+  "resources": {
+    "maxMemoryMb": 0,            // hard cap per script; 0 = maxMemoryPercent of total RAM
+    "maxMemoryPercent": 90,
+    "minAvailableMb": 0,         // required available memory before a step starts; 0 = percent
+    "minAvailablePercent": 20,
+    "waitPollMs": 5000,
+    "maxWaitMs": 1800000,        // give up waiting after 30 min (0 = wait forever)
+    "sampleIntervalMs": 2000,
+    "useCgroup": true
+  }
+}
+```
+
+The Performance tab shows system memory (used %, available, swap), the effective limits,
+whether the hard cgroup limit is active, and a table of running workflow steps with their
+current and peak RSS.
 
 ### Script Types
 

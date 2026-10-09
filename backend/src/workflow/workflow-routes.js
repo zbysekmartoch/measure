@@ -63,6 +63,7 @@ router.get('/events', async (req, res) => {
   // Event handlers
   const events = [
     'workflow-start', 'step-start', 'step-complete', 'step-failed',
+    'step-waiting', 'step-progress',
     'debug-waiting', 'debug-attached', 'debug-stopped',
     'workflow-complete', 'workflow-failed', 'workflow-aborted', 'state',
   ];

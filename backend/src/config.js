@@ -154,6 +154,18 @@ export const config = {
     }
   },
   
+  // Memory guard for workflow scripts (see utils/system-resources.js)
+  resources: {
+    maxMemoryMb: toNumber(process.env.SCRIPT_MAX_MEMORY_MB, toNumber(fileConfig.resources?.maxMemoryMb, 0)),
+    maxMemoryPercent: toNumber(process.env.SCRIPT_MAX_MEMORY_PERCENT, toNumber(fileConfig.resources?.maxMemoryPercent, 90)),
+    minAvailableMb: toNumber(process.env.SCRIPT_MIN_AVAILABLE_MB, toNumber(fileConfig.resources?.minAvailableMb, 0)),
+    minAvailablePercent: toNumber(process.env.SCRIPT_MIN_AVAILABLE_PERCENT, toNumber(fileConfig.resources?.minAvailablePercent, 20)),
+    waitPollMs: toNumber(fileConfig.resources?.waitPollMs, 5000),
+    maxWaitMs: toNumber(fileConfig.resources?.maxWaitMs, 1_800_000),
+    sampleIntervalMs: toNumber(fileConfig.resources?.sampleIntervalMs, 2000),
+    useCgroup: toBool(process.env.SCRIPT_USE_CGROUP, toBool(fileConfig.resources?.useCgroup, true)),
+  },
+
   // Frontend URL for reset links
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
 

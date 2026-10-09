@@ -40,6 +40,17 @@
     "defaultTimeout": 300000,
     "maxConcurrentAnalyses": 5
   },
+  "resources": {
+    "_comment": "Memory guard for workflow scripts. Absolute Mb values win over percents; 0 = derive from percent of total RAM.",
+    "maxMemoryMb": 0,
+    "maxMemoryPercent": 90,
+    "minAvailableMb": 0,
+    "minAvailablePercent": 20,
+    "waitPollMs": 5000,
+    "maxWaitMs": 1800000,
+    "sampleIntervalMs": 2000,
+    "useCgroup": true
+  },
   "requestLimits": {
     "jsonBodyLimit": "1mb",
     "auth": {
@@ -70,5 +81,16 @@
   },
   "outputsFolderName": "Outputs",
   "csvPreviewMaxRows": 100,
-  "previewMaxFileSize": 1048576
+  "previewMaxFileSize": 1048576,
+  "office": {
+    "enabled": true,
+    "documentServerUrl": "http://localhost:8080",
+    "jwtSecret": "2efgYW6MAKphEXqE2BUQHQjIMHcS4t8p",
+    "appUrl": "http://localhost:50100",
+    "forceSaveIntervalMs": 30000,
+    "forceSaveWaitTimeoutMs": 12000,
+    "sessionPreregistrationTtlMs": 120000,
+    "accessTokenTtl": "2h",
+    "configTokenTtl": "1h"
+  }
 }
