@@ -67,9 +67,6 @@ router.get('/events', async (req, res) => {
     return;
   }
 
-  // Send current state immediately
-  res.write(`event: state\ndata: ${JSON.stringify(run.getState())}\n\n`);
-
   // Event handlers
   const events = [
     'workflow-start', 'step-start', 'step-complete', 'step-failed',
@@ -79,15 +76,36 @@ router.get('/events', async (req, res) => {
   ];
 
   const handlers = {};
-
   for (const eventName of events) {
     handlers[eventName] = (data) => {
       try {
         res.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
       } catch { /* connection closed */ }
     };
-    run.on(eventName, handlers[eventName]);
   }
+
+  const attach = (r) => {
+    for (const eventName of events) r.on(eventName, handlers[eventName]);
+    res.write(`event: state\ndata: ${JSON.stringify(r.getState())}\n\n`);
+  };
+  const detach = (r) => {
+    for (const eventName of events) r.off(eventName, handlers[eventName]);
+  };
+
+  attach(run);
+
+  // A rerun of the same result creates a NEW WorkflowRun object under the same key while
+  // the finished one may still be in memory (kept for late clients). Clients that connected
+  // before the rerun started must follow the key, not the object — otherwise they would keep
+  // showing the old run forever.
+  const follow = setInterval(() => {
+    const current = getWorkflowRun(labId, resultId);
+    if (current && current !== run) {
+      detach(run);
+      run = current;
+      attach(run);
+    }
+  }, 1000);
 
   // Send keepalive every 15s to prevent timeout
   const keepalive = setInterval(() => {
@@ -99,9 +117,8 @@ router.get('/events', async (req, res) => {
   // Cleanup when client disconnects
   req.on('close', () => {
     clearInterval(keepalive);
-    for (const eventName of events) {
-      run.off(eventName, handlers[eventName]);
-    }
+    clearInterval(follow);
+    detach(run);
   });
 });
 
