@@ -47,14 +47,39 @@ export function useWorkflowEvents(labId, resultId, active = false, reconnectKey 
 
     const es = new EventSource(url);
     esRef.current = es;
+    let lastEventAt = Date.now();
+    let lastStatus = null;
 
     es.addEventListener('state', (ev) => {
       try {
         const data = JSON.parse(ev.data);
+        lastEventAt = Date.now();
+        lastStatus = data?.status || null;
         setWorkflowState(data);
         setIsConnected(true);
       } catch { /* parse error */ }
     });
+
+    // Self-healing: if the stream goes quiet while a run is supposedly still running
+    // (lost SSE event, dropped connection, backend restart), ask the server for the
+    // current state directly. Keepalive comments do not count as events on purpose.
+    const STALE_MS = 20_000;
+    const poll = setInterval(async () => {
+      if (lastStatus !== 'running' && lastStatus !== 'idle' && lastStatus !== null) return;
+      if (Date.now() - lastEventAt < STALE_MS) return;
+      try {
+        const res = await fetch(`/api/v1/labs/${labId}/results/${resultId}/workflow/state`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && Array.isArray(data.steps) && data.steps.length > 0) {
+          lastEventAt = Date.now();
+          lastStatus = data.status || null;
+          setWorkflowState(data);
+        }
+      } catch { /* backend unreachable — try again next tick */ }
+    }, 10_000);
 
     // Specific events — we use the 'state' event for the full snapshot,
     // but individual events can be useful for animations/transitions.
@@ -81,7 +106,10 @@ export function useWorkflowEvents(labId, resultId, active = false, reconnectKey 
       }
     };
 
-    return cleanup;
+    return () => {
+      clearInterval(poll);
+      cleanup();
+    };
     // reconnectKey is included so changing it forces a fresh SSE connection
   }, [labId, resultId, active, reconnectKey, cleanup]);
 

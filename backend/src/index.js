@@ -1,4 +1,5 @@
 import express from 'express';
+import { recoverOrphanedRuns } from './workflow/workflow-runner.js';
 import helmet from 'helmet';
 import cors from 'cors';
 import pinoHttp from 'pino-http';
@@ -167,6 +168,9 @@ async function bootstrap() {
     // Verify SQL connectivity for modes that still depend on SQL-backed users.
     await getPool().query('SELECT 1');
   }
+
+  // Runs interrupted by the previous backend process (restart/crash): kill orphans, mark aborted
+  await recoverOrphanedRuns(path.resolve(__dirname, '../labs')).catch((e) => console.warn('[workflow-runner] recovery failed:', e.message));
 
   server = app.listen(config.port, () => {
     console.log(`API listening on http://localhost:${config.port} env=${config.env}`);

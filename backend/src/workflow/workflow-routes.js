@@ -9,9 +9,18 @@
  */
 
 import { Router } from 'express';
-import { getWorkflowRun } from './workflow-runner.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { getWorkflowRun, readPersistedState } from './workflow-runner.js';
 
 const router = Router({ mergeParams: true });
+const LABS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../labs');
+
+/** State of a run that is no longer in memory: the snapshot persisted in the result dir. */
+function persistedState(labId, resultId) {
+  if (!/^[\w.-]+$/.test(String(labId)) || !/^[\w.-]+$/.test(String(resultId))) return null;
+  return readPersistedState(path.join(LABS_ROOT, String(labId), 'results', String(resultId)));
+}
 
 /**
  * GET /api/v1/labs/:labId/results/:resultId/workflow/events
@@ -51,8 +60,9 @@ router.get('/events', async (req, res) => {
   }
 
   if (!run) {
-    // Still no run after waiting — send an empty state and close
-    res.write(`event: state\ndata: ${JSON.stringify({ status: 'idle', steps: [] })}\n\n`);
+    // Still no run in memory — send the persisted final state (or idle) and close
+    const saved = persistedState(labId, resultId);
+    res.write(`event: state\ndata: ${JSON.stringify(saved || { status: 'idle', steps: [] })}\n\n`);
     res.end();
     return;
   }
@@ -105,7 +115,7 @@ router.get('/state', (req, res) => {
   const run = getWorkflowRun(labId, resultId);
 
   if (!run) {
-    return res.json({ status: 'idle', steps: [] });
+    return res.json(persistedState(labId, resultId) || { status: 'idle', steps: [] });
   }
 
   res.json(run.getState());

@@ -28,7 +28,7 @@
 
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import path from 'path';
 import {
   startDebugSession,
@@ -46,6 +46,8 @@ import {
   describeProcessExit,
   fmtMb,
 } from '../utils/system-resources.js';
+
+export const STATE_FILE_NAME = '_workflow_state.json';
 
 // ── Active workflow runs: Map<"labId:resultId", WorkflowRun> ────────────────
 
@@ -130,6 +132,10 @@ export class WorkflowRun extends EventEmitter {
     this.libScriptsPath = path.resolve(opts.scriptsRoot, '../../lib/scripts');
 
     this.key = `${opts.labId}:${opts.resultId}`;
+    // Full state snapshot persisted here on every change so SSE clients that reconnect
+    // late (or after a backend restart) still get the final state instead of 'idle'.
+    this.stateFile = path.join(this.resultDir, STATE_FILE_NAME);
+    this._lastPersistAt = 0;
     this.status = 'idle'; // idle | running | completed | failed | aborted
     this.currentStepIndex = -1;
     this.stepStatuses = opts.steps.map((name) => ({
@@ -167,6 +173,8 @@ export class WorkflowRun extends EventEmitter {
       completedAt: this.completedAt,
       debugVisible: this.debugVisible,
       stopOnFailure: this.stopOnFailure,
+      pid: this._currentProcess?.pid ?? null,
+      updatedAt: new Date().toISOString(),
       system: (() => {
         const m = readMemInfo();
         return { totalMb: m.totalMb, availableMb: m.availableMb, usedPercent: m.usedPercent, swapUsedMb: m.swapUsedMb };
@@ -243,7 +251,14 @@ export class WorkflowRun extends EventEmitter {
    */
   _emit(eventName, data) {
     this.emit(eventName, data);
-    this.emit('state', this.getState());
+    const state = this.getState();
+    this.emit('state', state);
+    // Persist: every real transition immediately, RSS samples at most every 5 s
+    const now = Date.now();
+    if (eventName !== 'step-progress' || now - this._lastPersistAt > 5000) {
+      this._lastPersistAt = now;
+      fs.writeFile(this.stateFile, JSON.stringify(state, null, 2), 'utf-8').catch(() => {});
+    }
   }
 
   /**
@@ -737,10 +752,12 @@ export class WorkflowRun extends EventEmitter {
    * Remove from active runs map after completion.
    */
   _cleanup() {
-    // Keep the run in the map for a short time so SSE clients can get final state
-    setTimeout(() => {
+    // Keep the run in the map for a while so SSE clients that reconnect late still
+    // get the final state from memory (the persisted state file covers the rest)
+    const t = setTimeout(() => {
       activeRuns.delete(this.key);
-    }, 30000); // 30 seconds
+    }, 10 * 60 * 1000);
+    if (typeof t.unref === 'function') t.unref();
   }
 }
 
@@ -783,4 +800,89 @@ export function abortWorkflowRun(labId, resultId) {
     return true;
   }
   return false;
+}
+
+/**
+ * Read the persisted state snapshot of a run that is no longer in memory.
+ * @returns {object|null}
+ */
+export function readPersistedState(resultDir) {
+  try {
+    const raw = readFileSync(path.join(resultDir, STATE_FILE_NAME), 'utf-8');
+    const st = JSON.parse(raw);
+    return st && typeof st === 'object' ? st : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function readCmdline(pid) {
+  try { return readFileSync(`/proc/${pid}/cmdline`, 'utf-8').replace(/\0/g, ' '); } catch { return ''; }
+}
+
+/**
+ * Called once at backend startup. Any run whose persisted state still says 'running'
+ * was interrupted by a backend restart (pm2 restart, crash, deploy): its Python child
+ * kept running as an orphan nobody tracks, and the UI showed it as running forever.
+ * We kill the orphan (if it still belongs to that run) and mark the run as aborted.
+ */
+export async function recoverOrphanedRuns(labsRoot) {
+  let labs = [];
+  try { labs = await fs.readdir(labsRoot, { withFileTypes: true }); } catch { return []; }
+  const recovered = [];
+  for (const lab of labs) {
+    if (!lab.isDirectory()) continue;
+    const resultsRoot = path.join(labsRoot, lab.name, 'results');
+    let results = [];
+    try { results = await fs.readdir(resultsRoot, { withFileTypes: true }); } catch { continue; }
+    for (const r of results) {
+      if (!r.isDirectory()) continue;
+      const resultDir = path.join(resultsRoot, r.name);
+      const st = readPersistedState(resultDir);
+      if (!st || (st.status !== 'running' && st.status !== 'idle')) continue;
+      const now = new Date().toISOString();
+      const note = 'Measure backend restarted while this step was running';
+      let killed = false;
+      if (st.pid && isPidAlive(st.pid)) {
+        const cmd = readCmdline(st.pid);
+        if (cmd.includes(path.join(labsRoot, lab.name))) {
+          try { process.kill(st.pid, 'SIGTERM'); killed = true; } catch { /* ignore */ }
+          const pid = st.pid;
+          const t = setTimeout(() => { if (isPidAlive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } } }, 5000);
+          if (typeof t.unref === 'function') t.unref();
+        }
+      }
+      st.status = 'aborted';
+      st.completedAt = now;
+      st.updatedAt = now;
+      st.pid = null;
+      for (const step of st.steps || []) {
+        if (step.status === 'running' || step.status === 'waiting' || step.status === 'debug-waiting' || step.status === 'debug-stopped') {
+          step.status = 'failed';
+          step.completedAt = now;
+          step.error = note + (killed ? ' (orphaned process killed)' : '');
+          step.rssMb = null;
+        } else if (step.status === 'pending') {
+          step.status = 'skipped';
+        }
+      }
+      await fs.writeFile(path.join(resultDir, STATE_FILE_NAME), JSON.stringify(st, null, 2), 'utf-8').catch(() => {});
+      try {
+        const pPath = path.join(resultDir, '_progress.json');
+        const progress = JSON.parse(await fs.readFile(pPath, 'utf-8'));
+        progress.status = 'aborted';
+        progress.completedAt = now;
+        progress.updatedAt = now;
+        await fs.writeFile(pPath, JSON.stringify(progress, null, 2), 'utf-8');
+      } catch { /* no progress file */ }
+      await fs.appendFile(path.join(resultDir, 'output.err'), `[measure] ${note}${killed ? `; orphaned process PID ${st.pid || '?'} terminated` : ''}\n`).catch(() => {});
+      recovered.push({ labId: lab.name, resultId: r.name, killed });
+    }
+  }
+  if (recovered.length) console.warn('[workflow-runner] recovered interrupted runs:', recovered);
+  return recovered;
 }
