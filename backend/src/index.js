@@ -77,16 +77,33 @@ app.use(helmet({
 }));
 
 // CORS
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // e.g., curl
-    if (config.corsOrigins.length === 0 || config.corsOrigins.includes(origin)) {
-      return cb(null, true);
-    }
-    return cb(new Error('CORS not allowed'), false);
-  },
-  credentials: true
-}));
+// Browsers send the Origin header on POST/PUT/DELETE even for same-origin requests, so a
+// frontend served by this very server (built frontend on :50100 reached under any hostname
+// or IP) must always be accepted, in addition to the configured CORS_ORIGINS list.
+function isSameOriginRequest(req) {
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  try {
+    const originHost = new URL(origin).host;
+    const requestHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+    return originHost.toLowerCase() === String(requestHost).split(',')[0].trim().toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function isOriginAllowed(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // e.g., curl
+  if (config.corsOrigins.length === 0 || config.corsOrigins.includes(origin)) return true;
+  return isSameOriginRequest(req);
+}
+
+app.use((req, res, next) => {
+  if (isOriginAllowed(req)) return next();
+  res.status(403).json({ error: `CORS not allowed for origin ${req.headers.origin}` });
+});
+app.use(cors({ origin: true, credentials: true }));
 
 // JSON parsing
 app.use(express.json({ limit: config.requestLimits.jsonBodyLimit }));
