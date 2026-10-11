@@ -72,6 +72,10 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "blob:"],
       objectSrc: ["'self'", "blob:"],
       frameSrc: ["'self'", "blob:", ...officeOrigins],
+      // Helmet adds "upgrade-insecure-requests" by default, which makes browsers rewrite every
+      // request of an http:// page to https://. Measure is served over plain http on LAN
+      // (e.g. http://192.168.x.x:50100) — TLS, if any, is terminated by the reverse proxy.
+      upgradeInsecureRequests: null,
     },
   },
 }));
