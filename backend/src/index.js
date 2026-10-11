@@ -166,6 +166,7 @@ async function bootstrap() {
 
   server = app.listen(config.port, () => {
     console.log(`API listening on http://localhost:${config.port} env=${config.env}`);
+    console.log(`CORS origins from env: ${config.corsOrigins.length ? config.corsOrigins.join(', ') : '(none — any origin allowed)'}; same-origin requests are always allowed`);
     startBackupScheduler();
   });
 
